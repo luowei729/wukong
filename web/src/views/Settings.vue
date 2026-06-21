@@ -220,7 +220,7 @@ onMounted(async () => {
     if (res.data.primary) themeForm.primary = res.data.primary
     if (res.data.title) themeForm.title = res.data.title
     if (res.data.footer_text) themeForm.footer_text = res.data.footer_text
-    if (res.data.site_domain) themeForm.site_domain = res.data.site_domain
+    themeForm.site_domain = res.data.site_domain || ''
     applyTheme()
   } catch {}
 })

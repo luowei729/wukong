@@ -1,6 +1,6 @@
 # wukong 监控系统 - 开发规范与提示
 
-> 最后更新: 2026-06-21 13:32 (北京时间)
+> 最后更新: 2026-06-21 13:45 (北京时间)
 
 ## 开发原则
 
@@ -77,6 +77,7 @@ wukong/
 - **2026-06-21 12:39（北京时间）**：公开首页改为未登录可访问的服务器状态展示，公开详情路径为 `/server/:id`，后端新增 `/api/public/servers*` 脱敏只读接口；安装命令必须先配置 `site_domain`，token 必须通过 `?k=` 传给 `/api/install-agent.sh`，禁止再用 `curl -k token` 这种错误格式。
 - **2026-06-21 12:55（北京时间）**：本机端到端验证通过：未配置 `site_domain` 时安装命令 `ready=false` 且 `script_url` 为空；配置 `http://127.0.0.1:18080` 后脚本内 `TOKEN` 非空、`SERVER_ADDR` 正确；本机探针 `home-pc` 使用生成 token 注册上线，日志无 `token is malformed`；无头 Chrome 验证 `/`、`/server/:id`、`/dashboard` 均非白屏，公开 API 不含 `secret`/`token`，管理 API 未登录仍 401。
 - **2026-06-21 13:32（北京时间）**：在线安装脚本下载探针失败 401 的根因是 `/api/agent/binary/{version}/{arch}` 路由注释写无需鉴权但实际包了 JWT `authMiddleware`。已改成只读公开二进制下载接口，仅允许 `amd64`/`arm64`，并由 Docker 镜像内置 `/opt/wukong/bin/wukong-agent-amd64` 与 `wukong-agent-arm64`；本地验证 `/api/agent/binary/latest/amd64` 返回 200 ELF，不再 401。
+- **2026-06-21 13:45（北京时间）**：配置必须写入 SQLite `settings` 表固化，不能只保存在前端或内存；`site_domain` 每次保存都要写库（允许保存为空来关闭安装命令复制），并检查 `SetSetting` 错误。前端读取 `/api/theme` 时必须用后端返回值覆盖输入框，避免清空或保存失败后显示旧值。
 - **开发后续优先级**：① 探针 Ping 多运营商探测完善 ② Web API 端点完整实现 ③ 告警引擎集成 gRPC 心跳 ④ 前端接入真实 API 数据 ⑤ 安装脚本与升级流程端到端原型
 
 ## 部署相关长期提示

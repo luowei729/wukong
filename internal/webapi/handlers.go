@@ -764,27 +764,42 @@ func (h *Handler) handleUpdateTheme(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if theme.Preset != "" {
-		h.store.SetSetting("theme_preset", theme.Preset)
-	}
-	if theme.Primary != "" {
-		h.store.SetSetting("theme_primary_color", theme.Primary)
-	}
-	if theme.Title != "" {
-		h.store.SetSetting("theme_site_title", theme.Title)
-	}
-	if theme.Footer != "" {
-		h.store.SetSetting("theme_footer_text", theme.Footer)
-	}
-	if strings.TrimSpace(theme.SiteDomain) != "" {
-		baseURL, err := normalizeSiteBaseURL(theme.SiteDomain)
-		if err != nil {
-			writeError(w, http.StatusBadRequest, "站点域名格式无效")
+		if err := h.store.SetSetting("theme_preset", theme.Preset); err != nil {
+			writeError(w, http.StatusInternalServerError, "保存主题预设失败")
 			return
 		}
-		h.store.SetSetting("site_domain", baseURL)
+	}
+	if theme.Primary != "" {
+		if err := h.store.SetSetting("theme_primary_color", theme.Primary); err != nil {
+			writeError(w, http.StatusInternalServerError, "保存主题色失败")
+			return
+		}
+	}
+	if theme.Title != "" {
+		if err := h.store.SetSetting("theme_site_title", theme.Title); err != nil {
+			writeError(w, http.StatusInternalServerError, "保存站点标题失败")
+			return
+		}
+	}
+	if theme.Footer != "" {
+		if err := h.store.SetSetting("theme_footer_text", theme.Footer); err != nil {
+			writeError(w, http.StatusInternalServerError, "保存页脚文案失败")
+			return
+		}
 	}
 
-	writeJSON(w, http.StatusOK, map[string]string{"message": "主题已更新"})
+	// 站点域名允许保存为空，用于主动关闭安装命令复制；非空时统一规范化为 http(s)://host。
+	baseURL, err := normalizeSiteBaseURL(theme.SiteDomain)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "站点域名格式无效")
+		return
+	}
+	if err := h.store.SetSetting("site_domain", baseURL); err != nil {
+		writeError(w, http.StatusInternalServerError, "保存站点域名失败")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"message": "主题已更新", "site_domain": baseURL})
 }
 
 // ---- 上传 Logo ----
