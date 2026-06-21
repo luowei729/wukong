@@ -74,8 +74,6 @@ func (s *Service) Authenticate(username, password, totpCode string) (*LoginRespo
 	}
 
 	// 验证密码
-	hash, err := bcrypt.GenerateFromPassword([]byte(s.cfg.AdminPasswordHash), bcrypt.DefaultCost)
-	_ = hash // 配置中已经有 hash，这里直接比较
 	if s.cfg.AdminPasswordHash == "" {
 		s.recordFailure(ip)
 		return nil, errors.New("管理员密码未设置")

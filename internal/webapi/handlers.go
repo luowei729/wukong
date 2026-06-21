@@ -7,12 +7,13 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
+
+	"wukong/internal/store"
 )
 
 // ---- 辅助函数 ----
@@ -644,7 +645,7 @@ func (h *Handler) handleUploadLogo(w http.ResponseWriter, r *http.Request) {
 
 	// 保存文件（后续实现完整路径）
 	// 简单实现：写到项目目录
-	dst := fmt.Sprintf("/opt/wukong/data/uploads/%s", filename)
+	_ = fmt.Sprintf("/opt/wukong/data/uploads/%s", filename) // 占位，后续实现文件写入
 	log.Printf("Logo 上传: %s (%s, %d bytes)", filename, mime, header.Size)
 	writeJSON(w, http.StatusOK, map[string]string{
 		"message":  "上传成功",

@@ -1,0 +1,127 @@
+// wukong 监控全局样式入口
+@use './variables.scss' as *;
+
+// ---- 通用组件样式 ----
+
+// 卡片样式
+.wk-card {
+  background: var(--wk-panel);
+  border: 1px solid var(--wk-border);
+  border-radius: $wk-radius;
+  backdrop-filter: blur(12px);
+  transition: $wk-transition;
+
+  &:hover {
+    border-color: var(--wk-primary);
+    box-shadow: 0 0 20px var(--wk-primary-glow);
+  }
+}
+
+.wk-card-solid {
+  background: var(--wk-panel-solid);
+  border: 1px solid var(--wk-border);
+  border-radius: $wk-radius;
+}
+
+// 状态指示灯
+.wk-status-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-right: 6px;
+
+  &.online {
+    background: var(--wk-success);
+    box-shadow: 0 0 6px var(--wk-success);
+  }
+  &.offline {
+    background: var(--wk-text-muted);
+  }
+  &.alert {
+    background: var(--wk-danger);
+    box-shadow: 0 0 6px var(--wk-danger);
+  }
+}
+
+// 指标数值
+.wk-metric-value {
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-size: 1.5rem;
+  font-weight: 600;
+}
+
+// 侧边栏
+.wk-sidebar {
+  background: var(--wk-bg-soft);
+  border-right: 1px solid var(--wk-border);
+  width: 240px;
+  height: 100vh;
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 100;
+  padding: 16px 0;
+  overflow-y: auto;
+}
+
+.wk-sidebar-logo {
+  padding: 0 20px;
+  margin-bottom: 24px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+
+  .logo-text {
+    font-size: 20px;
+    font-weight: 700;
+    color: var(--wk-primary);
+  }
+}
+
+.wk-sidebar-menu {
+  list-style: none;
+  padding: 0;
+
+  li {
+    padding: 10px 20px;
+    cursor: pointer;
+    color: var(--wk-text-muted);
+    transition: $wk-transition;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 14px;
+
+    &:hover, &.active {
+      color: var(--wk-primary);
+      background: rgba(56, 189, 248, 0.08);
+    }
+  }
+}
+
+// 顶部栏
+.wk-header {
+  height: 56px;
+  border-bottom: 1px solid var(--wk-border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 24px;
+}
+
+// 主内容区
+.wk-main {
+  margin-left: 240px;
+  min-height: 100vh;
+}
+
+.wk-content {
+  padding: 24px;
+}
+
+// Element Plus 暗黑覆盖
+.dark .el-card {
+  background: var(--wk-panel-solid) !important;
+  border: 1px solid var(--wk-border) !important;
+}

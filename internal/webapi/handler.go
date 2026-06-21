@@ -5,6 +5,7 @@ package webapi
 import (
 	"embed"
 	"io/fs"
+	"log"
 	"net/http"
 
 	"wukong/internal/auth"
@@ -23,16 +24,25 @@ type Handler struct {
 	alertEngine *alert.Engine
 	notifier    *notify.Manager
 	cfg         *config.ServerConfig
+	mux         *http.ServeMux
 }
 
 func NewHandler(s store.MetricsStore, a *auth.Service, ae *alert.Engine, n *notify.Manager, cfg *config.ServerConfig) *Handler {
-	return &Handler{
+	h := &Handler{
 		store:       s,
 		authSvc:     a,
 		alertEngine: ae,
 		notifier:    n,
 		cfg:         cfg,
 	}
+	h.mux = http.NewServeMux()
+	h.RegisterRoutes(h.mux)
+	return h
+}
+
+// ServeHTTP 实现 http.Handler 接口
+func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	h.mux.ServeHTTP(w, r)
 }
 
 // RegisterRoutes 注册所有 API 路由和静态文件处理

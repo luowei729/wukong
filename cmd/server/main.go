@@ -64,9 +64,6 @@ func main() {
 	// === 启动 Web API 服务（REST + SSE + embed 前端） ===
 	webHandler := webapi.NewHandler(s, authSvc, alertEngine, notifier, cfg)
 
-	mux := http.NewServeMux()
-	webHandler.RegisterRoutes(mux)
-
 	// === cmux 的监听器 ===
 	listener, err := net.Listen("tcp", cfg.ListenAddr)
 	if err != nil {

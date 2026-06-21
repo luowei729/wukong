@@ -4,7 +4,6 @@ package store
 
 import (
 	"crypto/rand"
-	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
 	"fmt"
@@ -216,7 +215,7 @@ func (s *SQLiteStore) RegisterAgent(token, hostname, agentVer, arch string) (*Ag
 		agentID, hostname, agentVer, arch, string(secretHash), now, now,
 	)
 	if err != nil {
-		return "", "", fmt.Errorf("插入探针记录失败: %w", err)
+		return nil, "", fmt.Errorf("插入探针记录失败: %w", err)
 	}
 
 	agent := &Agent{

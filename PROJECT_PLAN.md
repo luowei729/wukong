@@ -1,92 +1,86 @@
-# xxxxxxxxx 项目开发方案
+# wukong 监控系统 部署方案
 
-> 版本: v1.1
-> 创建日期: 2026-06-10 23:00 (北京时间)
-> 最后更新: 2026-06-21 09:30:42 (北京时间)
-> 状态: **GitHub 首次完整推送准备中**（公开源码与文档入库，敏感凭证和本地索引排除）
-
----
+> 版本: v0.1.0
+> 创建日期: 2026-06-21 09:49 (北京时间)
+> 状态: **骨架搭建完成**，三个二进制编译通过，待 Phase 1 功能完善
 
 ## 一、项目概述
 
-### 1.1 项目定位 以下为演示 自己删除演示文案
+wukong 监控是一个类似哪吒探针的服务器探针系统，实时探测服务器状态，gRPC 双向流通信，单二进制极简部署。整个系统包括：
 
-xxxxxxxx项目 是一个运行在 Ubuntu Server 上的 AI 量化交易系统，在xx 平台虚拟货币市场实现 24/7 无人值守自动化交易。核心特色是**多 Agent LLM 分析 + 集成 ML 决策 + 硬编码风控**的混合架构——LLM Agent 只做分析建议，交易决策权归传统量化模型，风控规则硬编码不可逾越。
+- **主控（server）**：Go 单二进制，embed Vue3 前端，cmux 单端口同时服务 gRPC（探针通道）和 HTTP（Web API + SSE + 前端静态资源）
+- **探针（agent）**：Go 单二进制，采集 CPU/内存/磁盘/网络/Ping，gRPC 上报，本地 10min 缓冲
+- **签名服务（signer）**：ed25519 独立进程，私钥与 web 后端物理隔离，Unix Socket 通信
 
-### 1.2 核心原则
+## 二、技术栈
 
-| 原则 | 说明 |
-|------|------|
-| **分权制衡** | LLM 有权分析，无权交易；风控是硬编码宪法，谁都改不了 |
-| **数据驱动** | 数据质量 >> 模型复杂度，P0 数据先行 |
-##########演示以下省略
+| 层面 | 技术 | 说明 |
+|------|------|------|
+| 后端 | Go 1.22+ | 单二进制，cmux 双协议 |
+| 前端 | Vue3 + Element Plus + ECharts | Go embed 进单二进制，暗黑科技风双主题 |
+| 存储 | SQLite | WAL 模式，按小时分表，1 分钟预聚合 |
+| 探针 | Go | gopsutil 采集，gRPC 上报 |
+| 通信 | gRPC 双向流 | 探针个体凭证认证，指令 ed25519 签名 |
+| 部署 | systemd + nginx | 裸跑反代 |
 
-### 1.3 已确认的 18 项架构决策
-
-| # | 决策点 | 结论 |
-|---|--------|------|
-| 1 | 数据获取与交易执行方式 | Binance REST API + WebSocket，不用 Chrome 操控 |
-| 2 | 交易模式 | 架构统一设计，分阶段实现（现货→合约） |
-##########演示以下省略
-
----
-
-## 二、系统架构
-
-### 2.1 全局架构图
+## 三、部署架构
 
 ```
-┌──────────────────────────────────────────────────────────────────┐
-│                        Ubuntu Server 22.04 LTS                   │
-│                    NVIDIA Driver + Container Toolkit              │
-│                                                                   │
-│  ┌─────────────────────────────────────────────────────────────┐ │
-│  │                    Docker Compose                            │ │
-│  │                                                              │ │
-│  │  ┌──────────────┐  ┌──────────────┐  ┌──────────────────┐  │ │
-│  │  │ quantgod-     │  │ quantgod-     │  │ quantgod-        │  │ │
-│  │  │ frontend     │  │ backend      │  │ vllm             │  │ │
-│  │  │              │  │              │  │                  │  │ │
-##########演示以下省略
+浏览器 ──HTTPS 443──→ nginx ──┬→ proxy_pass http://127.0.0.1:64443 (Web REST/SSE)
+                              └→ grpc_pass  127.0.0.1:64443 (gRPC双向流)
+                                    │ cmux 同端口区分 HTTP/1.1 与 HTTP/2
+                                    ▼
+                              主控 wukong-server
+                              ├── SQLite (/opt/wukong/data/wukong.db)
+                              ├── 内存 agents_latest map (SSE源)
+                              └── Unix Socket → 签名服务 signer
+                                    ▲ gRPC over TLS (个体凭证认证, 指令需签名验签)
+                              探针 N 台 (各 /opt/wukong/agent/)
 ```
 
-### 2.2 数据流架构
+## 四、核心安全架构
+
+1. **双层鉴权**：Web 后台走 JWT+TOTP（管理员），探针走个体凭证（agent_id + agent_secret）+ 指令签名
+2. **签名私钥隔离**：ed25519 私钥在 signer 进程中，web 后端只能通过 Unix Socket 请求签名，无法直接拿私钥
+3. **指令白名单**：探针只接受白名单内的签名指令（更新配置、重启探针），不执行任意 shell
+4. **一次性安装 token**：30 分钟有效，注册即作废，防范未授权注册
+5. **二进制签名**：安装脚本和探针二进制用 B2 私钥签名，防中间人攻击
+
+## 五、测试验证
+
+```bash
+# 启动主控
+export WUKONG_ADMIN_PASSWORD='<bcrypt hash>'
+./build/wukong-server --config /opt/wukong/wukong.conf
+
+# 验证 API
+curl http://127.0.0.1:64443/api/health
+# → {"status":"ok","version":"0.1.0"}
+
+# 启动签名服务
+./build/wukong-signer --socket /opt/wukong/data/signer.sock
+
+# 启动探针
+./build/wukong-agent --config /opt/wukong/agent/agent.conf
+```
+
+## 六、目录布局
 
 ```
-┌─────────────┐     WebSocket      ┌──────────────────┐
-│   Binance    │ ─────────────────→ │  行情数据引擎     │
-│   API        │ ←───────────────── │  (FastAPI进程)    │
-│              │     REST API       │                  │
-└─────────────┘                    └────────┬─────────┘
-                                            │
-##########演示以下省略
+/opt/wukong/
+├── wukong                # 主控二进制
+├── wukong.conf           # 主控配置
+├── data/
+│   ├── wukong.db         # SQLite 数据库
+│   ├── uploads/          # Logo 等上传文件
+│   ├── signing/          # ed25519 密钥对（权限 400）
+│   └── signer.sock       # 签名服务 Unix Socket
+├── agent/
+│   ├── wukong-agent      # 探针二进制
+│   ├── agent.conf        # 探针配置（权限 600）
+│   └── data/             # 探针本地数据
+└── deploy/
+    ├── nginx/            # nginx 反代配置
+    ├── systemd/          # systemd unit 文件
+    └── scripts/          # 安装脚本
 ```
-
-### 2.3 后端模块架构
-
-```
-quantgod/
-├── backend/                          # Python 后端
-│   ├── main.py                       # FastAPI 入口
-│   ├── config/                       # 配置管理
-│   │   ├── settings.py               # 全局配置（Pydantic Settings）
-│   │   └── logging_conf.py           # 日志配置
-│   │
-│   ├── core/                         # 核心基础设施
-│   │   ├── redis_client.py           # Redis 连接管理
-##########演示以下省略
-
-
----
-
-## 2026-06-21 09:30:42（北京时间）- GitHub 推送范围约束
-
-### 改动前总结
-项目准备将当前源码推送到 GitHub，但仓库中同时存在可公开源码、公开说明文档、本地敏感凭证文档和 CodeGraph 本地索引目录；若直接全量提交，会违反 DEPLOY_CREDENTIALS.md 的“严禁 push 到公网”约束。
-
-### 改动后总结
-推送范围限定为 wukong 监控系统源码、前端源码、部署脚本、公开项目文档和依赖清单；DEPLOY_CREDENTIALS.md、.codegraph/、前端 node_modules/dist、构建产物、运行期数据库与日志均由 .gitignore 排除。后续开发继续沿用“公网仓库只保存可重建或可公开资产”的规则。
-
----
-
-*本文档将随项目开发持续更新，最新版本始终在 Git 仓库中。*

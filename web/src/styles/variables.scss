@@ -1,0 +1,60 @@
+// =============================================
+// wukong 监控 - 全局样式变量
+// 暗黑科技风 + 浅色可切换 双主题
+// =============================================
+
+// 字体
+$wk-font-family: 'Inter', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif;
+$wk-radius: 12px;
+$wk-transition: 0.2s ease;
+
+// 暗黑主题 CSS 变量
+:root,
+html[data-theme='dark'] {
+  --wk-bg: #050b18;
+  --wk-bg-soft: #0b1224;
+  --wk-panel: rgba(15, 23, 42, 0.86);
+  --wk-panel-solid: #111827;
+  --wk-border: rgba(56, 189, 248, 0.22);
+  --wk-text: #e5f2ff;
+  --wk-text-muted: #8aa4bf;
+  --wk-primary: #38bdf8;
+  --wk-primary-glow: rgba(56, 189, 248, 0.38);
+  --wk-success: #22c55e;
+  --wk-warning: #f59e0b;
+  --wk-danger: #ef4444;
+  --wk-chart-grid: rgba(148, 163, 184, 0.18);
+
+  // Element Plus 暗黑覆盖
+  --el-bg-color: #0b1224;
+  --el-bg-color-overlay: #111827;
+  --el-text-color-primary: #e5f2ff;
+  --el-text-color-secondary: #8aa4bf;
+  --el-border-color: rgba(56, 189, 248, 0.22);
+  --el-color-primary: #38bdf8;
+}
+
+// 浅色主题 CSS 变量
+html[data-theme='light'] {
+  --wk-bg: #f5f7fb;
+  --wk-bg-soft: #eef3f8;
+  --wk-panel: #ffffff;
+  --wk-panel-solid: #ffffff;
+  --wk-border: rgba(15, 23, 42, 0.12);
+  --wk-text: #0f172a;
+  --wk-text-muted: #64748b;
+  --wk-primary: #0284c7;
+  --wk-primary-glow: rgba(2, 132, 199, 0.18);
+  --wk-success: #16a34a;
+  --wk-warning: #d97706;
+  --wk-danger: #dc2626;
+  --wk-chart-grid: rgba(100, 116, 139, 0.2);
+
+  // Element Plus 浅色覆盖
+  --el-bg-color: #ffffff;
+  --el-bg-color-overlay: #f8fafc;
+  --el-text-color-primary: #0f172a;
+  --el-text-color-secondary: #64748b;
+  --el-border-color: rgba(15, 23, 42, 0.12);
+  --el-color-primary: #0284c7;
+}
