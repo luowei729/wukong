@@ -1,0 +1,34 @@
+# wukong 主控 systemd 服务
+[Unit]
+Description=wukong Server Monitor - Master
+Documentation=https://github.com/wukong/monitor
+After=network.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/opt/wukong/wukong --config /opt/wukong/wukong.conf
+ExecReload=/bin/kill -HUP $MAINPID
+WorkingDirectory=/opt/wukong
+Restart=always
+RestartSec=5
+
+# 安全配置
+User=wukong
+Group=wukong
+NoNewPrivileges=yes
+ProtectHome=yes
+ProtectSystem=full
+PrivateTmp=yes
+
+# 文件描述符（支撑千台探针长连接）
+LimitNOFILE=65536
+LimitNPROC=65536
+
+# 日志
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=wukong
+
+[Install]
+WantedBy=multi-user.target

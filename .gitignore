@@ -1,0 +1,27 @@
+# 本地敏感凭证文件：该文件包含部署账号、密码或密钥，禁止提交到公网仓库。
+DEPLOY_CREDENTIALS.md
+
+# CodeGraph 本地索引：由 MCP/本地工具生成，可随时重建，避免污染仓库。
+.codegraph/
+
+# Go 构建产物：本项目以源码和部署脚本为准，二进制由 CI 或本地构建生成。
+wukong-server
+wukong-agent
+wukong-signer
+bin/
+
+# 运行期数据：SQLite、日志和临时文件只属于当前机器环境。
+*.db
+*.db-shm
+*.db-wal
+*.log
+*.tmp
+
+# 前端依赖与构建产物：依赖通过 package-lock.json 复现，构建产物由发布流程生成。
+web/node_modules/
+web/dist/
+
+# 编辑器和系统文件：避免把个人环境配置提交到项目。
+.vscode/
+.idea/
+.DS_Store

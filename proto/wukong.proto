@@ -1,0 +1,134 @@
+// wukong 监控系统 protobuf 定义
+// 定义主控↔探针的 gRPC 通信协议，包含注册、指标上报、指令下发
+
+syntax = "proto3";
+package wukong;
+option go_package = "wukong/proto;wukongpb";
+
+// ========== 探针注册服务 ==========
+
+// 探针一次性 token 注册请求
+message RegisterRequest {
+  string token        = 1;  // 一次性注册 token，后台生成，30分钟过期
+  string hostname     = 2;  // 探针主机名
+  string agent_version = 3; // 探针版本号
+  string arch         = 4;  // 架构 amd64/arm64
+}
+
+// 注册响应：下发个体凭证和初始配置
+message RegisterResponse {
+  string agent_id     = 1;  // 探针唯一 ID（UUID）
+  string agent_secret = 2;  // 探针个体密钥（32字节随机）
+  int32  collect_interval = 3; // 采集频率（秒）
+  string server_name  = 4;  // 注册时探针名称（hostname）
+  int64  expires_at   = 5;  // 个体凭证过期时间戳
+}
+
+// ========== 指标数据消息 ==========
+
+// 单次采样的系统指标
+message SystemMetric {
+  int64  timestamp   = 1;  // Unix 时间戳（秒）
+  double cpu_percent = 2;  // CPU 使用率 %
+  double mem_percent = 3;  // 内存使用率 %
+  double disk_percent = 4; // 磁盘使用率 %
+  int64  net_up_bps  = 5;  // 网络上行 bps
+  int64  net_down_bps = 6; // 网络下行 bps
+  string os_version  = 7;  // 操作系统版本
+}
+
+// 单次 Ping 探测结果
+message PingMetric {
+  int64  timestamp  = 1;  // Unix 时间戳（秒）
+  string isp_name   = 2;  // 运营商名称（如"电信"）
+  string target_ip  = 3;  // 探测目标 IP
+  double latency_ms = 4;  // 延时（毫秒）
+  double loss_rate  = 5;  // 丢包率（0.0~1.0）
+  double jitter_ms  = 6;  // 抖动（毫秒）
+}
+
+// 探针上报的数据帧
+message MetricsReport {
+  string agent_id         = 1;          // 探针身份
+  int64  report_seq       = 2;          // 上报序号（用于去重）
+  SystemMetric system     = 3;          // 系统指标
+  repeated PingMetric pings = 4;        // 多运营商 Ping 结果
+  int64  buffered_count   = 5;          // 本地缓冲中积压的旧数据条数（主控宕机恢复后补传）
+}
+
+// ========== 指令下发 ==========
+
+// 主控下发给探针的指令类型
+enum CommandType {
+  COMMAND_UNSPECIFIED = 0;
+  COMMAND_UPDATE_CONFIG = 1;  // 更新配置（窄档白名单第①类）
+  COMMAND_RESTART_AGENT = 2;  // 重启探针进程（窄档白名单第②类）
+}
+
+// 一条签名指令（窄档白名单，仅限安全允许的操作）
+message SignedCommand {
+  string command_id       = 1;  // 指令唯一 ID（防重放）
+  CommandType command_type = 2; // 指令类型
+  bytes  payload          = 3;  // 指令载荷（JSON）
+  int64  issued_at        = 4;  // 签发时间戳
+  int64  expires_at       = 5;  // 过期时间戳（防重放窗口）
+  bytes  signature        = 6;  // ed25519 签名
+}
+
+// 指令执行结果
+message CommandResult {
+  string command_id   = 1;
+  bool   success      = 2;
+  string error_message = 3;
+}
+
+// ========== 双向流上报 ==========
+
+// 探针→主控的上报帧（主动推送）
+message AgentFrame {
+  oneof frame {
+    MetricsReport metrics_report = 1;
+    CommandResult command_result = 2;
+  }
+}
+
+// 主控→探针的下发帧（响应下发）
+message ServerFrame {
+  oneof frame {
+    SignedCommand signed_command = 1;
+    bool heartbeat_ack           = 2;  // 心跳确认
+  }
+}
+
+// ========== 签名服务（内部 Unix Socket） ==========
+
+// 签名请求（由主控核心进程发起）
+message SignRequest {
+  string command_type    = 1;  // 指令类型名称
+  bytes  payload         = 2;  // 载荷
+  int64  expires_in_sec  = 3;  // 有效期（秒）
+}
+
+// 签名响应
+message SignResponse {
+  bytes  signature       = 1;
+  string command_id      = 2;  // 指令唯一 ID
+  int64  issued_at       = 3;
+  int64  expires_at      = 4;
+  bytes  public_key      = 5;  // 签名公钥（首次返回，探针侧缓存）
+}
+
+// ========== gRPC 服务定义 ==========
+
+service AgentService {
+  // 探针注册（一次性）
+  rpc Register(RegisterRequest) returns (RegisterResponse);
+
+  // 探针上报 + 指令接收（双向流）
+  rpc ReportStream(stream AgentFrame) returns (stream ServerFrame);
+}
+
+service SignerService {
+  // 签名一条指令（内部服务，Unix Socket）
+  rpc Sign(SignRequest) returns (SignResponse);
+}
