@@ -2,6 +2,33 @@
 
 所有变更记录使用北京时间（UTC+8）。
 
+## [2026-06-21 14:10] - 修复探针 gRPC 地址配置并完成远程本机节点验证
+
+### 改动前总结
+`site_domain=https://server.lkz.pub` 已能让 Web/API、安装脚本和探针二进制下载正常工作，但安装脚本会把探针 gRPC 地址推导为 `server.lkz.pub:443`。实测该地址注册超时；同一主控的 `server.lkz.pub:64443` 直连 gRPC 注册和上报正常。
+
+### 改动后总结
+1. 新增 `agent_server_addr` 设置项并写入 SQLite `settings` 表，后台可独立配置探针注册/上报地址。
+2. 安装脚本继续用 `site_domain` 作为 `BASE_URL` 下载脚本和二进制，但 `SERVER_ADDR` 优先使用 `agent_server_addr`，未配置时才按站点域名回退推导。
+3. 安装 token 接口会预先校验 `agent_server_addr`，格式错误时返回 `ready=false`，避免复制后才注册失败。
+4. 后台设置页新增“探针 gRPC 地址”输入框，读取 `/api/theme` 时与 `site_domain` 一起回填。
+
+### 验证结果
+- `server.lkz.pub:443` gRPC 注册超时，`server.lkz.pub:64443` 注册成功。
+- 本机临时探针已注册为 `home-pc-server-lkz-e2e` 并向远程主控上报指标。
+- 公开 API `/api/public/servers` 与后台 `/api/agents`、`/api/agents/latest` 均能看到本机节点和指标。
+- `go test ./...` 通过。
+- `cd web && npm run build` 通过。
+
+### 涉及文件
+- `internal/webapi/handlers.go`
+- `web/src/views/Settings.vue`
+- `AGENTS.md`
+- `CHANGELOG.md`
+- `PROJECT_PLAN.md`
+
+---
+
 ## [2026-06-21 13:45] - 修复站点域名保存与配置数据库固化
 
 ### 改动前总结

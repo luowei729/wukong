@@ -391,6 +391,44 @@ func agentServerAddr(baseURL string) (string, error) {
 	return host, nil
 }
 
+// normalizeAgentServerAddr 规范化探针 gRPC 连接地址。
+// 原因：站点域名用于浏览器 HTTPS 访问，生产环境的 gRPC 可能走 64443 直连或单独的 nginx grpc_pass，不能总是从站点域名推导 443。
+func normalizeAgentServerAddr(raw string) (string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", nil
+	}
+	if strings.Contains(raw, "://") {
+		u, err := url.Parse(raw)
+		if err != nil || u.Host == "" {
+			return "", fmt.Errorf("探针连接地址格式无效")
+		}
+		raw = u.Host
+	}
+	host, port, err := net.SplitHostPort(raw)
+	if err != nil || strings.TrimSpace(host) == "" || strings.TrimSpace(port) == "" {
+		return "", fmt.Errorf("探针连接地址必须是 host:port 格式")
+	}
+	return net.JoinHostPort(host, port), nil
+}
+
+// installAgentServerAddr 返回安装脚本实际写入的探针 gRPC 地址。
+// 原因：优先使用数据库固化的 agent_server_addr；未配置时才回退到旧的 site_domain 推导，兼容本地单端口部署。
+func (h *Handler) installAgentServerAddr(baseURL string) (string, error) {
+	raw, err := h.store.GetSetting("agent_server_addr")
+	if err != nil {
+		return "", fmt.Errorf("读取探针连接地址失败")
+	}
+	addr, err := normalizeAgentServerAddr(raw)
+	if err != nil {
+		return "", err
+	}
+	if addr != "" {
+		return addr, nil
+	}
+	return agentServerAddr(baseURL)
+}
+
 // ---- 安装 Token ----
 
 func (h *Handler) handleCreateInstallToken(w http.ResponseWriter, r *http.Request) {
@@ -419,13 +457,27 @@ func (h *Handler) handleCreateInstallToken(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	// 生成命令前先校验探针 gRPC 地址，避免复制后才发现 443 反代不支持 gRPC。
+	serverAddr, err := h.installAgentServerAddr(baseURL)
+	if err != nil {
+		writeJSON(w, http.StatusCreated, map[string]interface{}{
+			"ready":      false,
+			"token":      token,
+			"script_url": "",
+			"message":    "探针 gRPC 地址格式无效，请在系统设置中填写 host:port",
+			"expires_in": "30分钟",
+		})
+		return
+	}
+
 	// token 必须放在脚本 URL 的查询参数中；curl -k 是 TLS 参数，不能用于传 token。
 	scriptURL := fmt.Sprintf("curl -fsSL %q | bash", fmt.Sprintf("%s/api/install-agent.sh?k=%s", baseURL, url.QueryEscape(token)))
 	writeJSON(w, http.StatusCreated, map[string]interface{}{
-		"ready":      true,
-		"token":      token,
-		"script_url": scriptURL,
-		"expires_in": "30分钟",
+		"ready":             true,
+		"token":             token,
+		"script_url":        scriptURL,
+		"agent_server_addr": serverAddr,
+		"expires_in":        "30分钟",
 	})
 }
 
@@ -450,9 +502,9 @@ func (h *Handler) handleInstallAgentScript(w http.ResponseWriter, r *http.Reques
 		baseURL = requestBaseURL(r)
 	}
 
-	serverAddr, err := agentServerAddr(baseURL)
+	serverAddr, err := h.installAgentServerAddr(baseURL)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "无法生成探针连接地址，请检查站点域名")
+		writeError(w, http.StatusBadRequest, "无法生成探针连接地址，请检查探针 gRPC 地址")
 		return
 	}
 
@@ -481,7 +533,7 @@ esac
 mkdir -p "$INSTALL_DIR" "$DATA_DIR"
 
 # 下载探针二进制
-# 注意：当前主控二进制下载接口仍在完善中；如下载失败，请先手动复制 build/wukong-agent 到该路径。
+# 已实现公开二进制下载接口，安装脚本会从 BASE_URL 下载当前镜像内置的探针。
 echo "下载 wukong 探针..."
 if ! curl -fsSL "$BASE_URL/api/agent/binary/latest/$ARCH" -o "$INSTALL_DIR/wukong-agent"; then
     echo "探针二进制下载失败，请手动复制 wukong-agent 后重新执行注册命令。"
@@ -733,6 +785,7 @@ func (h *Handler) handleGetTheme(w http.ResponseWriter, r *http.Request) {
 	title, _ := h.store.GetSetting("theme_site_title")
 	footer, _ := h.store.GetSetting("theme_footer_text")
 	siteDomain, _ := h.store.GetSetting("site_domain")
+	agentServerAddr, _ := h.store.GetSetting("agent_server_addr")
 
 	if preset == "" {
 		preset = "dark"
@@ -742,21 +795,23 @@ func (h *Handler) handleGetTheme(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]string{
-		"preset":      preset,
-		"primary":     primary,
-		"title":       title,
-		"footer_text": footer,
-		"site_domain": siteDomain,
+		"preset":            preset,
+		"primary":           primary,
+		"title":             title,
+		"footer_text":       footer,
+		"site_domain":       siteDomain,
+		"agent_server_addr": agentServerAddr,
 	})
 }
 
 func (h *Handler) handleUpdateTheme(w http.ResponseWriter, r *http.Request) {
 	var theme struct {
-		Preset     string `json:"preset"`
-		Primary    string `json:"primary"`
-		Title      string `json:"title"`
-		Footer     string `json:"footer_text"`
-		SiteDomain string `json:"site_domain"`
+		Preset          string `json:"preset"`
+		Primary         string `json:"primary"`
+		Title           string `json:"title"`
+		Footer          string `json:"footer_text"`
+		SiteDomain      string `json:"site_domain"`
+		AgentServerAddr string `json:"agent_server_addr"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&theme); err != nil {
 		writeError(w, http.StatusBadRequest, "请求体解析失败")
@@ -799,7 +854,18 @@ func (h *Handler) handleUpdateTheme(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]string{"message": "主题已更新", "site_domain": baseURL})
+	// 探针 gRPC 地址允许保存为空；为空时安装脚本按站点域名回退推导，非空时必须是 host:port。
+	agentAddr, err := normalizeAgentServerAddr(theme.AgentServerAddr)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "探针 gRPC 地址格式无效，请填写 host:port")
+		return
+	}
+	if err := h.store.SetSetting("agent_server_addr", agentAddr); err != nil {
+		writeError(w, http.StatusInternalServerError, "保存探针 gRPC 地址失败")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"message": "主题已更新", "site_domain": baseURL, "agent_server_addr": agentAddr})
 }
 
 // ---- 上传 Logo ----

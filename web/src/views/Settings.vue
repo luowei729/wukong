@@ -25,7 +25,11 @@
             </el-form-item>
             <el-form-item label="站点域名 / 访问地址">
               <el-input v-model="themeForm.site_domain" placeholder="https://monitor.example.com 或 http://127.0.0.1:64443" />
-              <div class="form-tip">用于生成探针安装命令；未配置时不能复制安装命令。</div>
+              <div class="form-tip">用于生成安装脚本下载地址；未配置时不能复制安装命令。</div>
+            </el-form-item>
+            <el-form-item label="探针 gRPC 地址">
+              <el-input v-model="themeForm.agent_server_addr" placeholder="monitor.example.com:443 或 monitor.example.com:64443" />
+              <div class="form-tip">探针实际注册和上报的地址，必须是 host:port；留空时按站点域名自动推导。</div>
             </el-form-item>
             <el-form-item>
               <el-button type="primary" :loading="saving" @click="saveTheme">
@@ -122,6 +126,7 @@ const themeForm = reactive({
   title: 'wukong 监控',
   footer_text: 'Powered by wukong',
   site_domain: '',
+  agent_server_addr: '',
 })
 const saving = ref(false)
 
@@ -221,6 +226,7 @@ onMounted(async () => {
     if (res.data.title) themeForm.title = res.data.title
     if (res.data.footer_text) themeForm.footer_text = res.data.footer_text
     themeForm.site_domain = res.data.site_domain || ''
+    themeForm.agent_server_addr = res.data.agent_server_addr || ''
     applyTheme()
   } catch {}
 })
