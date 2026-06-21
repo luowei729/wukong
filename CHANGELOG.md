@@ -2,6 +2,28 @@
 
 所有变更记录使用北京时间（UTC+8）。
 
+## [2026-06-21 13:32] - 修复在线安装探针二进制下载 401
+
+### 改动前总结
+安装命令中的 `?k=token-...` 已能正确传入安装脚本，但脚本下载 `/api/agent/binary/latest/$ARCH` 时，该路由仍被 JWT `authMiddleware` 包裹，远程服务器执行在线安装会返回 401，提示“探针二进制下载失败”。
+
+### 改动后总结
+1. `/api/agent/binary/{version}/{arch}` 改为无需 JWT 的只读二进制下载接口，仅允许 `amd64` / `arm64`，并只从固定发布目录返回随主控镜像内置的 `wukong-agent`。
+2. Docker 镜像构建阶段同时编译 `wukong-agent-amd64` 和 `wukong-agent-arm64`，运行镜像复制到 `/opt/wukong/bin/`，供安装脚本下载。
+3. 管理接口仍保持 JWT 鉴权；公开二进制接口不返回数据库、token、secret 或任何管理配置。
+
+### 验证结果
+- `go test ./...` 通过。
+- 本地 `/api/agent/binary/latest/amd64` 返回 `HTTP/1.1 200 OK`，响应体为 ELF 二进制，不再返回 401。
+
+### 涉及文件
+- `internal/webapi/handler.go`
+- `internal/webapi/handlers.go`
+- `deploy/Dockerfile`
+- `CHANGELOG.md`
+
+---
+
 ## [2026-06-21 12:39] - 新增公开状态首页与服务器详情，修复安装命令 token 传递
 
 ### 改动前总结

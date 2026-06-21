@@ -11,6 +11,8 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -593,9 +595,36 @@ echo "  systemctl restart wukong"
 // ---- 探针二进制下载 ----
 
 func (h *Handler) handleAgentBinaryDownload(w http.ResponseWriter, r *http.Request) {
-	version := getPathValue(r, "version")
-	arch := getPathValue(r, "arch")
-	writeError(w, http.StatusNotFound, fmt.Sprintf("版本 %s/%s 的二进制文件尚未上传", version, arch))
+	version := strings.TrimSpace(getPathValue(r, "version"))
+	arch := strings.TrimSpace(getPathValue(r, "arch"))
+	if version == "" || version == "latest" {
+		version = "latest"
+	}
+
+	// 安装脚本只允许下载随主控发布的固定架构二进制，避免把路径参数变成任意文件读取。
+	if arch != "amd64" && arch != "arm64" {
+		writeError(w, http.StatusBadRequest, "不支持的探针架构")
+		return
+	}
+
+	// Docker 镜像会把探针复制到 /opt/wukong/bin/wukong-agent-<arch>；本地开发构建可回退到当前目录。
+	candidates := []string{
+		filepath.Join("/opt/wukong/bin", "wukong-agent-"+arch),
+		filepath.Join("/opt/wukong", "wukong-agent"),
+		filepath.Join(filepath.Dir(os.Args[0]), "wukong-agent-"+arch),
+		filepath.Join(filepath.Dir(os.Args[0]), "wukong-agent"),
+	}
+	for _, path := range candidates {
+		if st, err := os.Stat(path); err == nil && !st.IsDir() {
+			w.Header().Set("Content-Type", "application/octet-stream")
+			w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"wukong-agent-%s\"", arch))
+			w.Header().Set("X-Wukong-Agent-Version", version)
+			http.ServeFile(w, r, path)
+			return
+		}
+	}
+
+	writeError(w, http.StatusNotFound, fmt.Sprintf("版本 %s/%s 的探针二进制文件不存在，请重新构建镜像", version, arch))
 }
 
 // ---- 告警 ----

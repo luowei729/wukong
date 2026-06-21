@@ -88,8 +88,9 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/install-agent.sh", h.handleInstallAgentScript)
 	mux.HandleFunc("GET /api/install-server.sh", h.handleInstallServerScript)
 
-	// 探针二进制下载（无需鉴权，供探针升级使用）
-	mux.HandleFunc("GET /api/agent/binary/{version}/{arch}", h.authMiddleware(h.handleAgentBinaryDownload))
+	// 探针二进制下载（无需 JWT 鉴权，供安装脚本和探针升级使用）。
+	// 该接口只返回随主控镜像发布的静态 agent 二进制，不暴露管理数据。
+	mux.HandleFunc("GET /api/agent/binary/{version}/{arch}", h.handleAgentBinaryDownload)
 
 	// 告警
 	mux.HandleFunc("GET /api/alerts", h.authMiddleware(h.handleListAlerts))
