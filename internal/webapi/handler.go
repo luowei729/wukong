@@ -116,6 +116,12 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	// 安装新节点（生成一次性 token）
 	mux.HandleFunc("POST /api/agents/install-token", h.authMiddleware(h.handleCreateInstallToken))
 
+	// 公开状态页接口：无需登录，仅返回脱敏后的只读展示数据。
+	mux.HandleFunc("GET /api/public/servers", h.handlePublicListServers)
+	mux.HandleFunc("GET /api/public/servers/{id}", h.handlePublicGetServer)
+	mux.HandleFunc("GET /api/public/servers/{id}/metrics", h.handlePublicGetServerMetrics)
+	mux.HandleFunc("GET /api/public/servers/{id}/ping-agg", h.handlePublicGetServerPingAgg)
+
 	// 静态资源（前端 SPA）
 	staticFS, err := fs.Sub(distFS, "dist")
 	if err != nil {

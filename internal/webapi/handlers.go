@@ -8,11 +8,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
 
+	"wukong/internal/auth"
 	"wukong/internal/store"
 )
 
@@ -46,13 +49,25 @@ func (h *Handler) handleHealth(w http.ResponseWriter, r *http.Request) {
 // ---- 鉴权相关 ----
 
 func (h *Handler) handleLogin(w http.ResponseWriter, r *http.Request) {
-	// 解析请求体
-	// ... 后续实现完整登录逻辑
-	writeJSON(w, http.StatusOK, map[string]string{"message": "login endpoint"})
+	// 解析管理员登录请求，前端登录和后续安装命令生成都依赖真实 JWT。
+	var req auth.LoginRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "请求体解析失败")
+		return
+	}
+
+	// 使用 auth.Service 统一校验用户名、密码和可选 TOTP，避免在 Web 层重复鉴权逻辑。
+	resp, err := h.authSvc.Authenticate(req.Username, req.Password, req.TOTPCode)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 func (h *Handler) handleRefreshToken(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]string{"message": "refresh endpoint"})
+	// 刷新令牌端点预留，当前前端主要使用登录签发的 access token。
+	writeJSON(w, http.StatusNotImplemented, map[string]string{"message": "refresh endpoint 待实现"})
 }
 
 // ---- 中间件 ----
@@ -186,9 +201,9 @@ func (h *Handler) handleCreateGroup(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) handleUpdateGroup(w http.ResponseWriter, r *http.Request) {
 	id := getPathValue(r, "id")
 	var group struct {
-		Name string  `json:"name"`
-		CollectIntv *int `json:"collect_intv"`
-		PingIntv    *int `json:"ping_intv"`
+		Name           string `json:"name"`
+		CollectIntv    *int   `json:"collect_intv"`
+		PingIntv       *int   `json:"ping_intv"`
 		TelegramConfID *int64 `json:"telegram_conf_id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&group); err != nil {
@@ -200,7 +215,9 @@ func (h *Handler) handleUpdateGroup(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, fmt.Sprintf("分组 %s 未找到", id))
 		return
 	}
-	if group.Name != "" { existing.Name = group.Name }
+	if group.Name != "" {
+		existing.Name = group.Name
+	}
 	existing.CollectIntv = group.CollectIntv
 	existing.PingIntv = group.PingIntv
 	existing.TelegramConfID = group.TelegramConfID
@@ -317,40 +334,136 @@ func (h *Handler) handleSetSetting(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"message": "已设置"})
 }
 
+// normalizeSiteBaseURL 将后台填写的站点域名统一为可访问的基础 URL。
+// 原因：安装命令需要同时支持正式域名 https://example.com 和本地调试 http://127.0.0.1:64443。
+func normalizeSiteBaseURL(raw string) (string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", nil
+	}
+	if !strings.HasPrefix(raw, "http://") && !strings.HasPrefix(raw, "https://") {
+		raw = "https://" + raw
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" {
+		return "", fmt.Errorf("站点域名格式无效")
+	}
+	u.Path = ""
+	u.RawQuery = ""
+	u.Fragment = ""
+	return strings.TrimRight(u.String(), "/"), nil
+}
+
+// requestBaseURL 在未配置站点域名时按当前请求推导本地调试地址。
+// 注意：后台生成可复制命令仍要求 site_domain；这里仅用于直接请求脚本时的兜底。
+func requestBaseURL(r *http.Request) string {
+	scheme := "https"
+	if r.TLS == nil {
+		scheme = "http"
+	}
+	if forwardedProto := r.Header.Get("X-Forwarded-Proto"); forwardedProto != "" {
+		scheme = forwardedProto
+	}
+	host := r.Host
+	if forwardedHost := r.Header.Get("X-Forwarded-Host"); forwardedHost != "" {
+		host = forwardedHost
+	}
+	return fmt.Sprintf("%s://%s", scheme, host)
+}
+
+// agentServerAddr 将 HTTP 基础地址转换为探针 gRPC 连接地址。
+// 原因：探针注册走 cmux 同端口 gRPC，命令行只需要 host:port，不需要 URL scheme。
+func agentServerAddr(baseURL string) (string, error) {
+	u, err := url.Parse(baseURL)
+	if err != nil || u.Host == "" {
+		return "", fmt.Errorf("无法解析主控地址")
+	}
+	host := u.Host
+	if !strings.Contains(host, ":") {
+		if u.Scheme == "http" {
+			host = net.JoinHostPort(host, "80")
+		} else {
+			host = net.JoinHostPort(host, "443")
+		}
+	}
+	return host, nil
+}
+
 // ---- 安装 Token ----
 
 func (h *Handler) handleCreateInstallToken(w http.ResponseWriter, r *http.Request) {
+	// 安装 token 仍然一次性生成，但只有站点域名配置完整时才返回可复制命令。
 	token, err := h.store.CreateInstallToken()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("生成安装 token 失败: %v", err))
 		return
 	}
-	// 获取配置的域名
+
+	// site_domain 由后台设置页维护；未配置时不生成占位命令，避免用户复制后 token 丢失。
 	domain, _ := h.store.GetSetting("site_domain")
-	scriptURL := fmt.Sprintf("curl -fsSL https://%s/api/install-agent.sh -k %s", domain, token)
-	if domain == "" {
-		scriptURL = fmt.Sprintf("curl -fsSL https://<你的域名>/api/install-agent.sh -k %s", token)
+	baseURL, err := normalizeSiteBaseURL(domain)
+	if domain == "" || err != nil {
+		message := "请先在系统设置中配置站点域名后再复制安装命令"
+		if err != nil {
+			message = "站点域名格式无效，请检查后再生成安装命令"
+		}
+		writeJSON(w, http.StatusCreated, map[string]interface{}{
+			"ready":      false,
+			"token":      token,
+			"script_url": "",
+			"message":    message,
+			"expires_in": "30分钟",
+		})
+		return
 	}
-	writeJSON(w, http.StatusCreated, map[string]string{
-		"token":       token,
-		"script_url":  scriptURL,
-		"expires_in":  "30分钟",
+
+	// token 必须放在脚本 URL 的查询参数中；curl -k 是 TLS 参数，不能用于传 token。
+	scriptURL := fmt.Sprintf("curl -fsSL %q | bash", fmt.Sprintf("%s/api/install-agent.sh?k=%s", baseURL, url.QueryEscape(token)))
+	writeJSON(w, http.StatusCreated, map[string]interface{}{
+		"ready":      true,
+		"token":      token,
+		"script_url": scriptURL,
+		"expires_in": "30分钟",
 	})
 }
 
 // ---- 安装脚本 ----
 
 func (h *Handler) handleInstallAgentScript(w http.ResponseWriter, r *http.Request) {
-	token := r.URL.Query().Get("k")
+	// 安装 token 必须通过 ?k= 传入，禁止生成空 TOKEN 脚本。
+	token := strings.TrimSpace(r.URL.Query().Get("k"))
+	if token == "" {
+		writeError(w, http.StatusBadRequest, "缺少安装 token，请从后台重新生成安装命令")
+		return
+	}
+
+	// 优先使用后台配置的站点域名；本地调试时可回退到请求 Host。
+	domain, _ := h.store.GetSetting("site_domain")
+	baseURL, err := normalizeSiteBaseURL(domain)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "站点域名格式无效，请先在后台修正")
+		return
+	}
+	if baseURL == "" {
+		baseURL = requestBaseURL(r)
+	}
+
+	serverAddr, err := agentServerAddr(baseURL)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "无法生成探针连接地址，请检查站点域名")
+		return
+	}
+
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 
 	script := fmt.Sprintf(`#!/bin/bash
 # wukong 探针安装脚本
-# 用法: curl -fsSL https://<域名>/api/install-agent.sh -k <token> | bash
+# 用法: curl -fsSL "%s/api/install-agent.sh?k=<token>" | bash
 set -e
 
-TOKEN="%s"
-SERVER="%s"
+TOKEN=%q
+BASE_URL=%q
+SERVER_ADDR=%q
 INSTALL_DIR="/opt/wukong/agent"
 DATA_DIR="$INSTALL_DIR/data"
 
@@ -366,13 +479,17 @@ esac
 mkdir -p "$INSTALL_DIR" "$DATA_DIR"
 
 # 下载探针二进制
+# 注意：当前主控二进制下载接口仍在完善中；如下载失败，请先手动复制 build/wukong-agent 到该路径。
 echo "下载 wukong 探针..."
-curl -fsSL "https://$SERVER/api/agent/binary/latest/$ARCH" -o "$INSTALL_DIR/wukong-agent"
+if ! curl -fsSL "$BASE_URL/api/agent/binary/latest/$ARCH" -o "$INSTALL_DIR/wukong-agent"; then
+    echo "探针二进制下载失败，请手动复制 wukong-agent 后重新执行注册命令。"
+    exit 1
+fi
 chmod +x "$INSTALL_DIR/wukong-agent"
 
 # 注册探针
-echo "注册到主控 $SERVER ..."
-"$INSTALL_DIR/wukong-agent" --server "$SERVER:443" --token "$TOKEN"
+echo "注册到主控 $SERVER_ADDR ..."
+"$INSTALL_DIR/wukong-agent" --server "$SERVER_ADDR" --token "$TOKEN"
 
 # 安装 systemd 服务
 cat > /etc/systemd/system/wukong-agent.service <<EOF
@@ -397,7 +514,7 @@ systemctl daemon-reload
 systemctl enable --now wukong-agent
 
 echo "wukong 探针安装完成！"
-`, token, h.cfg.ListenAddr)
+`, baseURL, token, baseURL, serverAddr)
 
 	w.Write([]byte(script))
 }
@@ -586,34 +703,57 @@ func (h *Handler) handleGetTheme(w http.ResponseWriter, r *http.Request) {
 	primary, _ := h.store.GetSetting("theme_primary_color")
 	title, _ := h.store.GetSetting("theme_site_title")
 	footer, _ := h.store.GetSetting("theme_footer_text")
+	siteDomain, _ := h.store.GetSetting("site_domain")
 
-	if preset == "" { preset = "dark" }
-	if title == "" { title = "wukong 监控" }
+	if preset == "" {
+		preset = "dark"
+	}
+	if title == "" {
+		title = "wukong 监控"
+	}
 
 	writeJSON(w, http.StatusOK, map[string]string{
 		"preset":      preset,
 		"primary":     primary,
 		"title":       title,
 		"footer_text": footer,
+		"site_domain": siteDomain,
 	})
 }
 
 func (h *Handler) handleUpdateTheme(w http.ResponseWriter, r *http.Request) {
 	var theme struct {
-		Preset  string `json:"preset"`
-		Primary string `json:"primary"`
-		Title   string `json:"title"`
-		Footer  string `json:"footer_text"`
+		Preset     string `json:"preset"`
+		Primary    string `json:"primary"`
+		Title      string `json:"title"`
+		Footer     string `json:"footer_text"`
+		SiteDomain string `json:"site_domain"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&theme); err != nil {
 		writeError(w, http.StatusBadRequest, "请求体解析失败")
 		return
 	}
 
-	if theme.Preset != "" { h.store.SetSetting("theme_preset", theme.Preset) }
-	if theme.Primary != "" { h.store.SetSetting("theme_primary_color", theme.Primary) }
-	if theme.Title != "" { h.store.SetSetting("theme_site_title", theme.Title) }
-	if theme.Footer != "" { h.store.SetSetting("theme_footer_text", theme.Footer) }
+	if theme.Preset != "" {
+		h.store.SetSetting("theme_preset", theme.Preset)
+	}
+	if theme.Primary != "" {
+		h.store.SetSetting("theme_primary_color", theme.Primary)
+	}
+	if theme.Title != "" {
+		h.store.SetSetting("theme_site_title", theme.Title)
+	}
+	if theme.Footer != "" {
+		h.store.SetSetting("theme_footer_text", theme.Footer)
+	}
+	if strings.TrimSpace(theme.SiteDomain) != "" {
+		baseURL, err := normalizeSiteBaseURL(theme.SiteDomain)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "站点域名格式无效")
+			return
+		}
+		h.store.SetSetting("site_domain", baseURL)
+	}
 
 	writeJSON(w, http.StatusOK, map[string]string{"message": "主题已更新"})
 }
@@ -639,8 +779,12 @@ func (h *Handler) handleUploadLogo(w http.ResponseWriter, r *http.Request) {
 
 	// 生成文件名
 	ext := ".png"
-	if mime == "image/jpeg" { ext = ".jpg" }
-	if mime == "image/svg+xml" { ext = ".svg" }
+	if mime == "image/jpeg" {
+		ext = ".jpg"
+	}
+	if mime == "image/svg+xml" {
+		ext = ".svg"
+	}
 	filename := "logo" + ext
 
 	// 保存文件（后续实现完整路径）
@@ -663,9 +807,9 @@ func (h *Handler) handleSetup2FA(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{
-		"secret":          secret,
-		"url":             url,
-		"message":         "请使用 Authenticator 应用扫描二维码或输入密钥",
+		"secret":  secret,
+		"url":     url,
+		"message": "请使用 Authenticator 应用扫描二维码或输入密钥",
 	})
 }
 

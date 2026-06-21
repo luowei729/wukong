@@ -46,11 +46,12 @@
 
 <script setup lang="ts">
 import { ref, reactive } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import axios from 'axios'
 
 const router = useRouter()
+const route = useRoute()
 
 const formRef = ref()
 const loading = ref(false)
@@ -83,7 +84,8 @@ async function handleLogin() {
     localStorage.setItem('access_token', res.data.access_token)
     localStorage.setItem('refresh_token', res.data.refresh_token)
     ElMessage.success('登录成功')
-    router.push('/dashboard')
+    const redirect = typeof route.query.redirect === 'string' ? route.query.redirect : '/dashboard'
+    router.push(redirect)
   } catch (e: any) {
     error.value = e.response?.data?.error || '登录失败'
   } finally {

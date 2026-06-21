@@ -251,14 +251,32 @@ func (s *SQLiteStore) GetAgent(id string) (*Agent, error) {
 	if err != nil {
 		return nil, err
 	}
-	if hostname.Valid { a.Hostname = hostname.String }
-	if groupID.Valid { a.GroupID = &groupID.String }
-	if osVer.Valid { a.OSVersion = osVer.String }
-	if agentVer.Valid { a.AgentVer = agentVer.String }
-	if arch.Valid { a.Arch = arch.String }
-	if collectIntv.Valid { v := int(collectIntv.Int64); a.CollectIntv = &v }
-	if pingIntv.Valid { v := int(pingIntv.Int64); a.PingIntv = &v }
-	if lastSeen.Valid { a.LastSeenAt = &lastSeen.Time }
+	if hostname.Valid {
+		a.Hostname = hostname.String
+	}
+	if groupID.Valid {
+		a.GroupID = &groupID.String
+	}
+	if osVer.Valid {
+		a.OSVersion = osVer.String
+	}
+	if agentVer.Valid {
+		a.AgentVer = agentVer.String
+	}
+	if arch.Valid {
+		a.Arch = arch.String
+	}
+	if collectIntv.Valid {
+		v := int(collectIntv.Int64)
+		a.CollectIntv = &v
+	}
+	if pingIntv.Valid {
+		v := int(pingIntv.Int64)
+		a.PingIntv = &v
+	}
+	if lastSeen.Valid {
+		a.LastSeenAt = &lastSeen.Time
+	}
 
 	// 如果 name 为空就用 hostname
 	if a.Name == "" {
@@ -287,15 +305,35 @@ func (s *SQLiteStore) ListAgents() ([]*Agent, error) {
 		if err != nil {
 			return nil, err
 		}
-		if hostname.Valid { a.Hostname = hostname.String }
-		if groupID.Valid { a.GroupID = &groupID.String }
-		if osVer.Valid { a.OSVersion = osVer.String }
-		if agentVer.Valid { a.AgentVer = agentVer.String }
-		if arch.Valid { a.Arch = arch.String }
-		if collectIntv.Valid { v := int(collectIntv.Int64); a.CollectIntv = &v }
-		if pingIntv.Valid { v := int(pingIntv.Int64); a.PingIntv = &v }
-		if lastSeen.Valid { a.LastSeenAt = &lastSeen.Time }
-		if a.Name == "" { a.Name = a.Hostname }
+		if hostname.Valid {
+			a.Hostname = hostname.String
+		}
+		if groupID.Valid {
+			a.GroupID = &groupID.String
+		}
+		if osVer.Valid {
+			a.OSVersion = osVer.String
+		}
+		if agentVer.Valid {
+			a.AgentVer = agentVer.String
+		}
+		if arch.Valid {
+			a.Arch = arch.String
+		}
+		if collectIntv.Valid {
+			v := int(collectIntv.Int64)
+			a.CollectIntv = &v
+		}
+		if pingIntv.Valid {
+			v := int(pingIntv.Int64)
+			a.PingIntv = &v
+		}
+		if lastSeen.Valid {
+			a.LastSeenAt = &lastSeen.Time
+		}
+		if a.Name == "" {
+			a.Name = a.Hostname
+		}
 		agents = append(agents, a)
 	}
 	return agents, nil
@@ -319,7 +357,9 @@ func (s *SQLiteStore) DeleteAgent(id string) error {
 
 func (s *SQLiteStore) SetAgentOnline(id string, online bool, seenAt time.Time) error {
 	on := 0
-	if online { on = 1 }
+	if online {
+		on = 1
+	}
 	_, err := s.db.Exec(
 		"UPDATE agents SET online = ?, last_seen_at = ? WHERE id = ?",
 		on, seenAt, id)
@@ -340,10 +380,20 @@ func (s *SQLiteStore) ListGroups() ([]*Group, error) {
 		var ci, pi sql.NullInt64
 		var tc sql.NullInt64
 		err := rows.Scan(&g.ID, &g.Name, &ci, &pi, &tc)
-		if err != nil { return nil, err }
-		if ci.Valid { v := int(ci.Int64); g.CollectIntv = &v }
-		if pi.Valid { v := int(pi.Int64); g.PingIntv = &v }
-		if tc.Valid { g.TelegramConfID = &tc.Int64 }
+		if err != nil {
+			return nil, err
+		}
+		if ci.Valid {
+			v := int(ci.Int64)
+			g.CollectIntv = &v
+		}
+		if pi.Valid {
+			v := int(pi.Int64)
+			g.PingIntv = &v
+		}
+		if tc.Valid {
+			g.TelegramConfID = &tc.Int64
+		}
 		groups = append(groups, g)
 	}
 	return groups, nil
@@ -355,10 +405,20 @@ func (s *SQLiteStore) GetGroup(id string) (*Group, error) {
 	var ci, pi sql.NullInt64
 	var tc sql.NullInt64
 	err := row.Scan(&g.ID, &g.Name, &ci, &pi, &tc)
-	if err != nil { return nil, err }
-	if ci.Valid { v := int(ci.Int64); g.CollectIntv = &v }
-	if pi.Valid { v := int(pi.Int64); g.PingIntv = &v }
-	if tc.Valid { g.TelegramConfID = &tc.Int64 }
+	if err != nil {
+		return nil, err
+	}
+	if ci.Valid {
+		v := int(ci.Int64)
+		g.CollectIntv = &v
+	}
+	if pi.Valid {
+		v := int(pi.Int64)
+		g.PingIntv = &v
+	}
+	if tc.Valid {
+		g.TelegramConfID = &tc.Int64
+	}
 	return g, nil
 }
 
@@ -381,7 +441,9 @@ func (s *SQLiteStore) UpdateGroup(group *Group) error {
 func (s *SQLiteStore) DeleteGroup(id string) error {
 	// 将属于该组的探针移到未分组
 	_, err := s.db.Exec("UPDATE agents SET group_id = NULL WHERE group_id = ?", id)
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	_, err = s.db.Exec("DELETE FROM groups WHERE id = ?", id)
 	return err
 }
@@ -390,13 +452,17 @@ func (s *SQLiteStore) DeleteGroup(id string) error {
 
 func (s *SQLiteStore) ListISPTargets() ([]*ISPTarget, error) {
 	rows, err := s.db.Query("SELECT id, name, ip, port, mode, enabled FROM isp_targets WHERE enabled = 1")
-	if err != nil { return nil, err }
+	if err != nil {
+		return nil, err
+	}
 	defer rows.Close()
 	var targets []*ISPTarget
 	for rows.Next() {
 		t := &ISPTarget{}
 		err := rows.Scan(&t.ID, &t.Name, &t.IP, &t.Port, &t.Mode, &t.Enabled)
-		if err != nil { return nil, err }
+		if err != nil {
+			return nil, err
+		}
 		targets = append(targets, t)
 	}
 	return targets, nil
@@ -406,7 +472,9 @@ func (s *SQLiteStore) CreateISPTarget(target *ISPTarget) (int64, error) {
 	res, err := s.db.Exec(
 		"INSERT INTO isp_targets (name, ip, port, mode, enabled) VALUES (?, ?, ?, ?, ?)",
 		target.Name, target.IP, target.Port, target.Mode, target.Enabled)
-	if err != nil { return 0, err }
+	if err != nil {
+		return 0, err
+	}
 	return res.LastInsertId()
 }
 
@@ -427,7 +495,9 @@ func (s *SQLiteStore) DeleteISPTarget(id int64) error {
 func (s *SQLiteStore) GetSetting(key string) (string, error) {
 	var value string
 	err := s.db.QueryRow("SELECT value FROM settings WHERE key = ?", key).Scan(&value)
-	if err == sql.ErrNoRows { return "", nil }
+	if err == sql.ErrNoRows {
+		return "", nil
+	}
 	return value, err
 }
 
@@ -520,18 +590,25 @@ func (s *SQLiteStore) AggregatePingMin() error {
 // ---- 时序数据查询 ----
 
 func (s *SQLiteStore) GetLatestMetrics(agentID string) (*LatestMetric, error) {
-	// 从最新的小时表查最新一条
+	// 从当前小时和上一小时查最新一条，避免整点附近刚切表时页面没有最新数据。
 	now := time.Now()
 	for i := 0; i < 2; i++ {
 		table := tableNameForTime("metrics_sys", now.Add(-time.Duration(i)*time.Hour))
+		if !s.tableExists(table) {
+			continue
+		}
 		row := s.db.QueryRow(
-			fmt.Sprintf("SELECT cpu, mem, disk, net_up, net_down, os_version FROM %s WHERE agent_id = ? ORDER BY ts DESC LIMIT 1", table),
+			fmt.Sprintf("SELECT cpu, mem, disk, net_up, net_down, os_version, ts FROM %s WHERE agent_id = ? ORDER BY ts DESC LIMIT 1", table),
 			agentID)
 		m := &LatestMetric{AgentID: agentID}
 		var osVer sql.NullString
-		err := row.Scan(&m.CPU, &m.Mem, &m.Disk, &m.NetUp, &m.NetDown, &osVer)
+		var ts int64
+		err := row.Scan(&m.CPU, &m.Mem, &m.Disk, &m.NetUp, &m.NetDown, &osVer, &ts)
 		if err == nil {
-			if osVer.Valid { m.OSVersion = osVer.String }
+			if osVer.Valid {
+				m.OSVersion = osVer.String
+			}
+			m.UpdatedAt = time.Unix(ts, 0)
 			return m, nil
 		}
 	}
@@ -539,23 +616,38 @@ func (s *SQLiteStore) GetLatestMetrics(agentID string) (*LatestMetric, error) {
 }
 
 func (s *SQLiteStore) GetAllLatestMetrics() (map[string]*LatestMetric, error) {
-	// 优化：不从 SQLite 全量查，由调用方维护内存 map
-	// 这里作为兜底，从最近的小时表全量查（不设硬限下可能慢）
+	// 从当前小时和上一小时合并每台探针的最新指标，并正确写入 UpdatedAt。
+	// 原先 SELECT MAX(ts) 但没有扫描 ts，会导致首页无法判断数据新鲜度。
 	now := time.Now()
-	table := tableNameForTime("metrics_sys", now)
-	rows, err := s.db.Query(
-		fmt.Sprintf("SELECT agent_id, cpu, mem, disk, net_up, net_down, os_version, MAX(ts) FROM %s GROUP BY agent_id", table))
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
 	result := make(map[string]*LatestMetric)
-	for rows.Next() {
-		m := &LatestMetric{}
-		var osVer sql.NullString
-		if err := rows.Scan(&m.AgentID, &m.CPU, &m.Mem, &m.Disk, &m.NetUp, &m.NetDown, &osVer); err == nil {
-			if osVer.Valid { m.OSVersion = osVer.String }
-			result[m.AgentID] = m
+	for i := 0; i < 2; i++ {
+		table := tableNameForTime("metrics_sys", now.Add(-time.Duration(i)*time.Hour))
+		if !s.tableExists(table) {
+			continue
+		}
+		rows, err := s.db.Query(
+			fmt.Sprintf("SELECT agent_id, cpu, mem, disk, net_up, net_down, os_version, ts FROM %s ORDER BY ts DESC", table))
+		if err != nil {
+			return nil, err
+		}
+		for rows.Next() {
+			m := &LatestMetric{}
+			var osVer sql.NullString
+			var ts int64
+			if err := rows.Scan(&m.AgentID, &m.CPU, &m.Mem, &m.Disk, &m.NetUp, &m.NetDown, &osVer, &ts); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			m.UpdatedAt = time.Unix(ts, 0)
+			if osVer.Valid {
+				m.OSVersion = osVer.String
+			}
+			if existing, ok := result[m.AgentID]; !ok || m.UpdatedAt.After(existing.UpdatedAt) {
+				result[m.AgentID] = m
+			}
+		}
+		if err := rows.Close(); err != nil {
+			return nil, err
 		}
 	}
 	return result, nil
@@ -577,7 +669,9 @@ func (s *SQLiteStore) GetPingAgg(agentID, isp string, since, until time.Time) ([
 		var bucket int64
 		var lossCnt int
 		err := rows.Scan(&bucket, &p.Count, &p.AvgLat, &p.MinLat, &p.MaxLat, &lossCnt)
-		if err != nil { return nil, err }
+		if err != nil {
+			return nil, err
+		}
 		p.BucketMin = time.Unix(bucket, 0)
 		p.LossRate = float64(lossCnt) / float64(p.Count)
 		results = append(results, p)
@@ -586,19 +680,24 @@ func (s *SQLiteStore) GetPingAgg(agentID, isp string, since, until time.Time) ([
 }
 
 func (s *SQLiteStore) GetSystemMetrics(agentID string, since, until time.Time) ([]*RawSystemMetric, error) {
-	// 跨小时表的 UNION ALL 查询
+	// 跨小时表的 UNION ALL 查询；每个小时表都有独立占位符，因此参数也要按表重复追加。
 	var tables []string
+	var args []interface{}
 	for t := since.Truncate(time.Hour); !t.After(until); t = t.Add(time.Hour) {
 		table := tableNameForTime("metrics_sys", t)
+		if !s.tableExists(table) {
+			continue
+		}
 		tables = append(tables, fmt.Sprintf(
 			"SELECT ts, cpu, mem, disk, net_up, net_down FROM %s WHERE agent_id = ? AND ts >= ? AND ts < ?",
 			table))
+		args = append(args, agentID, since.Unix(), until.Unix())
 	}
 	if len(tables) == 0 {
 		return nil, nil
 	}
 	query := strings.Join(tables, " UNION ALL ") + " ORDER BY ts"
-	rows, err := s.db.Query(query, agentID, since.Unix(), until.Unix())
+	rows, err := s.db.Query(query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -608,7 +707,9 @@ func (s *SQLiteStore) GetSystemMetrics(agentID string, since, until time.Time) (
 		r := &RawSystemMetric{}
 		var ts int64
 		err := rows.Scan(&ts, &r.CPU, &r.Mem, &r.Disk, &r.NetUp, &r.NetDown)
-		if err != nil { return nil, err }
+		if err != nil {
+			return nil, err
+		}
 		r.Timestamp = time.Unix(ts, 0)
 		results = append(results, r)
 	}
@@ -622,7 +723,9 @@ func (s *SQLiteStore) CreateAlert(alert *Alert) (int64, error) {
 		`INSERT INTO alerts (agent_id, metric, threshold, value, status, fired_at, notified)
 		 VALUES (?, ?, ?, ?, 'firing', ?, 0)`,
 		alert.AgentID, alert.Metric, alert.Threshold, alert.Value, alert.FiredAt)
-	if err != nil { return 0, err }
+	if err != nil {
+		return 0, err
+	}
 	return res.LastInsertId()
 }
 
@@ -638,13 +741,17 @@ func (s *SQLiteStore) ListActiveAlerts() ([]*Alert, error) {
 	rows, err := s.db.Query(
 		`SELECT id, agent_id, metric, threshold, value, fired_at, notified
 		 FROM alerts WHERE status = 'firing'`)
-	if err != nil { return nil, err }
+	if err != nil {
+		return nil, err
+	}
 	defer rows.Close()
 	var alerts []*Alert
 	for rows.Next() {
 		a := &Alert{Status: "firing"}
 		err := rows.Scan(&a.ID, &a.AgentID, &a.Metric, &a.Threshold, &a.Value, &a.FiredAt, &a.Notified)
-		if err != nil { return nil, err }
+		if err != nil {
+			return nil, err
+		}
 		alerts = append(alerts, a)
 	}
 	return alerts, nil
@@ -656,7 +763,9 @@ func (s *SQLiteStore) GetActiveAlert(agentID, metric string) (*Alert, error) {
 		agentID, metric)
 	a := &Alert{Status: "firing"}
 	err := row.Scan(&a.ID, &a.AgentID, &a.Metric, &a.Threshold, &a.Value, &a.FiredAt, &a.Notified)
-	if err != nil { return nil, err }
+	if err != nil {
+		return nil, err
+	}
 	return a, nil
 }
 
@@ -667,18 +776,24 @@ func (s *SQLiteStore) GetActiveAlert(agentID, metric string) (*Alert, error) {
 func (s *SQLiteStore) DropOldHourlyTables(keepHours int) error {
 	// 查出所有 metrics_sys_ 和 metrics_ping_ 表
 	rows, err := s.db.Query("SELECT name FROM sqlite_master WHERE type='table' AND (name LIKE 'metrics_sys_%' OR name LIKE 'metrics_ping_%')")
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	defer rows.Close()
 
 	cutoff := time.Now().Add(-time.Duration(keepHours) * time.Hour)
 	for rows.Next() {
 		var name string
-		if err := rows.Scan(&name); err != nil { continue }
+		if err := rows.Scan(&name); err != nil {
+			continue
+		}
 		// 解析小时表名中的时间戳
 		// metrics_sys_2026062114 -> 14 = 2026-06-21 14:00
 		timeStr := strings.TrimPrefix(strings.TrimPrefix(name, "metrics_sys_"), "metrics_ping_")
 		t, err := time.ParseInLocation("2006010215", timeStr, time.Local)
-		if err != nil { continue }
+		if err != nil {
+			continue
+		}
 		if t.Before(cutoff) {
 			_, err := s.db.Exec("DROP TABLE IF EXISTS " + name)
 			if err != nil {
@@ -698,6 +813,14 @@ func (s *SQLiteStore) CleanOldAggData(hours int) error {
 }
 
 // ---- 辅助函数 ----
+
+// tableExists 检查按小时分表是否存在。
+// 原因：公开首页会跨当前小时和上一小时查询，缺失小时表应跳过而不是返回 SQL 错误。
+func (s *SQLiteStore) tableExists(name string) bool {
+	var exists int
+	err := s.db.QueryRow("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", name).Scan(&exists)
+	return err == nil
+}
 
 func newUUID() string {
 	b := make([]byte, 16)

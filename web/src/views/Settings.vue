@@ -23,9 +23,13 @@
             <el-form-item label="页脚文本">
               <el-input v-model="themeForm.footer_text" placeholder="Powered by wukong" />
             </el-form-item>
+            <el-form-item label="站点域名 / 访问地址">
+              <el-input v-model="themeForm.site_domain" placeholder="https://monitor.example.com 或 http://127.0.0.1:64443" />
+              <div class="form-tip">用于生成探针安装命令；未配置时不能复制安装命令。</div>
+            </el-form-item>
             <el-form-item>
               <el-button type="primary" :loading="saving" @click="saveTheme">
-                保存主题
+                保存主题与站点地址
               </el-button>
             </el-form-item>
           </el-form>
@@ -35,14 +39,29 @@
       <!-- 安装新节点 -->
       <el-tab-pane label="安装节点" name="install">
         <div class="wk-card-solid" style="padding: 20px;">
+          <el-alert
+            v-if="!themeForm.site_domain"
+            title="请先在“主题风格”里配置站点域名 / 访问地址，否则不能复制安装命令。"
+            type="warning"
+            :closable="false"
+            style="margin-bottom: 16px;"
+          />
           <el-button type="primary" :loading="generating" @click="generateToken">
             生成安装命令
           </el-button>
+          <div v-if="installMessage" class="install-message">
+            {{ installMessage }}
+          </div>
           <div v-if="installCommand" style="margin-top: 16px;">
             <div class="command-box">
               <code>{{ installCommand }}</code>
             </div>
-            <el-button size="small" style="margin-top: 8px;" @click="copyCommand">
+            <el-button
+              size="small"
+              style="margin-top: 8px;"
+              :disabled="!installReady"
+              @click="copyCommand"
+            >
               复制命令
             </el-button>
           </div>
@@ -102,12 +121,15 @@ const themeForm = reactive({
   primary: '#38bdf8',
   title: 'wukong 监控',
   footer_text: 'Powered by wukong',
+  site_domain: '',
 })
 const saving = ref(false)
 
 // 安装
 const generating = ref(false)
 const installCommand = ref('')
+const installReady = ref(false)
+const installMessage = ref('')
 
 // Telegram
 const tgForm = reactive({
@@ -130,7 +152,7 @@ async function saveTheme() {
       headers: { Authorization: `Bearer ${token}` },
     })
     applyTheme()
-    ElMessage.success('主题已保存')
+    ElMessage.success('主题和站点地址已保存')
   } catch (e: any) {
     ElMessage.error(e.response?.data?.error || '保存失败')
   } finally {
@@ -147,12 +169,22 @@ function applyTheme() {
 
 async function generateToken() {
   generating.value = true
+  installCommand.value = ''
+  installReady.value = false
+  installMessage.value = ''
   try {
     const token = localStorage.getItem('access_token')
     const res = await axios.post('/api/install-tokens', {}, {
       headers: { Authorization: `Bearer ${token}` },
     })
-    installCommand.value = res.data.script_url
+    installReady.value = Boolean(res.data.ready)
+    installCommand.value = res.data.script_url || ''
+    installMessage.value = res.data.message || ''
+    if (!installReady.value) {
+      ElMessage.warning(installMessage.value || '请先配置站点域名')
+      return
+    }
+    ElMessage.success('安装命令已生成')
   } catch (e: any) {
     ElMessage.error(e.response?.data?.error || '生成失败')
   } finally {
@@ -161,6 +193,10 @@ async function generateToken() {
 }
 
 async function copyCommand() {
+  if (!installReady.value || !installCommand.value || installCommand.value.includes('<你的域名>')) {
+    ElMessage.warning('站点域名未配置，不能复制安装命令')
+    return
+  }
   try {
     await navigator.clipboard.writeText(installCommand.value)
     ElMessage.success('已复制到剪贴板')
@@ -184,12 +220,24 @@ onMounted(async () => {
     if (res.data.primary) themeForm.primary = res.data.primary
     if (res.data.title) themeForm.title = res.data.title
     if (res.data.footer_text) themeForm.footer_text = res.data.footer_text
+    if (res.data.site_domain) themeForm.site_domain = res.data.site_domain
     applyTheme()
   } catch {}
 })
 </script>
 
 <style scoped>
+.form-tip,
+.install-message {
+  margin-top: 6px;
+  color: var(--wk-text-muted);
+  font-size: 12px;
+}
+
+.install-message {
+  margin-top: 12px;
+}
+
 .command-box {
   background: var(--wk-bg-soft);
   border: 1px solid var(--wk-border);

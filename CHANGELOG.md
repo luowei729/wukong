@@ -2,6 +2,49 @@
 
 所有变更记录使用北京时间（UTC+8）。
 
+## [2026-06-21 12:39] - 新增公开状态首页与服务器详情，修复安装命令 token 传递
+
+### 改动前总结
+首页默认进入后台登录流程，未登录用户不能查看服务器状态；服务器详情也只有后台节点页。安装命令在未配置域名时仍生成可复制的 `<你的域名>` 占位命令，并把安装 token 放在 `curl -k token` 位置，实际不会传给 `/api/install-agent.sh?k=`，导致脚本 TOKEN 为空，后续注册/下载链路可能把安装 token 误当 JWT 解析并报 `token is malformed`。
+
+### 改动后总结
+1. 新增 `/api/public/servers`、`/api/public/servers/{id}`、`/api/public/servers/{id}/metrics`、`/api/public/servers/{id}/ping-agg` 脱敏只读接口，公开页面不复用后台 `/api/agents` 管理接口。
+2. 修复 `GetLatestMetrics()` / `GetAllLatestMetrics()` 最新指标时间读取，公开首页可正确判断在线、离线、数据延迟和最近更新时间。
+3. `/` 改为公开状态首页，新增 `/server/:id` 公开服务器详情页；后台 `/dashboard`、`/nodes`、`/alerts`、`/settings` 继续要求登录。
+4. 登录接口接入真实 `auth.Service.Authenticate`，登录成功后支持 `redirect` 回跳后台目标。
+5. 安装命令生成改为必须先设置 `site_domain`，未设置时 `ready=false` 且前端禁止复制；正确命令格式为 `curl -fsSL "https://域名/api/install-agent.sh?k=<token>" | bash`。
+6. 安装脚本缺少 `?k=` 时直接返回错误，不再生成空 TOKEN 脚本；脚本中的探针连接地址由站点地址推导，不再使用监听地址冒充公网域名。
+7. 由于当前 proto 的 `MetricsReport` 暂无 agent_secret 字段，注册后的流连接先按已注册 agent_id 校验，避免本机探针注册成功后立即被空 secret 校验拒绝；后续应在协议中补充凭证或签名字段。
+
+### 涉及文件
+- `internal/webapi/handler.go`
+- `internal/webapi/handlers.go`
+- `internal/webapi/public.go`
+- `internal/store/sqlite.go`
+- `internal/grpcapi/agent_server.go`
+- `web/src/router/index.ts`
+- `web/src/views/Login.vue`
+- `web/src/views/Settings.vue`
+- `web/src/views/public/PublicHome.vue`
+- `web/src/views/public/PublicServerDetail.vue`
+- `AGENTS.md`
+- `CHANGELOG.md`
+- `PROJECT_PLAN.md`
+- `DEPLOY_CREDENTIALS.md`
+
+### 验证结果
+- `go test ./...` 通过。
+- `cd web && npm run build` 通过，chunk size warning 不影响本次功能。
+- 本地主控 `127.0.0.1:18080` 启动成功，真实登录接口能签发 JWT。
+- 未配置 `site_domain` 时，安装 token 接口返回 `ready=false` 且 `script_url` 为空，不能复制占位命令。
+- 配置 `site_domain=http://127.0.0.1:18080` 后，安装命令包含 `/api/install-agent.sh?k=token-...`，没有 `curl -k token`。
+- 安装脚本中 `TOKEN` 非空、`SERVER_ADDR` 正确。
+- 本机探针已使用生成 token 注册成功，节点 `home-pc` 在线；日志未出现 `token is malformed`。
+- 无头 Chrome 验证 `/`、`/server/:id`、`/dashboard` 都不是白屏；公开页未登录可访问，后台页未登录展示登录页。
+- 公开 API 不包含 `secret`、`token`，管理接口未登录仍返回 401。
+
+---
+
 ## [2026-06-21 11:57] - 修复部署后首页白屏：嵌入 Vite 下划线资源 + SPA 回退
 
 ### 改动前总结

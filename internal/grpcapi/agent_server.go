@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"wukong/internal/config"
-	pb "wukong/proto/gen"
 	"wukong/internal/store"
+	pb "wukong/proto/gen"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -48,11 +48,11 @@ func (s *AgentServer) Register(ctx context.Context, req *pb.RegisterRequest) (*p
 	}
 
 	return &pb.RegisterResponse{
-		AgentId:          agent.ID,
-		AgentSecret:      secret,
-		CollectInterval:  int32(s.cfg.DefaultCollectInterval),
-		ServerName:       agent.Hostname,
-		ExpiresAt:        time.Now().Add(365 * 24 * time.Hour).Unix(), // 一年有效
+		AgentId:         agent.ID,
+		AgentSecret:     secret,
+		CollectInterval: int32(s.cfg.DefaultCollectInterval),
+		ServerName:      agent.Hostname,
+		ExpiresAt:       time.Now().Add(365 * 24 * time.Hour).Unix(), // 一年有效
 	}, nil
 }
 
@@ -69,8 +69,10 @@ func (s *AgentServer) ReportStream(stream pb.AgentService_ReportStreamServer) er
 		return status.Errorf(codes.InvalidArgument, "首个消息必须是 MetricsReport")
 	}
 
-	// 验证探针身份
-	if !s.store.ValidateAgent(report.AgentId, "") {
+	// 验证探针身份。
+	// 当前 proto 的 MetricsReport 只有 agent_id，没有携带 agent_secret；因此先确认 agent_id 已注册，
+	// 避免注册成功后的本机探针因为空 secret 校验被拒绝。后续应在协议中补充签名或凭证字段。
+	if _, err := s.store.GetAgent(report.AgentId); err != nil {
 		return status.Errorf(codes.PermissionDenied, "身份验证失败")
 	}
 
@@ -177,6 +179,8 @@ func (s *AgentServer) GetOnlineAgents() map[string]time.Time {
 }
 
 func min(a, b int) int {
-	if a < b { return a }
+	if a < b {
+		return a
+	}
 	return b
 }
