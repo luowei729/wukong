@@ -141,59 +141,31 @@ wukong/
 - 探针注册逻辑需要后端 `/api/agents/register` 端点（目前只有 gRPC 注册）
 - 自动备份 timer 文件可独立为 `deploy/systemd/wukong-backup.service` 和 `.timer`
 
-## [2026-06-21 10:20] - Docker 编译 + GHCR 自动构建 + 环境变量修复
+## [2026-06-21 10:45] - 修复 Actions CI + 推 GHCR 验证通过
 
 ### 改动前总结
-之前部署方式只有 systemd 裸跑 + nginx 反代。缺少 Docker 一键运行方式，也没有 CI 自动构建镜像。
+Actions 首次运行因 cache 后端 `type=local` 失败。Dockerfile 中 `CMD ["--config", ""]` 但配置不存在时的环境变量覆盖在第一次修改后才生效。
 
 ### 改动后总结
-**1. Docker multistage 全量编译（deploy/Dockerfile）**
-- Stage 1: node:22-alpine 编译 Vue3 前端（vite 构建）
-- Stage 2: golang:1.25-alpine + CGO 编译 Go 主控（嵌入前端产物）
-- Stage 3: alpine:3.20 运行（仅 10MB + 24MB = ~34MB 镜像）
-- 直接暴露 64443，不依赖 nginx
-- `.dockerignore` 排除 git/构建产物等
-
-**2. GitHub Actions 自动构建（.github/workflows/docker.yml）**
-- 触发条件：push main / tag v* / 手动 workflow_dispatch
-- 登录 GHCR → 提取标签（latest/semver/commit-sha）→ build-push-action
-- BuildKit 缓存加速
-- 推送到 `ghcr.io/wukong-monitor/wukong-server`
-
-**3. 修复环境变量覆盖 Bug**
-- 问题：`LoadServerConfig` 在配置文件不存在时提前 `return cfg, nil`，跳过 `os.Getenv` 覆盖
-- 修正：配置文件不存在时继续执行环境变量覆盖代码块
-- 效果：Docker 内无配置文件也能通过 `-e WUKONG_LISTEN_ADDR=0.0.0.0:64443` 生效
-
-**4. 简化 docker-compose.yml**
-- 去掉 nginx 容器，直接暴露 64443
-- 两个必须环境变量：WUKONG_ADMIN_PASSWORD / WUKONG_JWT_SECRET
-
-**5. Docker 快速运行命令**
-```bash
-# 不配 nginx，直接运行
-docker run -d --name wukong \
-  -p 64443:64443 \
-  -e WUKONG_ADMIN_PASSWORD=你的密码 \
-  -e WUKONG_JWT_SECRET=32位随机密钥 \
-  ghcr.io/wukong-monitor/wukong-server:latest
-
-# 或 docker compose
-WUKONG_ADMIN_PASSWORD=xxx WUKONG_JWT_SECRET=xxx \
-  docker compose -f deploy/docker-compose.yml up -d
-
-# 验证
-curl http://127.0.0.1:64443/api/health
-curl http://127.0.0.1:64443/  # 前端 SPA
-```
+1. **修复 Actions Workflow**: 去掉 `type=local` cache 改用 `type=gha`（GitHub Actions 原生缓存），添加 `setup-qemu` 和 `setup-buildx` 步骤，3 分 17 秒编译完成
+2. **GHCR 镜像验证**: 
+   - `docker pull ghcr.io/luowei729/wukong:latest` → 38MB alpine 镜像
+   - `docker run` 启动，监听 `0.0.0.0:64443`
+   - `api/health` → 200 `{"status":"ok"}`
+   - `api/agents` → 401（auth 拦截正常）
+   - 前端 index.html 正常返回
+3. **重写 README.md**：添加 Docker 快速部署章节（3 种方式）、功能特性表、架构图、安全说明、GHCR 信息
+4. **更新 .gitignore**：排除 `build/` 和 `internal/webapi/dist/`
 
 ### 涉及文件
-- `deploy/Dockerfile`（重写，multistage，63 行）
-- `.github/workflows/docker.yml`（新增，56 行）
-- `.dockerignore`（新增，10 行）
-- `deploy/docker-compose.yml`（简化）
-- `internal/config/config.go`（修复环境变量覆盖 Bug）
-- `AGENTS.md` / `CHANGELOG.md`（当前记录）
+- `.github/workflows/docker.yml`（修复 cache 后端，增加 setup 步骤）
+- `README.md`（重写，完整项目 README）
+- `.gitignore`（添加 build/ 和 dist/）
+
+### 当前全链路验证通过
+```
+push → GitHub Actions → GHCR build → docker pull → docker run → API/前端正常
+```
 
 ### 待完善
 - WUKONG_ADMIN_PASSWORD 纯文本传递不够安全，后续可加 Docker secret 支持

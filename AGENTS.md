@@ -71,7 +71,7 @@ wukong/
 ## 开发提示
 
 - **2026-06-21 09:30（北京时间）**：推 GitHub 前排除 DEPLOY_CREDENTIALS.md 和 .codegraph/。DEPLOY_CREDENTIALS.md 是本项目敏感凭证文档，不允许提交公网仓库；.codegraph/ 是本地索引，可重建。
-- **2026-06-21 09:49（北京时间）**：项目完整骨架已搭建，21 项架构决策已 grill-me 确认。三个二进制全部编译通过：`wukong-server`（24MB，embed Vue3）、`wukong-agent`（15MB）、`wukong-signer`（15MB）。主控监听 64443，cmux 双协议（gRPC + HTTP），nginx 反代配置已生成到 `deploy/nginx/wukong.conf`。前端 6 页面（Login/Dashboard/Nodes/NodeDetail/Alerts/Settings），暗黑科技风双主题，已构建并 embed 进主控。
+- **2026-06-21 10:20（北京时间）**：补全 Docker 部署、GHCR 自动构建（GitHub Actions）。GitHub Actions 在 push main 或 tag v* 时自动构建并推送到 `ghcr.io/luowei729/wukong`。已实测拉取 GHCR 镜像并 docker run 验证成功。tldr: `docker run -p 64443:64443 -e WUKONG_ADMIN_PASSWORD=xxx -e WUKONG_JWT_SECRET=xxx ghcr.io/luowei729/wukong:latest`
 - **开发后续优先级**：① 探针 Ping 多运营商探测完善 ② Web API 端点完整实现 ③ 告警引擎集成 gRPC 心跳 ④ 前端接入真实 API 数据 ⑤ 安装脚本与升级流程端到端原型
 
 ## 部署相关长期提示
