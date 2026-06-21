@@ -2,7 +2,8 @@
 
 > 版本: v0.1.0
 > 创建日期: 2026-06-21 09:49 (北京时间)
-> 状态: **骨架搭建完成**，三个二进制编译通过，待 Phase 1 功能完善
+> 最后更新: 2026-06-21 10:05 (北京时间)
+> 状态: **骨架搭建完成 + 安装脚本与部署文档就绪**，三个二进制编译通过，待 Phase 1 功能完善
 
 ## 一、项目概述
 
@@ -69,18 +70,22 @@ curl http://127.0.0.1:64443/api/health
 ```
 /opt/wukong/
 ├── wukong                # 主控二进制
+├── wukong-signer         # 签名服务二进制
 ├── wukong.conf           # 主控配置
+├── deploy/
+│   ├── nginx/wukong.conf # nginx 反代配置
+│   └── scripts/
+│       ├── install-server.sh  # 主控安装脚本
+│       └── install-agent.sh   # 探针安装脚本
 ├── data/
 │   ├── wukong.db         # SQLite 数据库
 │   ├── uploads/          # Logo 等上传文件
 │   ├── signing/          # ed25519 密钥对（权限 400）
-│   └── signer.sock       # 签名服务 Unix Socket
-├── agent/
-│   ├── wukong-agent      # 探针二进制
-│   ├── agent.conf        # 探针配置（权限 600）
-│   └── data/             # 探针本地数据
-└── deploy/
-    ├── nginx/            # nginx 反代配置
-    ├── systemd/          # systemd unit 文件
-    └── scripts/          # 安装脚本
+│   ├── signer.sock       # 签名服务 Unix Socket
+│   └── .admin_password   # 初始密码（首次登录后删除）
+└── agent/                # （仅探针节点）
+    ├── wukong-agent      # 探针二进制
+    ├── agent.conf        # 探针配置（权限 600）
+    ├── data/             # 探针本地数据
+    └── server.txt        # 主控地址
 ```

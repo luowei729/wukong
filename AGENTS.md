@@ -1,6 +1,6 @@
 # wukong 监控系统 - 开发规范与提示
 
-> 最后更新: 2026-06-21 09:49 (北京时间)
+> 最后更新: 2026-06-21 10:20 (北京时间)
 
 ## 开发原则
 
@@ -73,3 +73,16 @@ wukong/
 - **2026-06-21 09:30（北京时间）**：推 GitHub 前排除 DEPLOY_CREDENTIALS.md 和 .codegraph/。DEPLOY_CREDENTIALS.md 是本项目敏感凭证文档，不允许提交公网仓库；.codegraph/ 是本地索引，可重建。
 - **2026-06-21 09:49（北京时间）**：项目完整骨架已搭建，21 项架构决策已 grill-me 确认。三个二进制全部编译通过：`wukong-server`（24MB，embed Vue3）、`wukong-agent`（15MB）、`wukong-signer`（15MB）。主控监听 64443，cmux 双协议（gRPC + HTTP），nginx 反代配置已生成到 `deploy/nginx/wukong.conf`。前端 6 页面（Login/Dashboard/Nodes/NodeDetail/Alerts/Settings），暗黑科技风双主题，已构建并 embed 进主控。
 - **开发后续优先级**：① 探针 Ping 多运营商探测完善 ② Web API 端点完整实现 ③ 告警引擎集成 gRPC 心跳 ④ 前端接入真实 API 数据 ⑤ 安装脚本与升级流程端到端原型
+
+## 部署相关长期提示
+
+- **部署目录**: `/opt/wukong/`，主控 wukong.conf 权限 600，signing/ 权限 400
+- **nginx**: 443 → 64443 反代，gRPC 用 `grpc_pass`，SSE 必须 `proxy_buffering off`
+- **密钥安全**: ed25519 私钥 /opt/wukong/data/signing/ed25519.key 权限 400，首次登录后删除 .admin_password
+- **探针注册**: 一次性 token 30 分钟过期，注册即作废；注册后服务器下发 agent_secret 个体凭证
+- **签名校验**: 安装脚本 web 后端不接触私钥，签名请求通过 Unix Socket 发送到 signer 进程
+- **更新记录**: 2026-06-21 09:49 骨架完成；2026-06-21 10:05 完成安装脚本+部署文档+DEPLOY_CREDENTIALS.md；2026-06-21 10:20 补Docker/GHCR/GitHub Actions
+- **Docker 部署**: `deploy/Dockerfile` multistage 全量编译（Vue3→Go→alpine 运行），直接暴露 64443，不依赖 nginx
+- **GHCR 自动构建**: `.github/workflows/docker.yml` 在 push main 或 tag v* 时自动构建推 ghcr.io
+- **快速运行**: `docker run -p 64443:64443 -e WUKONG_ADMIN_PASSWORD=xxx ghcr.io/wukong-monitor/wukong-server:latest`
+- **docker compose**: `WUKONG_ADMIN_PASSWORD=xxx WUKONG_JWT_SECRET=xxx docker compose -f deploy/docker-compose.yml up -d`

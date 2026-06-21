@@ -1,0 +1,17 @@
+version: '3.8'
+
+services:
+  wukong:
+    image: ghcr.io/wukong-monitor/wukong-server:latest
+    container_name: wukong
+    restart: unless-stopped
+    ports:
+      - "64443:64443"
+    environment:
+      - WUKONG_ADMIN_PASSWORD=${WUKONG_ADMIN_PASSWORD?请设置管理员密码}
+      - WUKONG_JWT_SECRET=${WUKONG_JWT_SECRET?请设置JWT密钥}
+    volumes:
+      - wukong-data:/opt/wukong/data
+
+volumes:
+  wukong-data:

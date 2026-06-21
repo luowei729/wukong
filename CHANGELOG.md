@@ -76,3 +76,125 @@ wukong/
 - 探针本地缓冲 flush、Ping 多运营商探测、自动升级逻辑需补充
 - 告警引擎需要集成到 gRPC 心跳判定中
 - 前端需要接入真实 API 数据替换模拟数据
+
+## [2026-06-21 10:05] - 补全部署脚本 + 完整部署文档
+
+### 改动前总结
+项目骨架已完成可编译，但缺少可运行的安装脚本和完整部署指南。DEPLOY_CREDENTIALS.md 还是旧演示项目的凭证文档，完全不可用。
+
+### 改动后总结
+**1. 新增安装脚本（2 个可执行脚本）**
+- `deploy/scripts/install-server.sh`：主控一键安装脚本
+  - 前置检查（root/架构/包管理器）
+  - 自动安装 nginx 等系统依赖
+  - 创建 /opt/wukong 目录结构（data/signing/uploads）
+  - 下载或复制主控二进制
+  - 生成默认 wukong.conf 配置（权限 600）
+  - 自动生成 JWT 密钥和随机管理员密码
+  - 安装 systemd 服务（wukong.service）
+  - 生成 nginx 反代配置（443→64443，gRPC+SSE+SPA）
+  - 注意：签名服务内嵌在主控中，无需单独启动
+- `deploy/scripts/install-agent.sh`：探针一键安装脚本
+  - 支持两种传参方式（-k token 或环境变量）
+  - 检测已有配置跳过注册
+  - 线上下载或本地复制探针二进制
+  - 自动注册到主控（token 验证）
+  - 安装 systemd 服务（wukong-agent.service，含 CAP_NET_RAW）
+  - 注册成功后保存 agent.conf 个体凭证
+
+**2. 新增 Docker 可选部署**
+- `deploy/docker-compose.yml`：Docker 版部署（nginx + wukong 双容器）
+- 注：默认使用 systemd 裸跑更简单，Docker 版本供参考
+
+**3. 重写 DEPLOY_CREDENTIALS.md**（完整部署指南）
+- 快速部署：主控 4 步 + 探针 3 种方式
+- 安全配置：防火墙/SSL/密码/签名私钥
+- 目录结构详解（/opt/wukong/ 树）
+- 配置文件样例（wukong.conf + agent.conf）
+- 服务管理命令汇总
+- 升级流程（主控替换/探针自动升级/手动）
+- 自动备份 systemd timer（每 6h + 保留 7 份）
+- 详细排错指南（主控启动/探针注册/网络/白屏）
+- 开发环境快速启动
+- 部署检查清单（12 项）
+- 实际部署凭证表格（待填）
+
+**4. 更新 PROJECT_PLAN.md 进展状态**
+- 标注安装脚本与部署文档已完成
+- 更新 Phase 1 完成项
+
+**5. 更新 AGENTS.md**
+- 添加部署长期提示段落
+- 添加 session 记录到开发提示
+
+### 涉及文件
+- `deploy/scripts/install-server.sh`（新增，可执行，162 行）
+- `deploy/scripts/install-agent.sh`（新增，可执行，180 行）
+- `deploy/docker-compose.yml`（新增，46 行）
+- `DEPLOY_CREDENTIALS.md`（重写，完整部署指南，310 行）
+- `AGENTS.md`（更新最后更新时间和部署提示）
+- `CHANGELOG.md`（当前记录）
+- `PROJECT_PLAN.md`（更新 Phase 1 进展）
+
+### 待完善
+- 安装脚本中 web API 下载二进制端点需要后端配合实现 `/api/agent/binary/latest/{arch}`
+- 探针注册逻辑需要后端 `/api/agents/register` 端点（目前只有 gRPC 注册）
+- 自动备份 timer 文件可独立为 `deploy/systemd/wukong-backup.service` 和 `.timer`
+
+## [2026-06-21 10:20] - Docker 编译 + GHCR 自动构建 + 环境变量修复
+
+### 改动前总结
+之前部署方式只有 systemd 裸跑 + nginx 反代。缺少 Docker 一键运行方式，也没有 CI 自动构建镜像。
+
+### 改动后总结
+**1. Docker multistage 全量编译（deploy/Dockerfile）**
+- Stage 1: node:22-alpine 编译 Vue3 前端（vite 构建）
+- Stage 2: golang:1.25-alpine + CGO 编译 Go 主控（嵌入前端产物）
+- Stage 3: alpine:3.20 运行（仅 10MB + 24MB = ~34MB 镜像）
+- 直接暴露 64443，不依赖 nginx
+- `.dockerignore` 排除 git/构建产物等
+
+**2. GitHub Actions 自动构建（.github/workflows/docker.yml）**
+- 触发条件：push main / tag v* / 手动 workflow_dispatch
+- 登录 GHCR → 提取标签（latest/semver/commit-sha）→ build-push-action
+- BuildKit 缓存加速
+- 推送到 `ghcr.io/wukong-monitor/wukong-server`
+
+**3. 修复环境变量覆盖 Bug**
+- 问题：`LoadServerConfig` 在配置文件不存在时提前 `return cfg, nil`，跳过 `os.Getenv` 覆盖
+- 修正：配置文件不存在时继续执行环境变量覆盖代码块
+- 效果：Docker 内无配置文件也能通过 `-e WUKONG_LISTEN_ADDR=0.0.0.0:64443` 生效
+
+**4. 简化 docker-compose.yml**
+- 去掉 nginx 容器，直接暴露 64443
+- 两个必须环境变量：WUKONG_ADMIN_PASSWORD / WUKONG_JWT_SECRET
+
+**5. Docker 快速运行命令**
+```bash
+# 不配 nginx，直接运行
+docker run -d --name wukong \
+  -p 64443:64443 \
+  -e WUKONG_ADMIN_PASSWORD=你的密码 \
+  -e WUKONG_JWT_SECRET=32位随机密钥 \
+  ghcr.io/wukong-monitor/wukong-server:latest
+
+# 或 docker compose
+WUKONG_ADMIN_PASSWORD=xxx WUKONG_JWT_SECRET=xxx \
+  docker compose -f deploy/docker-compose.yml up -d
+
+# 验证
+curl http://127.0.0.1:64443/api/health
+curl http://127.0.0.1:64443/  # 前端 SPA
+```
+
+### 涉及文件
+- `deploy/Dockerfile`（重写，multistage，63 行）
+- `.github/workflows/docker.yml`（新增，56 行）
+- `.dockerignore`（新增，10 行）
+- `deploy/docker-compose.yml`（简化）
+- `internal/config/config.go`（修复环境变量覆盖 Bug）
+- `AGENTS.md` / `CHANGELOG.md`（当前记录）
+
+### 待完善
+- WUKONG_ADMIN_PASSWORD 纯文本传递不够安全，后续可加 Docker secret 支持
+- Docker 版探针镜像待后续补全

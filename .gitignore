@@ -8,6 +8,7 @@ DEPLOY_CREDENTIALS.md
 wukong-server
 wukong-agent
 wukong-signer
+build/
 bin/
 
 # 运行期数据：SQLite、日志和临时文件只属于当前机器环境。
@@ -20,6 +21,7 @@ bin/
 # 前端依赖与构建产物：依赖通过 package-lock.json 复现，构建产物由发布流程生成。
 web/node_modules/
 web/dist/
+internal/webapi/dist/
 
 # 编辑器和系统文件：避免把个人环境配置提交到项目。
 .vscode/

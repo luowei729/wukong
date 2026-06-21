@@ -110,13 +110,28 @@ func LoadServerConfig(path string) (*ServerConfig, error) {
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return cfg, nil // 配置文件不存在，使用默认值
+		if !errors.Is(err, os.ErrNotExist) {
+			return nil, fmt.Errorf("读取配置文件 %s 失败: %w", path, err)
 		}
-		return nil, fmt.Errorf("读取配置文件 %s 失败: %w", path, err)
-	}
-	if err := json.Unmarshal(data, cfg); err != nil {
+		// 配置文件不存在，使用默认值，继续执行环境变量覆盖
+	} else if err := json.Unmarshal(data, cfg); err != nil {
 		return nil, fmt.Errorf("解析配置文件 %s 失败: %w", path, err)
+	}
+	// 环境变量覆盖（支持 Docker 等场景，始终执行）
+	if v := os.Getenv("WUKONG_LISTEN_ADDR"); v != "" {
+		cfg.ListenAddr = v
+	}
+	if v := os.Getenv("WUKONG_DB_PATH"); v != "" {
+		cfg.DBPath = v
+	}
+	if v := os.Getenv("WUKONG_DATA_DIR"); v != "" {
+		cfg.DataDir = v
+	}
+	if v := os.Getenv("WUKONG_JWT_SECRET"); v != "" {
+		cfg.JWTSecret = v
+	}
+	if v := os.Getenv("WUKONG_LOG_LEVEL"); v != "" {
+		cfg.LogLevel = v
 	}
 	// 从环境变量读取敏感信息（不落盘）
 	if v := os.Getenv("WUKONG_ADMIN_PASSWORD"); v != "" {
