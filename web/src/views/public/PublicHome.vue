@@ -21,34 +21,9 @@
     </header>
 
     <main class="public-main">
-      <section class="hero">
-        <div class="hero-copy">
-          <div :class="['status-pill', globalStatusClass]">
-            <span class="wk-status-dot" :class="globalStatusClass" />
-            {{ globalStatusText }}
-          </div>
-          <h1>全球服务器状态</h1>
-          <p>公开展示所有服务器的在线状态、资源使用率与最近上报时间，管理操作请登录后台完成。</p>
-        </div>
-        <div class="hero-panel wk-card">
-          <span>最后更新</span>
-          <strong>{{ lastUpdatedText }}</strong>
-          <small>数据来自脱敏公开接口</small>
-        </div>
-      </section>
-
-      <section class="summary-grid">
-        <div class="summary-card wk-card" v-for="item in summaryCards" :key="item.label">
-          <span>{{ item.label }}</span>
-          <strong class="wk-metric-value">{{ item.value }}</strong>
-          <small>{{ item.hint }}</small>
-        </div>
-      </section>
-
       <section class="section-head">
         <div>
           <h2>服务器列表</h2>
-          <p>点击卡片查看公开服务器详情。</p>
         </div>
       </section>
 
@@ -119,33 +94,8 @@ interface PublicServer {
 const router = useRouter()
 const loading = ref(false)
 const servers = ref<PublicServer[]>([])
-const generatedAt = ref('')
-const summary = ref({ total: 0, online: 0, offline: 0, avg_cpu: 0, avg_mem: 0, avg_disk: 0 })
 const hasToken = computed(() => Boolean(localStorage.getItem('access_token')))
 let refreshTimer: ReturnType<typeof setInterval> | null = null
-
-const globalStatusClass = computed(() => {
-  if (summary.value.total === 0) return 'unknown'
-  if (summary.value.offline > 0) return 'offline'
-  return 'online'
-})
-
-const globalStatusText = computed(() => {
-  if (summary.value.total === 0) return '暂无服务器数据'
-  if (summary.value.offline > 0) return '部分服务器异常'
-  return '所有服务器运行正常'
-})
-
-const lastUpdatedText = computed(() => relativeTime(generatedAt.value))
-
-const summaryCards = computed(() => [
-  { label: '服务器总数', value: summary.value.total, hint: '公开展示节点' },
-  { label: '在线服务器', value: summary.value.online, hint: '最近数据正常' },
-  { label: '离线/异常', value: summary.value.offline, hint: '需要管理员关注' },
-  { label: '平均 CPU', value: `${summary.value.avg_cpu || 0}%`, hint: '所有有数据节点' },
-  { label: '平均内存', value: `${summary.value.avg_mem || 0}%`, hint: '所有有数据节点' },
-  { label: '平均磁盘', value: `${summary.value.avg_disk || 0}%`, hint: '所有有数据节点' },
-])
 
 async function loadData(showLoading = false) {
   // 公开首页只访问 /api/public/servers，不携带 JWT，确保未登录也可展示；定时刷新时不切 loading，避免每秒闪烁。
@@ -153,8 +103,6 @@ async function loadData(showLoading = false) {
   try {
     const res = await axios.get(`/api/public/servers?_=${Date.now()}`)
     servers.value = res.data.servers || []
-    summary.value = res.data.summary || summary.value
-    generatedAt.value = res.data.generated_at || new Date().toISOString()
   } finally {
     if (showLoading) loading.value = false
   }
@@ -272,13 +220,8 @@ onUnmounted(() => {
 }
 
 .brand small,
-.hero p,
-.section-head p,
 .server-meta,
-.server-foot,
-.summary-card small,
-.hero-panel small,
-.hero-panel span {
+.server-foot {
   color: var(--wk-text-muted);
 }
 
@@ -365,7 +308,7 @@ onUnmounted(() => {
 .section-head {
   display: flex;
   justify-content: space-between;
-  margin: 42px 0 18px;
+  margin: 32px 0 18px;
 }
 
 .section-head h2 {

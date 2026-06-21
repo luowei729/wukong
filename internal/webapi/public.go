@@ -34,6 +34,7 @@ type publicServerSummary struct {
 	LastSeenAt *time.Time `json:"last_seen_at,omitempty"`
 	UpdatedAt  *time.Time `json:"updated_at,omitempty"`
 	OSVersion  string     `json:"os_version,omitempty"`
+	Arch       string     `json:"arch,omitempty"`
 	CPU        *float64   `json:"cpu,omitempty"`
 	Mem        *float64   `json:"mem,omitempty"`
 	Disk       *float64   `json:"disk,omitempty"`
@@ -203,6 +204,8 @@ func buildPublicServerSummary(agent *store.Agent, metric *store.LatestMetric) pu
 		Online:     agent.Online,
 		Status:     publicStatus(agent, metric),
 		LastSeenAt: agent.LastSeenAt,
+		OSVersion:  agent.OSVersion,
+		Arch:       agent.Arch,
 	}
 	if metric != nil {
 		updatedAt := metric.UpdatedAt

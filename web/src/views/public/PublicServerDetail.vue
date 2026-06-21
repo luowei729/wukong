@@ -27,8 +27,15 @@
             <p>{{ server.os_version || '系统信息待上报' }}</p>
           </div>
           <div class="hero-meta">
-            <span>最后上报</span>
-            <strong>{{ relativeTime(server.updated_at || server.last_seen_at) }}</strong>
+            <span>最后活跃</span>
+            <strong>{{ formatDateTime(server.updated_at || server.last_seen_at) }}</strong>
+          </div>
+        </section>
+
+        <section class="spec-grid wk-card-solid">
+          <div v-for="item in serverSpecs" :key="item.label" class="spec-item">
+            <span>{{ item.label }}</span>
+            <strong>{{ item.value }}</strong>
           </div>
         </section>
 
@@ -80,6 +87,7 @@ interface PublicServer {
   last_seen_at?: string
   updated_at?: string
   os_version?: string
+  arch?: string
   cpu?: number
   mem?: number
   disk?: number
@@ -105,9 +113,22 @@ const error = ref('')
 const chartRef = ref<HTMLDivElement>()
 let chart: echarts.ECharts | null = null
 let refreshTimer: ReturnType<typeof setInterval> | null = null
+let metricsTimer: ReturnType<typeof setInterval> | null = null
 
 const hasToken = computed(() => Boolean(localStorage.getItem('access_token')))
 const serverID = computed(() => route.params.id as string)
+
+const serverSpecs = computed(() => [
+  { label: 'Status', value: statusText(server.value?.status || 'unknown') },
+  { label: 'Arch', value: archText(server.value?.arch) },
+  { label: 'System', value: systemText(server.value?.os_version) },
+  { label: 'CPU', value: formatPercent(server.value?.cpu) },
+  { label: 'Mem', value: formatPercent(server.value?.mem) },
+  { label: 'Disk', value: formatPercent(server.value?.disk) },
+  { label: 'Upload', value: `${formatBytes(server.value?.net_up)}/s` },
+  { label: 'Download', value: `${formatBytes(server.value?.net_down)}/s` },
+  { label: 'Last active time', value: formatDateTime(server.value?.updated_at || server.value?.last_seen_at) },
+])
 
 const currentMetrics = computed(() => [
   { label: 'CPU', value: formatPercent(server.value?.cpu), hint: '当前使用率' },
@@ -124,7 +145,6 @@ async function loadServer(showLoading = false) {
   try {
     const res = await axios.get(`/api/public/servers/${serverID.value}?_=${Date.now()}`)
     server.value = res.data.server
-    await loadMetrics()
   } catch (e: any) {
     error.value = e.response?.data?.error || '无法加载服务器详情'
   } finally {
@@ -145,8 +165,7 @@ async function loadMetrics() {
 
 function renderChart() {
   if (!chartRef.value || metricPoints.value.length === 0) return
-  chart?.dispose()
-  chart = echarts.init(chartRef.value, 'dark')
+  if (!chart) chart = echarts.init(chartRef.value, 'dark')
   const labels = metricPoints.value.map((item) => formatTime(item.timestamp))
   chart.setOption({
     tooltip: { trigger: 'axis', backgroundColor: 'rgba(15, 23, 42, 0.92)', borderColor: 'rgba(56, 189, 248, 0.3)' },
@@ -195,6 +214,24 @@ function formatBytes(value?: number) {
   return `${size.toFixed(size >= 10 ? 0 : 1)} ${units[index]}`
 }
 
+function systemText(value?: string) {
+  if (!value) return '-'
+  if (value.includes(' ')) return value.split(' ')[0]
+  return value
+}
+
+function archText(value?: string) {
+  if (!value) return '-'
+  if (value === 'amd64') return 'x86_64'
+  if (value === 'arm64') return 'aarch64'
+  return value
+}
+
+function formatDateTime(value?: string) {
+  if (!value) return '-'
+  return new Date(value).toLocaleString()
+}
+
 function relativeTime(value?: string) {
   if (!value) return '暂无上报'
   const diff = Date.now() - new Date(value).getTime()
@@ -219,13 +256,16 @@ function handleResize() {
 
 onMounted(() => {
   loadServer(true)
-  // 详情页当前指标和趋势每秒刷新，保证公开详情接近实时。
+  loadMetrics()
+  // 详情页当前指标每秒刷新；趋势图低频刷新且不销毁重建，避免图表无限闪烁。
   refreshTimer = setInterval(() => loadServer(false), 1000)
+  metricsTimer = setInterval(() => loadMetrics(), 60000)
   window.addEventListener('resize', handleResize)
 })
 
 onUnmounted(() => {
   if (refreshTimer) clearInterval(refreshTimer)
+  if (metricsTimer) clearInterval(metricsTimer)
   chart?.dispose()
   window.removeEventListener('resize', handleResize)
 })
@@ -296,15 +336,40 @@ onUnmounted(() => {
 .status-pill.stale,
 .status-pill.unknown { color: var(--wk-warning); }
 
-.metric-grid {
+.metric-grid,
+.spec-grid {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 16px;
   margin: 18px 0;
 }
 
+.metric-grid {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+.spec-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  padding: 20px;
+}
+
 .metric-card {
   padding: 18px;
+}
+
+.spec-item {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.spec-item span {
+  color: var(--wk-text-muted);
+  font-size: 12px;
+}
+
+.spec-item strong {
+  font-size: 16px;
+  word-break: break-word;
 }
 
 .metric-card strong {
@@ -341,7 +406,8 @@ onUnmounted(() => {
   .hero-meta {
     text-align: left;
   }
-  .metric-grid {
+  .metric-grid,
+  .spec-grid {
     grid-template-columns: 1fr;
   }
 }
