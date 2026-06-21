@@ -59,6 +59,7 @@ import axios from 'axios'
 const router = useRouter()
 const nodeList = ref<any[]>([])
 let eventSource: EventSource | null = null
+let refreshTimer: ReturnType<typeof setInterval> | null = null
 
 const stats = ref([
   { label: '在线节点', value: '0', unit: '台' },
@@ -70,11 +71,21 @@ const stats = ref([
 async function fetchNodes() {
   try {
     const token = localStorage.getItem('access_token')
-    const res = await axios.get('/api/agents', {
-      headers: { Authorization: `Bearer ${token}` },
-    })
-    nodeList.value = res.data
-    stats.value[0].value = String(res.data.filter((n: any) => n.online).length)
+    const headers = { Authorization: `Bearer ${token}` }
+    const [agentsRes, latestRes] = await Promise.all([
+      axios.get(`/api/agents?_=${Date.now()}`, { headers }),
+      axios.get(`/api/agents/latest?_=${Date.now()}`, { headers }),
+    ])
+    const latest = latestRes.data || {}
+    nodeList.value = (agentsRes.data || []).map((node: any) => ({
+      ...node,
+      ...(latest[node.id] || {}),
+    }))
+    const onlineNodes = nodeList.value.filter((n: any) => n.online)
+    stats.value[0].value = String(onlineNodes.length)
+    const metricNodes = nodeList.value.filter((n: any) => typeof n.cpu === 'number')
+    stats.value[1].value = metricNodes.length ? (metricNodes.reduce((sum: number, n: any) => sum + n.cpu, 0) / metricNodes.length).toFixed(1) : '-'
+    stats.value[2].value = metricNodes.length ? (metricNodes.reduce((sum: number, n: any) => sum + n.mem, 0) / metricNodes.length).toFixed(1) : '-'
   } catch (e) {
     console.error('获取节点列表失败', e)
   }
@@ -101,10 +112,13 @@ function goToNode(id: string) {
 onMounted(() => {
   fetchNodes()
   connectSSE()
+  // 后台总览每秒主动刷新一次，避免依赖 SSE 或浏览器缓存导致设备状态不更新。
+  refreshTimer = setInterval(fetchNodes, 1000)
 })
 
 onUnmounted(() => {
   eventSource?.close()
+  if (refreshTimer) clearInterval(refreshTimer)
 })
 </script>
 

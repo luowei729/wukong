@@ -1,7 +1,7 @@
 #!/bin/bash
 # =============================================
 # wukong 监控系统 - 探针安装脚本
-# 用法: curl -fsSL https://你的域名/api/install-agent.sh -k <TOKEN> | bash
+# 用法: curl -fsSL "https://你的域名/api/install-agent.sh?k=<TOKEN>" | bash
 # =============================================
 set -euo pipefail
 
@@ -18,8 +18,8 @@ log_error() { echo -e "${RED}[ERROR]${NC} $1"; }
 
 # ---- 参数解析 ----
 # 支持两种传参方式:
-#   1. curl ... -k <TOKEN>  (查询参数)
-#   2. export TOKEN=xxx; bash install-agent.sh
+#   1. export TOKEN=xxx SERVER=monitor.example.com:443; bash install-agent.sh
+#   2. bash install-agent.sh -k <TOKEN> -s monitor.example.com:443
 TOKEN="${TOKEN:-}"
 SERVER="${SERVER:-}"
 # 从命令行参数读取 (curl -k <token> 时 token 在末尾)
@@ -49,14 +49,14 @@ CONFIG_FILE="$INSTALL_DIR/agent.conf"
 SERVICE_FILE="/etc/systemd/system/wukong-agent.service"
 ARCH=""
 
-# 检测架构
+# 检测架构：同时支持 amd64 和 arm64 节点服务器，其他架构直接提示不可安装。
 detect_arch() {
     local arch
     arch=$(uname -m)
     case "$arch" in
-        x86_64)  ARCH="amd64" ;;
+        x86_64|amd64)  ARCH="amd64" ;;
         aarch64|arm64) ARCH="arm64" ;;
-        *) log_error "不支持的架构: $arch"; exit 1 ;;
+        *) log_error "不支持的架构: $arch（当前仅支持 amd64 / arm64）"; exit 1 ;;
     esac
     log_info "系统架构: $ARCH"
 }
@@ -90,7 +90,12 @@ create_dirs() {
 download_agent() {
     detect_arch
 
-    local binary_url="https://${SERVER}/api/agent/binary/latest/${ARCH}"
+    local base_url="https://${SERVER}"
+    # SERVER 可以是 host:port；下载 Web API 统一走 HTTPS 站点地址，常见生产值为 server.lkz.pub:443。
+    if [[ "$SERVER" == *":443" ]]; then
+        base_url="https://${SERVER%:443}"
+    fi
+    local binary_url="${base_url}/api/agent/binary/latest/${ARCH}"
 
     log_info "下载探针二进制 ($ARCH)..."
     if ! curl -fsSL "$binary_url" -o "$INSTALL_DIR/wukong-agent"; then
@@ -134,8 +139,8 @@ register_agent() {
 
     log_info "正在注册到主控 $SERVER ..."
 
-    # 直接运行探针进行注册（注册完成后退出）
-    if ! "$INSTALL_DIR/wukong-agent" --server "${SERVER}:443" --token "$TOKEN"; then
+    # 直接运行探针进行注册（注册完成后退出），SERVER 已包含端口时不要再追加 :443。
+    if ! "$INSTALL_DIR/wukong-agent" --server "$SERVER" --token "$TOKEN"; then
         log_error "注册失败，请检查："
         log_error "  1. TOKEN 是否有效（30 分钟过期）"
         log_error "  2. 主控地址 $SERVER 是否正确"
@@ -206,7 +211,11 @@ print_summary() {
     echo -e "    重启探针: ${YELLOW}systemctl restart wukong-agent${NC}"
     echo -e "    停止探针: ${YELLOW}systemctl stop wukong-agent${NC}"
     echo ""
-    echo -e "  现在可以登录管理后台 ${CYAN}https://$SERVER${NC} 查看节点状态"
+    local display_url="https://${SERVER}"
+    if [[ "$SERVER" == *":443" ]]; then
+        display_url="https://${SERVER%:443}"
+    fi
+    echo -e "  现在可以登录管理后台 ${CYAN}${display_url}${NC} 查看节点状态"
     echo ""
 }
 

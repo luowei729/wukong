@@ -4,12 +4,15 @@ package alert
 
 import (
 	"log"
+	"strconv"
 	"sync"
 	"time"
 
 	"wukong/internal/config"
 	"wukong/internal/store"
 )
+
+const alertCheckInterval = 5 * time.Second
 
 // Engine 告警引擎
 type Engine struct {
@@ -33,12 +36,14 @@ func NewEngine(s store.MetricsStore, cfg *config.ServerConfig) *Engine {
 		cfg:            cfg,
 		suppressed:     make(map[string]time.Time),
 		exceedDuration: make(map[string]time.Duration),
+		silencedAgents: make(map[string]struct{}),
+		silencedGroups: make(map[string]struct{}),
 	}
 }
 
 // ThresholdConfig 单个指标的阈值配置
 type ThresholdConfig struct {
-	Metric      string  `json:"metric"`       // cpu/mem/disk/ping_latency/ping_loss
+	Metric      string  `json:"metric"` // cpu/mem/disk/ping_latency/ping_loss
 	Enabled     bool    `json:"enabled"`
 	Warning     float64 `json:"warning"`      // 告警阈值
 	Critical    float64 `json:"critical"`     // 严重阈值（暂用同一阈值，后续可扩展）
@@ -47,9 +52,34 @@ type ThresholdConfig struct {
 	SuppressMin int     `json:"suppress_min"` // 抑制期（分钟）
 }
 
-// Run 定时检查（每分钟执行一次）
+func (e *Engine) settingInt(key string, fallback int) int {
+	value, err := e.store.GetSetting(key)
+	if err != nil || value == "" {
+		return fallback
+	}
+	v, err := strconv.Atoi(value)
+	if err != nil {
+		return fallback
+	}
+	return v
+}
+
+func (e *Engine) settingFloat(key string, fallback float64) float64 {
+	value, err := e.store.GetSetting(key)
+	if err != nil || value == "" {
+		return fallback
+	}
+	v, err := strconv.ParseFloat(value, 64)
+	if err != nil {
+		return fallback
+	}
+	return v
+}
+
+// Run 定时检查告警状态。
+// 原因：离线阈值默认 30 秒，若仍每分钟检查会明显滞后；这里用 5 秒轻量轮询，具体触发时间仍由数据库阈值控制。
 func (e *Engine) Run() {
-	ticker := time.NewTicker(1 * time.Minute)
+	ticker := time.NewTicker(alertCheckInterval)
 	defer ticker.Stop()
 
 	for range ticker.C {
@@ -76,26 +106,39 @@ func (e *Engine) checkAlerts() {
 			continue
 		}
 
-		// 检查各指标
-		e.checkMetric(agent, "cpu", metrics.CPU, 90, 85, 60)
-		e.checkMetric(agent, "mem", metrics.Mem, 90, 85, 60)
-		e.checkMetric(agent, "disk", metrics.Disk, 90, 85, 300)
+		// 检查各指标，阈值和持续时间优先使用 SQLite settings 表，后台保存后立即生效。
+		duration := e.settingInt("alert_metric_duration_seconds", 60)
+		e.checkMetric(agent, "cpu", metrics.CPU, e.settingFloat("alert_cpu_threshold", 90), 85, duration)
+		e.checkMetric(agent, "mem", metrics.Mem, e.settingFloat("alert_mem_threshold", 90), 85, duration)
+		e.checkMetric(agent, "disk", metrics.Disk, e.settingFloat("alert_disk_threshold", 90), 85, e.settingInt("alert_disk_duration_seconds", 300))
 	}
 }
 
 func (e *Engine) handleOffline(agent *store.Agent) {
 	key := agent.ID + ":offline"
 	e.mu.RLock()
-	_, suppressed := e.suppressed[key]
+	firedAt, suppressed := e.suppressed[key]
 	e.mu.RUnlock()
-	if suppressed {
+	if suppressed && time.Since(firedAt) < time.Duration(e.cfg.AlertSuppressMinutes)*time.Minute {
 		return
 	}
+	if suppressed {
+		// 抑制期过后允许再次触发离线告警，避免节点长期离线却永远只报一次。
+		e.mu.Lock()
+		delete(e.suppressed, key)
+		e.mu.Unlock()
+	}
 
-	// 检查探针是否已离线超过一定时间（这里告警引擎使用 grpcapi 的心跳数据）
-	// 暂略详细实现，等待集成
-	log.Printf("告警引擎: 探针 %s(%s) 离线", agent.Name, agent.ID)
-	e.fireAlert(agent, "offline", 0, 1)
+	// 离线告警按最后心跳时间和后台配置的离线阈值判断，避免节点刚短暂重连就立刻报警。
+	offlineSeconds := e.settingInt("alert_offline_seconds", e.cfg.HeartbeatTimeout)
+	if agent.LastSeenAt != nil && time.Since(*agent.LastSeenAt) < time.Duration(offlineSeconds)*time.Second {
+		return
+	}
+	log.Printf("告警引擎: 探针 %s(%s) 离线超过 %d 秒", agent.Name, agent.ID, offlineSeconds)
+	e.fireAlert(agent, "offline", float64(offlineSeconds), 1)
+	e.mu.Lock()
+	e.suppressed[key] = time.Now()
+	e.mu.Unlock()
 }
 
 func (e *Engine) checkMetric(agent *store.Agent, metric string, value, threshold, recovery float64, durationSec int) {
@@ -112,9 +155,9 @@ func (e *Engine) checkMetric(agent *store.Agent, metric string, value, threshold
 		delete(e.suppressed, key)
 	}
 
-	// 持续超阈值累计
+	// 持续超阈值累计；检查周期是 5 秒，所以每轮只累加实际检查间隔。
 	if value > threshold {
-		e.exceedDuration[key] += 1 * time.Minute // 每次检查增加 1 分钟
+		e.exceedDuration[key] += alertCheckInterval
 		if e.exceedDuration[key] >= time.Duration(durationSec)*time.Second {
 			// 持续超阈值达到条件，触发告警
 			e.fireAlert(agent, metric, threshold, value)

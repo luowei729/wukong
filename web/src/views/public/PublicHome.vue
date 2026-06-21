@@ -97,7 +97,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import axios from 'axios'
 
@@ -122,6 +122,7 @@ const servers = ref<PublicServer[]>([])
 const generatedAt = ref('')
 const summary = ref({ total: 0, online: 0, offline: 0, avg_cpu: 0, avg_mem: 0, avg_disk: 0 })
 const hasToken = computed(() => Boolean(localStorage.getItem('access_token')))
+let refreshTimer: ReturnType<typeof setInterval> | null = null
 
 const globalStatusClass = computed(() => {
   if (summary.value.total === 0) return 'unknown'
@@ -146,16 +147,16 @@ const summaryCards = computed(() => [
   { label: '平均磁盘', value: `${summary.value.avg_disk || 0}%`, hint: '所有有数据节点' },
 ])
 
-async function loadData() {
-  // 公开首页只访问 /api/public/servers，不携带 JWT，确保未登录也可展示。
-  loading.value = true
+async function loadData(showLoading = false) {
+  // 公开首页只访问 /api/public/servers，不携带 JWT，确保未登录也可展示；定时刷新时不切 loading，避免每秒闪烁。
+  if (showLoading) loading.value = true
   try {
-    const res = await axios.get('/api/public/servers')
+    const res = await axios.get(`/api/public/servers?_=${Date.now()}`)
     servers.value = res.data.servers || []
     summary.value = res.data.summary || summary.value
     generatedAt.value = res.data.generated_at || new Date().toISOString()
   } finally {
-    loading.value = false
+    if (showLoading) loading.value = false
   }
 }
 
@@ -200,7 +201,15 @@ function relativeTime(value?: string) {
   return `${Math.floor(hours / 24)} 天前`
 }
 
-onMounted(loadData)
+onMounted(() => {
+  loadData(true)
+  // 首页状态卡片每秒刷新一次，保证公开展示接近实时。
+  refreshTimer = setInterval(() => loadData(false), 1000)
+})
+
+onUnmounted(() => {
+  if (refreshTimer) clearInterval(refreshTimer)
+})
 </script>
 
 <style scoped>

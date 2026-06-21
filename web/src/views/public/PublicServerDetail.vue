@@ -104,6 +104,7 @@ const loading = ref(false)
 const error = ref('')
 const chartRef = ref<HTMLDivElement>()
 let chart: echarts.ECharts | null = null
+let refreshTimer: ReturnType<typeof setInterval> | null = null
 
 const hasToken = computed(() => Boolean(localStorage.getItem('access_token')))
 const serverID = computed(() => route.params.id as string)
@@ -116,24 +117,24 @@ const currentMetrics = computed(() => [
   { label: '下行', value: `${formatBytes(server.value?.net_down)}/s`, hint: '实时速率' },
 ])
 
-async function loadServer() {
-  // 详情页使用公开接口，不携带管理 token，防止未登录访问被后台鉴权阻断。
-  loading.value = true
+async function loadServer(showLoading = false) {
+  // 详情页使用公开接口，不携带管理 token，防止未登录访问被后台鉴权阻断；定时刷新时静默更新，避免页面闪烁。
+  if (showLoading) loading.value = true
   error.value = ''
   try {
-    const res = await axios.get(`/api/public/servers/${serverID.value}`)
+    const res = await axios.get(`/api/public/servers/${serverID.value}?_=${Date.now()}`)
     server.value = res.data.server
     await loadMetrics()
   } catch (e: any) {
     error.value = e.response?.data?.error || '无法加载服务器详情'
   } finally {
-    loading.value = false
+    if (showLoading) loading.value = false
   }
 }
 
 async function loadMetrics() {
   try {
-    const res = await axios.get(`/api/public/servers/${serverID.value}/metrics?range=24h`)
+    const res = await axios.get(`/api/public/servers/${serverID.value}/metrics?range=24h&_=${Date.now()}`)
     metricPoints.value = res.data.points || []
     await nextTick()
     renderChart()
@@ -217,11 +218,14 @@ function handleResize() {
 }
 
 onMounted(() => {
-  loadServer()
+  loadServer(true)
+  // 详情页当前指标和趋势每秒刷新，保证公开详情接近实时。
+  refreshTimer = setInterval(() => loadServer(false), 1000)
   window.addEventListener('resize', handleResize)
 })
 
 onUnmounted(() => {
+  if (refreshTimer) clearInterval(refreshTimer)
   chart?.dispose()
   window.removeEventListener('resize', handleResize)
 })

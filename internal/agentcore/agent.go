@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net"
 	"os"
 	"sync"
 	"time"
@@ -15,6 +16,7 @@ import (
 	pb "wukong/proto/gen"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/keepalive"
 )
@@ -69,11 +71,9 @@ func NewAgent(cfg *config.AgentConfig) (*Agent, error) {
 
 // Register 使用一次性 token 注册到主控
 func (a *Agent) Register(token string) error {
-	// 连接主控 gRPC 服务
+	// 连接主控 gRPC 服务；443 通过公网 nginx TLS 反代，内网/直连端口继续使用明文 gRPC。
 	conn, err := grpc.Dial(a.cfg.ServerAddr,
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
-		grpc.WithBlock(),
-		grpc.WithTimeout(10*time.Second))
+		append(a.grpcDialOptions(), grpc.WithBlock(), grpc.WithTimeout(10*time.Second))...)
 	if err != nil {
 		return fmt.Errorf("连接主控失败: %w", err)
 	}
@@ -230,17 +230,24 @@ func (a *Agent) reportLoop(ctx context.Context) {
 	}
 }
 
+// grpcDialOptions 按连接地址选择 gRPC 传输方式。
+// 原因：生产环境要求探针通过 443 连接 nginx，此时客户端必须使用 TLS；本地 64443 或内网直连仍保持明文 gRPC。
+func (a *Agent) grpcDialOptions() []grpc.DialOption {
+	_, port, err := net.SplitHostPort(a.cfg.ServerAddr)
+	if err == nil && port == "443" {
+		return []grpc.DialOption{grpc.WithTransportCredentials(credentials.NewClientTLSFromCert(nil, ""))}
+	}
+	return []grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())}
+}
+
 // connect 连接到主控
 func (a *Agent) connect(ctx context.Context) (*grpc.ClientConn, error) {
-	// 使用 insecure 连接（TLS 由 nginx 终结）
-	return grpc.DialContext(ctx, a.cfg.ServerAddr,
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
-		grpc.WithKeepaliveParams(keepalive.ClientParameters{
-			Time:                30 * time.Second,
-			Timeout:             10 * time.Second,
-			PermitWithoutStream: true,
-		}),
-	)
+	options := append(a.grpcDialOptions(), grpc.WithKeepaliveParams(keepalive.ClientParameters{
+		Time:                30 * time.Second,
+		Timeout:             10 * time.Second,
+		PermitWithoutStream: true,
+	}))
+	return grpc.DialContext(ctx, a.cfg.ServerAddr, options...)
 }
 
 // collectAndReport 采集一次并构造上报消息

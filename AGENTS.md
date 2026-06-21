@@ -1,6 +1,6 @@
 # wukong 监控系统 - 开发规范与提示
 
-> 最后更新: 2026-06-21 14:10 (北京时间)
+> 最后更新: 2026-06-21 15:05 (北京时间)
 
 ## 开发原则
 
@@ -54,7 +54,7 @@ wukong/
 | 6 | 存储 | **SQLite**（WAL + 按小时分表 + ping_agg_1min 预聚合 + DROP 清理）+ 内存 latest map |
 | 7 | 部署目录 | **/opt/wukong**，主控单二进制 + 探针单二进制 |
 | 8 | 规模 | **不设硬限**，全套优化 + 背压 + 预留 MetricsStore 接口 |
-| 9 | 采集频率 | **默认 5s，后端可改**，D4 三级回退（探针 > 分组 > 全局） |
+| 9 | 采集频率 | **默认 1s，后端可改**，D4 三级回退（探针 > 分组 > 全局）；公开首页和后台设备页也按 1s 轮询刷新 |
 | 10 | 运营商 Ping | **E1 全局 IP 池 + 双模式**（默认 ICMP，回退 TCP） |
 | 11 | 自定义主题 | **F3 预设 + CSS 变量微调 + Logo/站名/页脚**，全局一份，改后刷新 |
 | 12 | 实时推送 | **SSE 增量帧**（浏览器自动重连，不通回退轮询） |
@@ -79,6 +79,8 @@ wukong/
 - **2026-06-21 13:32（北京时间）**：在线安装脚本下载探针失败 401 的根因是 `/api/agent/binary/{version}/{arch}` 路由注释写无需鉴权但实际包了 JWT `authMiddleware`。已改成只读公开二进制下载接口，仅允许 `amd64`/`arm64`，并由 Docker 镜像内置 `/opt/wukong/bin/wukong-agent-amd64` 与 `wukong-agent-arm64`；本地验证 `/api/agent/binary/latest/amd64` 返回 200 ELF，不再 401。
 - **2026-06-21 13:45（北京时间）**：配置必须写入 SQLite `settings` 表固化，不能只保存在前端或内存；`site_domain` 每次保存都要写库（允许保存为空来关闭安装命令复制），并检查 `SetSetting` 错误。前端读取 `/api/theme` 时必须用后端返回值覆盖输入框，避免清空或保存失败后显示旧值。
 - **2026-06-21 14:10（北京时间）**：生产环境 `server.lkz.pub:443` 当前只验证 HTTP/API 正常，gRPC 注册会超时；`server.lkz.pub:64443` 直连 gRPC 注册和上报已验证成功。因此安装脚本的 Web 下载地址继续使用 `site_domain`，探针注册/上报地址改由 SQLite `agent_server_addr` 固化（格式必须 `host:port`），未配置时才回退按站点域名推导。
+- **2026-06-21 14:43（北京时间）**：页面和 API 响应必须全站带 `Cache-Control: no-store, no-cache, must-revalidate, max-age=0`、`Pragma: no-cache`、`Expires: 0`，公开首页、公开详情页、后台总览、后台设备页每秒静默轮询并给请求加 `?_=${Date.now()}`；默认采集间隔改为 1 秒。管理员修改密码接口为 `PUT /api/auth/password`，必须 JWT 鉴权、校验当前密码，新密码 bcrypt hash 写入 SQLite `settings.admin_password_hash` 固化，登录前优先读取该设置。
+- **2026-06-21 15:05（北京时间）**：生产要求探针只能通过 `server.lkz.pub:443` 连接，不再使用 `64443` 对外直连；探针客户端在目标端口为 443 时使用 TLS gRPC，经 nginx `listen 443 ssl http2` 的 `/wukong.AgentService/` 反代转发到本机 64443，其他端口仍保持明文 gRPC。后台 `agent_server_addr` 生产值应固化为 `server.lkz.pub:443`，安装脚本必须输出 `SERVER_ADDR="server.lkz.pub:443"`。Telegram 设置页不回显 token、不使用 password 类型并提供测试通知；告警阈值页必须显示离线阈值；告警中心空列表要返回/兜底成数组；agent 安装需支持 amd64/arm64，注册后退出并由 systemd 常驻和开机自启；服务器节点名称支持后台自定义修改。
 - **开发后续优先级**：① 探针 Ping 多运营商探测完善 ② Web API 端点完整实现 ③ 告警引擎集成 gRPC 心跳 ④ 前端接入真实 API 数据 ⑤ 安装脚本与升级流程端到端原型
 
 ## 部署相关长期提示

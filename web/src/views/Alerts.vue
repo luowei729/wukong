@@ -4,25 +4,29 @@
     <h2 style="margin-bottom: 20px; font-size: 20px;">告警中心</h2>
 
     <div class="wk-card-solid" style="padding: 20px;">
-      <el-table :data="alertList" stripe style="width: 100%">
-        <el-table-column label="状态" width="80">
+      <el-table :data="alertList" stripe style="width: 100%" v-loading="loading">
+        <el-table-column label="状态" width="90">
           <template #default="{ row }">
             <el-tag :type="row.status === 'firing' ? 'danger' : 'success'" size="small">
               {{ row.status === 'firing' ? '进行中' : '已恢复' }}
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="指标" width="100" prop="metric" />
-        <el-table-column label="阈值" width="80">
-          <template #default="{ row }">{{ row.threshold }}</template>
+        <el-table-column label="指标" width="120">
+          <template #default="{ row }">{{ metricText(row.metric) }}</template>
         </el-table-column>
-        <el-table-column label="当前值" width="80">
-          <template #default="{ row }">{{ row.value?.toFixed(1) }}</template>
+        <el-table-column label="阈值" width="100">
+          <template #default="{ row }">{{ formatValue(row.metric, row.threshold) }}</template>
         </el-table-column>
-        <el-table-column label="触发时间" width="180" prop="fired_at" />
-        <el-table-column label="探针" prop="agent_id" />
+        <el-table-column label="当前值" width="100">
+          <template #default="{ row }">{{ formatValue(row.metric, row.value) }}</template>
+        </el-table-column>
+        <el-table-column label="触发时间" width="190">
+          <template #default="{ row }">{{ formatTime(row.fired_at) }}</template>
+        </el-table-column>
+        <el-table-column label="探针" prop="agent_id" min-width="220" />
       </el-table>
-      <div v-if="alertList.length === 0" style="text-align: center; padding: 40px; color: var(--wk-text-muted);">
+      <div v-if="!loading && alertList.length === 0" style="text-align: center; padding: 40px; color: var(--wk-text-muted);">
         暂无告警
       </div>
     </div>
@@ -30,22 +34,57 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import axios from 'axios'
 
 const alertList = ref<any[]>([])
+const loading = ref(false)
+let refreshTimer: ReturnType<typeof setInterval> | null = null
 
-async function fetchAlerts() {
+function authHeaders() {
+  const token = localStorage.getItem('access_token')
+  return { Authorization: `Bearer ${token}` }
+}
+
+async function fetchAlerts(showLoading = false) {
+  if (showLoading) loading.value = true
   try {
-    const token = localStorage.getItem('access_token')
-    const res = await axios.get('/api/alerts/active', {
-      headers: { Authorization: `Bearer ${token}` },
+    const res = await axios.get(`/api/alerts/active?_=${Date.now()}`, {
+      headers: authHeaders(),
     })
-    alertList.value = res.data
+    // 后端无告警时可能返回 null；前端必须兜底成数组，避免表格闪现后因 .length 报错消失。
+    alertList.value = Array.isArray(res.data) ? res.data : []
   } catch (e) {
     console.error('获取告警列表失败', e)
+    alertList.value = []
+  } finally {
+    if (showLoading) loading.value = false
   }
 }
 
-onMounted(fetchAlerts)
+function metricText(metric: string) {
+  return ({ offline: '离线', cpu: 'CPU', mem: '内存', disk: '磁盘', ping_latency: 'Ping 延迟', ping_loss: 'Ping 丢包' } as Record<string, string>)[metric] || metric
+}
+
+function formatValue(metric: string, value?: number) {
+  if (typeof value !== 'number') return '-'
+  if (metric === 'offline') return value > 1 ? `${value.toFixed(0)} 秒` : '离线'
+  if (metric === 'ping_latency') return `${value.toFixed(1)} ms`
+  return `${value.toFixed(1)}%`
+}
+
+function formatTime(value?: string) {
+  if (!value) return '-'
+  return new Date(value).toLocaleString()
+}
+
+onMounted(() => {
+  fetchAlerts(true)
+  // 告警中心也按秒刷新，配合 no-store 避免页面闪现旧状态后消失。
+  refreshTimer = setInterval(() => fetchAlerts(false), 1000)
+})
+
+onUnmounted(() => {
+  if (refreshTimer) clearInterval(refreshTimer)
+})
 </script>

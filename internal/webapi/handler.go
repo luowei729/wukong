@@ -44,6 +44,10 @@ func NewHandler(s store.MetricsStore, a *auth.Service, ae *alert.Engine, n *noti
 
 // ServeHTTP 实现 http.Handler 接口
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// 全站禁用缓存，避免浏览器或反代缓存旧 HTML/JS/API，导致刷新后仍看不到最新页面和设备数据。
+	w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+	w.Header().Set("Pragma", "no-cache")
+	w.Header().Set("Expires", "0")
 	h.mux.ServeHTTP(w, r)
 }
 
@@ -55,6 +59,7 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	// 鉴权
 	mux.HandleFunc("POST /api/auth/login", h.handleLogin)
 	mux.HandleFunc("POST /api/auth/refresh", h.handleRefreshToken)
+	mux.HandleFunc("PUT /api/auth/password", h.authMiddleware(h.handleChangePassword))
 
 	// 探针管理
 	mux.HandleFunc("GET /api/agents", h.authMiddleware(h.handleListAgents))
@@ -106,6 +111,13 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	// 主题配置
 	mux.HandleFunc("GET /api/theme", h.authMiddleware(h.handleGetTheme))
 	mux.HandleFunc("PUT /api/theme", h.authMiddleware(h.handleUpdateTheme))
+
+	// 通知与告警默认阈值配置
+	mux.HandleFunc("GET /api/telegram", h.authMiddleware(h.handleGetTelegram))
+	mux.HandleFunc("PUT /api/telegram", h.authMiddleware(h.handleUpdateTelegram))
+	mux.HandleFunc("POST /api/telegram/test", h.authMiddleware(h.handleTestTelegram))
+	mux.HandleFunc("GET /api/alert-settings", h.authMiddleware(h.handleGetAlertSettings))
+	mux.HandleFunc("PUT /api/alert-settings", h.authMiddleware(h.handleUpdateAlertSettings))
 
 	// 上传 Logo
 	mux.HandleFunc("POST /api/upload/logo", h.authMiddleware(h.handleUploadLogo))

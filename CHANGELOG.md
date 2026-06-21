@@ -2,6 +2,84 @@
 
 所有变更记录使用北京时间（UTC+8）。
 
+## [2026-06-21 15:05] - 完善 Telegram、告警、探针安装与 443 gRPC 连接
+
+### 改动前总结
+Telegram Bot Token 输入框容易被浏览器密码管理器误填，且缺少测试通知入口；告警设置页没有展示离线报警阈值，报警中心在空告警或异常响应时可能闪现后消失。探针安装链路虽然能直连 64443，但用户要求生产只能通过 443；旧探针客户端对所有地址都使用明文 gRPC，连接 HTTPS/nginx 443 时会失败。同时静态安装脚本仍可能把 `:443` 重复追加到 `SERVER`，节点注册过程会在前台常驻，用户 Ctrl+C 后才继续安装 systemd。
+
+### 改动后总结
+1. Telegram 设置接口新增读取、保存和测试通知；前端不回显 Bot Token，不使用 password 类型输入框，并关闭自动补全，避免密码管理器误填。
+2. 告警阈值接口新增 CPU/内存/磁盘、离线秒数和资源持续时间的 SQLite settings 固化，告警引擎每 5 秒检查并读取最新阈值。
+3. 告警中心后端空列表兜底为空数组，前端 `Array.isArray` 兜底，避免页面闪现后因 `.length` 报错消失。
+4. 探针安装脚本自动识别 `amd64` / `arm64`，注册命令执行成功后退出，由 systemd `enable --now` 后台常驻并设置开机自启。
+5. 探针客户端在目标端口为 `443` 时使用 TLS gRPC，满足 `server.lkz.pub:443` 通过 nginx `ssl http2` 反代；其他端口继续使用明文 gRPC，兼容本地和内网直连。
+6. 静态安装脚本修正 `SERVER` 处理，`SERVER=host:443` 时下载地址使用 `https://host`，注册地址保持 `host:443`，不再拼成 `host:443:443`。
+7. 后台设备页和节点详情页支持自定义服务器节点名称，调用现有 `PUT /api/agents/{id}` 固化保存。
+8. nginx 示例关闭前端页面缓存，并保留 `/wukong.AgentService/` 的 443 gRPC 反代示例。
+
+### 验证结果
+- `go test ./...` 通过。
+- `npm --prefix /root/wukong/web run build` 通过，Vite chunk size warning 不影响本次功能。
+- 曾在项目根目录误执行一次 `npm run build`，因根目录无 `package.json` 失败；随后已用 `npm --prefix /root/wukong/web run build` 正确验证。
+- 构建产生的 `internal/webapi/dist` hash 文件已还原，避免提交旧 dist 删除。
+
+### 涉及文件
+- `cmd/agent/main.go`
+- `internal/agentcore/agent.go`
+- `internal/alert/engine.go`
+- `internal/config/config.go`
+- `internal/notify/notify.go`
+- `internal/webapi/handler.go`
+- `internal/webapi/handlers.go`
+- `deploy/nginx/wukong.conf`
+- `deploy/scripts/install-agent.sh`
+- `web/src/views/Settings.vue`
+- `web/src/views/Alerts.vue`
+- `web/src/views/Nodes.vue`
+- `web/src/views/NodeDetail.vue`
+- `AGENTS.md`
+- `CHANGELOG.md`
+- `PROJECT_PLAN.md`
+- `DEPLOY_CREDENTIALS.md`
+
+---
+
+## [2026-06-21 14:43] - 每秒刷新、禁用缓存并新增密码固化修改
+
+### 改动前总结
+公开首页、公开详情页和后台设备页存在浏览器或反代缓存旧页面/API 的风险，手动刷新后可能仍看不到新版本或最新设备指标；后台设备列表只展示基础节点信息，CPU/内存/磁盘没有合并最新指标。管理员密码只能依赖启动配置或环境变量，缺少后台修改入口，也没有按“配置写入数据库固化”的要求保存到 SQLite。
+
+### 改动后总结
+1. `ServeHTTP` 全站写入 `no-store/no-cache` 响应头，避免 HTML、静态资源和 API 被浏览器或反代缓存。
+2. 公开首页、公开详情页、后台总览、后台设备页改为每秒静默刷新，请求追加 `?_=${Date.now()}`，后台节点页合并 `/api/agents/latest` 显示实时 CPU/内存/磁盘。
+3. 主控默认下发采集间隔和探针默认采集间隔从 5 秒调整为 1 秒，新注册探针默认按秒级上报。
+4. 新增 `PUT /api/auth/password`，JWT 鉴权后校验当前密码，新密码用 bcrypt 生成 hash 并写入 SQLite `settings.admin_password_hash`。
+5. 登录前优先读取数据库固化的 `admin_password_hash` 并同步到内存配置，确保修改密码后立即生效且重启容器后仍使用新密码。
+6. 后台设置页新增“修改密码”页签，提供当前密码、新密码、确认新密码表单。
+
+### 验证计划
+- `curl -I` 检查页面和 API 响应包含 `Cache-Control: no-store, no-cache, must-revalidate, max-age=0`。
+- 无头 Chrome 打开首页、详情页和后台设备页，确认不是白屏且请求会每秒刷新。
+- 修改密码后旧密码登录失败，新密码登录成功；重启主控/容器后新密码仍可登录。
+- `go test ./...` 通过。
+- `cd web && npm run build` 通过。
+
+### 涉及文件
+- `internal/webapi/handler.go`
+- `internal/webapi/handlers.go`
+- `internal/config/config.go`
+- `web/src/views/public/PublicHome.vue`
+- `web/src/views/public/PublicServerDetail.vue`
+- `web/src/views/Dashboard.vue`
+- `web/src/views/Nodes.vue`
+- `web/src/views/Settings.vue`
+- `AGENTS.md`
+- `CHANGELOG.md`
+- `PROJECT_PLAN.md`
+- `DEPLOY_CREDENTIALS.md`
+
+---
+
 ## [2026-06-21 14:10] - 修复探针 gRPC 地址配置并完成远程本机节点验证
 
 ### 改动前总结

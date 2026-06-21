@@ -49,7 +49,7 @@ type ServerConfig struct {
 	DBMaxConnections int `json:"db_max_connections"` // SQLite 最大连接数（写用，默认 1）
 
 	// 探针相关默认值
-	DefaultCollectInterval int `json:"default_collect_interval"` // 默认采集频率（秒，5）
+	DefaultCollectInterval int `json:"default_collect_interval"` // 默认采集频率（秒，1）
 	DefaultPingInterval    int `json:"default_ping_interval"`    // 默认 Ping 频率（秒，60）
 	HeartbeatTimeout       int `json:"heartbeat_timeout"`        // 心跳超时判定离线（秒，30）
 
@@ -61,7 +61,7 @@ type ServerConfig struct {
 
 	// Telemetry
 	DefaultTelegramBotToken string `json:"-"` // 默认 Telegram bot token（开配置不读，从环境变量 TG_BOT_TOKEN 读）
-	DefaultTelegramChatID  int64  `json:"-"` // 默认 Telegram chat ID（从环境变量 TG_CHAT_ID 读）
+	DefaultTelegramChatID   int64  `json:"-"` // 默认 Telegram chat ID（从环境变量 TG_CHAT_ID 读）
 }
 
 // 探针配置
@@ -89,7 +89,7 @@ func DefaultServerConfig() *ServerConfig {
 		JWTAccessExpiry:        "15m",
 		JWTRefreshExpiry:       "168h",
 		DBMaxConnections:       1,
-		DefaultCollectInterval: 5,
+		DefaultCollectInterval: 1,
 		DefaultPingInterval:    60,
 		HeartbeatTimeout:       30,
 		AlertSuppressMinutes:   30,
@@ -101,7 +101,7 @@ func DefaultAgentConfig() *AgentConfig {
 	return &AgentConfig{
 		ServerAddr:      "",
 		DataDir:         filepath.Join(DefaultDir, "agent", "data"),
-		CollectInterval: 5,
+		CollectInterval: 1,
 		PingInterval:    60,
 		BufferMinutes:   10,
 		LogLevel:        "info",

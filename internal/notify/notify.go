@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 )
 
 // Notifier 通知渠道接口
@@ -65,7 +66,7 @@ func NewTelegramNotifier(botToken string, chatID int64) *TelegramNotifier {
 	return &TelegramNotifier{
 		BotToken: botToken,
 		ChatID:   chatID,
-		client:   &http.Client{Timeout: 10},
+		client:   &http.Client{Timeout: 10 * time.Second},
 	}
 }
 

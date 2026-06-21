@@ -18,7 +18,10 @@ import (
 	"time"
 
 	"wukong/internal/auth"
+	"wukong/internal/notify"
 	"wukong/internal/store"
+
+	"golang.org/x/crypto/bcrypt"
 )
 
 // ---- 辅助函数 ----
@@ -50,11 +53,30 @@ func (h *Handler) handleHealth(w http.ResponseWriter, r *http.Request) {
 
 // ---- 鉴权相关 ----
 
+// loadPersistentAdminPasswordHash 从 SQLite 读取已固化的管理员密码 hash。
+// 原因：用户要求配置都写进数据库固化，修改密码后重启容器也必须继续使用新密码。
+func (h *Handler) loadPersistentAdminPasswordHash() error {
+	hash, err := h.store.GetSetting("admin_password_hash")
+	if err != nil {
+		return fmt.Errorf("读取管理员密码设置失败: %w", err)
+	}
+	if strings.TrimSpace(hash) != "" {
+		h.cfg.AdminPasswordHash = hash
+	}
+	return nil
+}
+
 func (h *Handler) handleLogin(w http.ResponseWriter, r *http.Request) {
 	// 解析管理员登录请求，前端登录和后续安装命令生成都依赖真实 JWT。
 	var req auth.LoginRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "请求体解析失败")
+		return
+	}
+
+	// 登录前优先加载数据库固化密码，保证修改密码后即使主控重启也仍用最新 hash。
+	if err := h.loadPersistentAdminPasswordHash(); err != nil {
+		writeError(w, http.StatusInternalServerError, "读取管理员密码失败")
 		return
 	}
 
@@ -70,6 +92,60 @@ func (h *Handler) handleLogin(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) handleRefreshToken(w http.ResponseWriter, r *http.Request) {
 	// 刷新令牌端点预留，当前前端主要使用登录签发的 access token。
 	writeJSON(w, http.StatusNotImplemented, map[string]string{"message": "refresh endpoint 待实现"})
+}
+
+func (h *Handler) handleChangePassword(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		OldPassword string `json:"old_password"`
+		NewPassword string `json:"new_password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "请求体解析失败")
+		return
+	}
+
+	// 修改密码必须同时校验旧密码和新密码强度，避免已登录页面被他人临时操作后直接接管账号。
+	req.OldPassword = strings.TrimSpace(req.OldPassword)
+	if req.OldPassword == "" || req.NewPassword == "" {
+		writeError(w, http.StatusBadRequest, "当前密码和新密码不能为空")
+		return
+	}
+	if len(req.NewPassword) < 8 {
+		writeError(w, http.StatusBadRequest, "新密码至少需要 8 位")
+		return
+	}
+	if req.OldPassword == req.NewPassword {
+		writeError(w, http.StatusBadRequest, "新密码不能与当前密码相同")
+		return
+	}
+
+	// 修改前先加载数据库里的最新 hash，防止用启动时的旧内存值覆盖已经固化的新密码。
+	if err := h.loadPersistentAdminPasswordHash(); err != nil {
+		writeError(w, http.StatusInternalServerError, "读取管理员密码失败")
+		return
+	}
+	if h.cfg.AdminPasswordHash == "" {
+		writeError(w, http.StatusInternalServerError, "管理员密码未设置")
+		return
+	}
+	if err := bcrypt.CompareHashAndPassword([]byte(h.cfg.AdminPasswordHash), []byte(req.OldPassword)); err != nil {
+		writeError(w, http.StatusUnauthorized, "当前密码错误")
+		return
+	}
+
+	// bcrypt hash 写入 SQLite settings 表，随后同步内存配置，让新密码无需重启立即生效。
+	hash, err := bcrypt.GenerateFromPassword([]byte(req.NewPassword), bcrypt.DefaultCost)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "生成密码 hash 失败")
+		return
+	}
+	if err := h.store.SetSetting("admin_password_hash", string(hash)); err != nil {
+		writeError(w, http.StatusInternalServerError, "保存管理员密码失败")
+		return
+	}
+	h.cfg.AdminPasswordHash = string(hash)
+
+	writeJSON(w, http.StatusOK, map[string]string{"message": "密码已修改"})
 }
 
 // ---- 中间件 ----
@@ -521,12 +597,12 @@ SERVER_ADDR=%q
 INSTALL_DIR="/opt/wukong/agent"
 DATA_DIR="$INSTALL_DIR/data"
 
-# 检测架构
+# 检测架构：同时支持 amd64 和 arm64 服务器节点，其他架构直接给出明确错误。
 ARCH=$(uname -m)
 case "$ARCH" in
-    x86_64) ARCH="amd64" ;;
-    aarch64) ARCH="arm64" ;;
-    *) echo "不支持的架构: $ARCH"; exit 1 ;;
+    x86_64|amd64) ARCH="amd64" ;;
+    aarch64|arm64) ARCH="arm64" ;;
+    *) echo "不支持的架构: $ARCH（当前仅支持 amd64 / arm64）"; exit 1 ;;
 esac
 
 # 创建目录
@@ -687,6 +763,9 @@ func (h *Handler) handleListAlerts(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("查询告警失败: %v", err))
 		return
 	}
+	if alerts == nil {
+		alerts = []*store.Alert{}
+	}
 	writeJSON(w, http.StatusOK, alerts)
 }
 
@@ -695,6 +774,9 @@ func (h *Handler) handleListActiveAlerts(w http.ResponseWriter, r *http.Request)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("查询活跃告警失败: %v", err))
 		return
+	}
+	if alerts == nil {
+		alerts = []*store.Alert{}
 	}
 	writeJSON(w, http.StatusOK, alerts)
 }
@@ -866,6 +948,162 @@ func (h *Handler) handleUpdateTheme(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]string{"message": "主题已更新", "site_domain": baseURL, "agent_server_addr": agentAddr})
+}
+
+func (h *Handler) handleGetTelegram(w http.ResponseWriter, r *http.Request) {
+	botToken, _ := h.store.GetSetting("telegram_bot_token")
+	chatID, _ := h.store.GetSetting("telegram_chat_id")
+
+	// 不把已保存的 bot token 回填到前端，避免浏览器密码管理器误填或泄露；前端只显示是否已配置。
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"bot_token":     "",
+		"chat_id":       chatID,
+		"has_bot_token": strings.TrimSpace(botToken) != "",
+	})
+}
+
+func (h *Handler) handleUpdateTelegram(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		BotToken string `json:"bot_token"`
+		ChatID   string `json:"chat_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "请求体解析失败")
+		return
+	}
+
+	chatID := strings.TrimSpace(req.ChatID)
+	if chatID == "" {
+		writeError(w, http.StatusBadRequest, "Chat ID 不能为空")
+		return
+	}
+	if _, err := strconv.ParseInt(chatID, 10, 64); err != nil {
+		writeError(w, http.StatusBadRequest, "Chat ID 必须是数字")
+		return
+	}
+
+	// bot token 留空表示保留数据库中已有值，避免每次打开设置页都要求重新输入敏感 token。
+	if token := strings.TrimSpace(req.BotToken); token != "" {
+		if err := h.store.SetSetting("telegram_bot_token", token); err != nil {
+			writeError(w, http.StatusInternalServerError, "保存 Telegram Bot Token 失败")
+			return
+		}
+	}
+	if err := h.store.SetSetting("telegram_chat_id", chatID); err != nil {
+		writeError(w, http.StatusInternalServerError, "保存 Telegram Chat ID 失败")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"message": "Telegram 配置已保存"})
+}
+
+func (h *Handler) handleTestTelegram(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		BotToken string `json:"bot_token"`
+		ChatID   string `json:"chat_id"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&req)
+
+	botToken := strings.TrimSpace(req.BotToken)
+	if botToken == "" {
+		stored, _ := h.store.GetSetting("telegram_bot_token")
+		botToken = strings.TrimSpace(stored)
+	}
+	chatIDRaw := strings.TrimSpace(req.ChatID)
+	if chatIDRaw == "" {
+		stored, _ := h.store.GetSetting("telegram_chat_id")
+		chatIDRaw = strings.TrimSpace(stored)
+	}
+	if botToken == "" || chatIDRaw == "" {
+		writeError(w, http.StatusBadRequest, "请先填写 Bot Token 和 Chat ID")
+		return
+	}
+	chatID, err := strconv.ParseInt(chatIDRaw, 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "Chat ID 必须是数字")
+		return
+	}
+
+	// 直接使用当前表单值或数据库值发送测试消息，验证 Telegram 网络、token 和 chat_id 是否可用。
+	n := notify.NewTelegramNotifier(botToken, chatID)
+	if err := n.Send(&notify.Message{Title: "wukong 测试通知", Body: "这是一条来自 wukong 后台的 Telegram 测试消息。", Level: "info"}); err != nil {
+		writeError(w, http.StatusBadGateway, fmt.Sprintf("测试通知发送失败: %v", err))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"message": "测试通知已发送"})
+}
+
+func intSettingValue(raw string, fallback int) int {
+	if v, err := strconv.Atoi(strings.TrimSpace(raw)); err == nil {
+		return v
+	}
+	return fallback
+}
+
+func floatSettingValue(raw string, fallback float64) float64 {
+	if v, err := strconv.ParseFloat(strings.TrimSpace(raw), 64); err == nil {
+		return v
+	}
+	return fallback
+}
+
+func (h *Handler) handleGetAlertSettings(w http.ResponseWriter, r *http.Request) {
+	cpu, _ := h.store.GetSetting("alert_cpu_threshold")
+	mem, _ := h.store.GetSetting("alert_mem_threshold")
+	disk, _ := h.store.GetSetting("alert_disk_threshold")
+	offline, _ := h.store.GetSetting("alert_offline_seconds")
+	duration, _ := h.store.GetSetting("alert_metric_duration_seconds")
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"cpu":                     floatSettingValue(cpu, 90),
+		"mem":                     floatSettingValue(mem, 90),
+		"disk":                    floatSettingValue(disk, 90),
+		"offline_seconds":         intSettingValue(offline, h.cfg.HeartbeatTimeout),
+		"metric_duration_seconds": intSettingValue(duration, 60),
+		"suppress_minutes":        h.cfg.AlertSuppressMinutes,
+	})
+}
+
+func (h *Handler) handleUpdateAlertSettings(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		CPU                   float64 `json:"cpu"`
+		Mem                   float64 `json:"mem"`
+		Disk                  float64 `json:"disk"`
+		OfflineSeconds        int     `json:"offline_seconds"`
+		MetricDurationSeconds int     `json:"metric_duration_seconds"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "请求体解析失败")
+		return
+	}
+	if req.CPU <= 0 || req.CPU > 100 || req.Mem <= 0 || req.Mem > 100 || req.Disk <= 0 || req.Disk > 100 {
+		writeError(w, http.StatusBadRequest, "CPU/内存/磁盘阈值必须在 1-100 之间")
+		return
+	}
+	if req.OfflineSeconds < 5 || req.OfflineSeconds > 3600 {
+		writeError(w, http.StatusBadRequest, "离线报警阈值必须在 5-3600 秒之间")
+		return
+	}
+	if req.MetricDurationSeconds < 1 || req.MetricDurationSeconds > 3600 {
+		writeError(w, http.StatusBadRequest, "资源告警持续时间必须在 1-3600 秒之间")
+		return
+	}
+
+	settings := map[string]string{
+		"alert_cpu_threshold":           fmt.Sprintf("%.1f", req.CPU),
+		"alert_mem_threshold":           fmt.Sprintf("%.1f", req.Mem),
+		"alert_disk_threshold":          fmt.Sprintf("%.1f", req.Disk),
+		"alert_offline_seconds":         strconv.Itoa(req.OfflineSeconds),
+		"alert_metric_duration_seconds": strconv.Itoa(req.MetricDurationSeconds),
+	}
+	for key, value := range settings {
+		if err := h.store.SetSetting(key, value); err != nil {
+			writeError(w, http.StatusInternalServerError, "保存告警阈值失败")
+			return
+		}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"message": "告警阈值已保存"})
 }
 
 // ---- 上传 Logo ----

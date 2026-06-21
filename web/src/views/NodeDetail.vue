@@ -7,8 +7,9 @@
     </el-button>
 
     <div style="display: flex; align-items: center; gap: 12px; margin: 16px 0;">
-      <span :class="['wk-status-dot', 'online']" />
+      <span :class="['wk-status-dot', node?.online ? 'online' : 'offline']" />
       <h2 style="font-size: 20px;">{{ nodeName }}</h2>
+      <el-button size="small" type="primary" plain @click="openRename">修改名称</el-button>
     </div>
 
     <!-- 24h Ping K线图 -->
@@ -23,13 +24,51 @@
 import { ref, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRoute } from 'vue-router'
 import { ArrowLeft } from '@element-plus/icons-vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import axios from 'axios'
 import * as echarts from 'echarts'
 
 const route = useRoute()
 const agentId = route.params.id as string
+const node = ref<any | null>(null)
 const nodeName = ref('节点详情')
 const chartRef = ref<HTMLDivElement>()
 let chart: echarts.ECharts | null = null
+
+async function fetchNode() {
+  try {
+    const token = localStorage.getItem('access_token')
+    const res = await axios.get(`/api/agents/${agentId}?_=${Date.now()}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+    node.value = res.data
+    nodeName.value = res.data.name || res.data.hostname || `节点 ${agentId.slice(0, 8)}`
+  } catch (e) {
+    console.error('获取节点详情失败', e)
+  }
+}
+
+async function openRename() {
+  try {
+    const { value } = await ElMessageBox.prompt('请输入新的服务器节点名称', '修改节点名称', {
+      confirmButtonText: '保存',
+      cancelButtonText: '取消',
+      inputValue: nodeName.value,
+      inputPattern: /^.{1,64}$/,
+      inputErrorMessage: '节点名称长度必须为 1-64 个字符',
+    })
+    const token = localStorage.getItem('access_token')
+    await axios.put(`/api/agents/${agentId}`, { name: value }, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+    ElMessage.success('节点名称已保存')
+    await fetchNode()
+  } catch (e: any) {
+    if (e !== 'cancel') {
+      ElMessage.error(e.response?.data?.error || '修改节点名称失败')
+    }
+  }
+}
 
 function initChart() {
   if (!chartRef.value) return
@@ -98,7 +137,7 @@ function initChart() {
 }
 
 onMounted(async () => {
-  nodeName.value = `节点 ${agentId.slice(0, 8)}`
+  await fetchNode()
   await nextTick()
   initChart()
 })

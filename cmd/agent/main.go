@@ -37,12 +37,14 @@ func main() {
 		log.Fatalf("创建探针实例失败: %v", err)
 	}
 
-	// 如果是首次安装（带了 token），先注册
+	// 如果是首次安装（带了 token），只执行注册并退出。
+	// 原因：安装脚本后续还要写入 systemd 并由 systemd 常驻启动；注册命令不能阻塞在前台，避免用户 Ctrl+C 后才继续安装。
 	if *token != "" {
 		if err := agent.Register(*token); err != nil {
 			log.Fatalf("注册到主控失败: %v", err)
 		}
 		log.Println("探针注册成功，个体凭证已保存")
+		return
 	}
 
 	// 启动探针（采集 + 上报 + 指令接收）
