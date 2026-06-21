@@ -2,6 +2,27 @@
 
 所有变更记录使用北京时间（UTC+8）。
 
+## [2026-06-21 11:57] - 修复部署后首页白屏：嵌入 Vite 下划线资源 + SPA 回退
+
+### 改动前总结
+部署后用无头 Chrome 打开首页，HTML 和主 JS 均正常返回，但 Vue 挂载后的 `#app` 内容为空注释。进一步检查网络资源发现 `/assets/_plugin-vue_export-helper-DlAUqK2U.js` 返回 404；该文件是 Vite 动态组件拆包生成的下划线开头资源，本地 dist 存在，但 Go `//go:embed dist/*` 未可靠嵌入下划线文件，导致登录页动态 import 失败白屏。
+
+### 改动后总结
+1. `internal/webapi/handler.go` 将 `//go:embed dist/*` 改为 `//go:embed all:dist`，确保 `_` 开头资源进入单二进制。
+2. 新增 `spaFileServer`，真实存在的静态资源直接返回；缺失的 JS/CSS 等带扩展名文件保留 404；无扩展名前端路由回退到 `index.html`，支持刷新 `/dashboard` 等 history 路由。
+3. 已用无头 Chrome 复现并定位白屏，修复后重新构建验证首页有登录卡片内容。
+4. 顺手修复 `internal/agentcore/agent.go` 中 `log.Println` 误用格式化占位符导致 `go test ./...` vet 失败的问题。
+
+### 涉及文件
+- `internal/webapi/handler.go`
+- `internal/agentcore/agent.go`
+- `AGENTS.md`
+- `CHANGELOG.md`
+- `PROJECT_PLAN.md`
+- `DEPLOY_CREDENTIALS.md`
+
+---
+
 ## [2026-06-21 09:49] - 项目初始化：完整骨架搭建 + 可编译单二进制
 
 ### 改动前总结

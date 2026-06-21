@@ -25,10 +25,10 @@ type Agent struct {
 	client pb.AgentServiceClient
 	conn   *grpc.ClientConn
 
-	mu         sync.RWMutex
-	agentID    string
+	mu          sync.RWMutex
+	agentID     string
 	agentSecret string
-	registered bool
+	registered  bool
 
 	// 缓冲
 	buffer     []*pb.MetricsReport
@@ -125,7 +125,7 @@ func (a *Agent) Start(ctx context.Context) error {
 	// 启动 gRPC 连接和上报循环
 	go a.reportLoop(ctx)
 
-	log.Println("探针已启动，采集频率: %ds", a.cfg.CollectInterval)
+	log.Printf("探针已启动，采集频率: %ds", a.cfg.CollectInterval)
 	return nil
 }
 
@@ -341,6 +341,8 @@ func getArch() string {
 }
 
 func minDuration(a, b time.Duration) time.Duration {
-	if a < b { return a }
+	if a < b {
+		return a
+	}
 	return b
 }

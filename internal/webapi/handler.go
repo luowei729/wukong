@@ -7,15 +7,17 @@ import (
 	"io/fs"
 	"log"
 	"net/http"
+	"path"
+	"strings"
 
-	"wukong/internal/auth"
 	"wukong/internal/alert"
+	"wukong/internal/auth"
+	"wukong/internal/config"
 	"wukong/internal/notify"
 	"wukong/internal/store"
-	"wukong/internal/config"
 )
 
-//go:embed dist/*
+//go:embed all:dist
 var distFS embed.FS
 
 type Handler struct {
@@ -120,6 +122,37 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 		log.Printf("无法加载 embedded 前端资源: %v", err)
 		return
 	}
+	mux.Handle("GET /", spaFileServer(staticFS))
+}
+
+// spaFileServer 返回前端静态资源处理器。
+// 原因：Vue Router 使用 history 模式，用户刷新 /dashboard 等前端路由时，
+// 后端静态文件系统里没有同名文件；此时必须回退到 index.html，让前端路由接管。
+// 同时 Vite 可能生成以下划线开头的资源文件，所以 distFS 必须用 all:dist 嵌入。
+func spaFileServer(staticFS fs.FS) http.Handler {
 	fileServer := http.FileServer(http.FS(staticFS))
-	mux.Handle("GET /", fileServer)
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		cleanPath := strings.TrimPrefix(path.Clean(r.URL.Path), "/")
+		if cleanPath == "." || cleanPath == "" {
+			cleanPath = "index.html"
+		}
+
+		// 如果请求的静态资源真实存在，直接交给 FileServer 输出，保留正确的缓存和 Content-Type 行为。
+		if file, err := staticFS.Open(cleanPath); err == nil {
+			_ = file.Close()
+			fileServer.ServeHTTP(w, r)
+			return
+		}
+
+		// API 或带扩展名的静态资源缺失时返回 404，避免把真正的资源错误伪装成 index.html。
+		if strings.HasPrefix(cleanPath, "api/") || path.Ext(cleanPath) != "" {
+			http.NotFound(w, r)
+			return
+		}
+
+		// 其余未知路径按 SPA 路由处理，防止浏览器刷新 /dashboard 等前端页面出现 404/白屏。
+		r.URL.Path = "/"
+		fileServer.ServeHTTP(w, r)
+	})
 }
