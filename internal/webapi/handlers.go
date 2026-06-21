@@ -203,8 +203,10 @@ func (h *Handler) handleGetAgent(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) handleUpdateAgent(w http.ResponseWriter, r *http.Request) {
 	id := getPathValue(r, "id")
 	var agent struct {
-		Name    string  `json:"name"`
-		GroupID *string `json:"group_id"`
+		Name        *string `json:"name"`
+		GroupID     *string `json:"group_id"`
+		CollectIntv *int    `json:"collect_intv"`
+		PingIntv    *int    `json:"ping_intv"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&agent); err != nil {
 		writeError(w, http.StatusBadRequest, "请求体解析失败")
@@ -218,11 +220,30 @@ func (h *Handler) handleUpdateAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 更新字段
-	if agent.Name != "" {
-		existing.Name = agent.Name
+	// 更新字段；采集和 Ping 频率会写入 SQLite 固化，新注册/重启探针后通过配置生效。
+	if agent.Name != nil {
+		name := strings.TrimSpace(*agent.Name)
+		if name == "" || len([]rune(name)) > 64 {
+			writeError(w, http.StatusBadRequest, "节点名称长度必须为 1-64 个字符")
+			return
+		}
+		existing.Name = name
 	}
 	existing.GroupID = agent.GroupID
+	if agent.CollectIntv != nil {
+		if *agent.CollectIntv < 1 || *agent.CollectIntv > 3600 {
+			writeError(w, http.StatusBadRequest, "采集频率必须在 1-3600 秒之间")
+			return
+		}
+		existing.CollectIntv = agent.CollectIntv
+	}
+	if agent.PingIntv != nil {
+		if *agent.PingIntv < 5 || *agent.PingIntv > 3600 {
+			writeError(w, http.StatusBadRequest, "Ping 频率必须在 5-3600 秒之间")
+			return
+		}
+		existing.PingIntv = agent.PingIntv
+	}
 
 	if err := h.store.UpdateAgent(existing); err != nil {
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("更新探针失败: %v", err))
@@ -342,6 +363,10 @@ func (h *Handler) handleCreateISPTarget(w http.ResponseWriter, r *http.Request) 
 		Name: target.Name, IP: target.IP, Port: target.Port,
 		Mode: target.Mode, Enabled: target.Enabled,
 	}
+	if err := validateISPTarget(t); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	id, err := h.store.CreateISPTarget(t)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("创建 ISP 目标失败: %v", err))
@@ -363,6 +388,10 @@ func (h *Handler) handleUpdateISPTarget(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	target.ID = id
+	if err := validateISPTarget(&target); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	if err := h.store.UpdateISPTarget(&target); err != nil {
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("更新 ISP 目标失败: %v", err))
 		return
@@ -382,6 +411,35 @@ func (h *Handler) handleDeleteISPTarget(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"message": "已删除"})
+}
+
+func validateISPTarget(target *store.ISPTarget) error {
+	// 运营商目标会下发到探针执行网络探测，必须在入库前约束模式和端口范围。
+	if target == nil {
+		return fmt.Errorf("运营商目标不能为空")
+	}
+	target.Name = strings.TrimSpace(target.Name)
+	target.IP = strings.TrimSpace(target.IP)
+	target.Mode = strings.ToLower(strings.TrimSpace(target.Mode))
+	if target.Name == "" {
+		return fmt.Errorf("运营商名称不能为空")
+	}
+	if target.IP == "" {
+		return fmt.Errorf("目标 IP 或域名不能为空")
+	}
+	if target.Mode == "" {
+		target.Mode = "auto"
+	}
+	if target.Mode != "auto" && target.Mode != "icmp" && target.Mode != "tcp" {
+		return fmt.Errorf("探测模式必须是 auto、icmp 或 tcp")
+	}
+	if target.Port == 0 {
+		target.Port = 80
+	}
+	if target.Port < 1 || target.Port > 65535 {
+		return fmt.Errorf("端口必须在 1-65535 之间")
+	}
+	return nil
 }
 
 // ---- 设置 ----

@@ -151,6 +151,8 @@ type RegisterResponse struct {
 	CollectInterval int32                  `protobuf:"varint,3,opt,name=collect_interval,json=collectInterval,proto3" json:"collect_interval,omitempty"` // 采集频率（秒）
 	ServerName      string                 `protobuf:"bytes,4,opt,name=server_name,json=serverName,proto3" json:"server_name,omitempty"`                 // 注册时探针名称（hostname）
 	ExpiresAt       int64                  `protobuf:"varint,5,opt,name=expires_at,json=expiresAt,proto3" json:"expires_at,omitempty"`                   // 个体凭证过期时间戳
+	PingInterval    int32                  `protobuf:"varint,6,opt,name=ping_interval,json=pingInterval,proto3" json:"ping_interval,omitempty"`          // Ping 频率（秒）
+	PingTargets     []*PingTarget          `protobuf:"bytes,7,rep,name=ping_targets,json=pingTargets,proto3" json:"ping_targets,omitempty"`              // 启用的运营商 Ping 目标
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache
 }
@@ -220,23 +222,127 @@ func (x *RegisterResponse) GetExpiresAt() int64 {
 	return 0
 }
 
-// 单次采样的系统指标
-type SystemMetric struct {
+func (x *RegisterResponse) GetPingInterval() int32 {
+	if x != nil {
+		return x.PingInterval
+	}
+	return 0
+}
+
+func (x *RegisterResponse) GetPingTargets() []*PingTarget {
+	if x != nil {
+		return x.PingTargets
+	}
+	return nil
+}
+
+// 运营商 Ping 目标配置
+type PingTarget struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Timestamp     int64                  `protobuf:"varint,1,opt,name=timestamp,proto3" json:"timestamp,omitempty"`                         // Unix 时间戳（秒）
-	CpuPercent    float64                `protobuf:"fixed64,2,opt,name=cpu_percent,json=cpuPercent,proto3" json:"cpu_percent,omitempty"`    // CPU 使用率 %
-	MemPercent    float64                `protobuf:"fixed64,3,opt,name=mem_percent,json=memPercent,proto3" json:"mem_percent,omitempty"`    // 内存使用率 %
-	DiskPercent   float64                `protobuf:"fixed64,4,opt,name=disk_percent,json=diskPercent,proto3" json:"disk_percent,omitempty"` // 磁盘使用率 %
-	NetUpBps      int64                  `protobuf:"varint,5,opt,name=net_up_bps,json=netUpBps,proto3" json:"net_up_bps,omitempty"`         // 网络上行 bps
-	NetDownBps    int64                  `protobuf:"varint,6,opt,name=net_down_bps,json=netDownBps,proto3" json:"net_down_bps,omitempty"`   // 网络下行 bps
-	OsVersion     string                 `protobuf:"bytes,7,opt,name=os_version,json=osVersion,proto3" json:"os_version,omitempty"`         // 操作系统版本
+	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`        // 运营商名称
+	Ip            string                 `protobuf:"bytes,2,opt,name=ip,proto3" json:"ip,omitempty"`            // 目标 IP 或域名
+	Port          int32                  `protobuf:"varint,3,opt,name=port,proto3" json:"port,omitempty"`       // TCP 探测端口
+	Mode          string                 `protobuf:"bytes,4,opt,name=mode,proto3" json:"mode,omitempty"`        // auto/icmp/tcp
+	Enabled       bool                   `protobuf:"varint,5,opt,name=enabled,proto3" json:"enabled,omitempty"` // 是否启用
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
+func (x *PingTarget) Reset() {
+	*x = PingTarget{}
+	mi := &file_wukong_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PingTarget) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PingTarget) ProtoMessage() {}
+
+func (x *PingTarget) ProtoReflect() protoreflect.Message {
+	mi := &file_wukong_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PingTarget.ProtoReflect.Descriptor instead.
+func (*PingTarget) Descriptor() ([]byte, []int) {
+	return file_wukong_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *PingTarget) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *PingTarget) GetIp() string {
+	if x != nil {
+		return x.Ip
+	}
+	return ""
+}
+
+func (x *PingTarget) GetPort() int32 {
+	if x != nil {
+		return x.Port
+	}
+	return 0
+}
+
+func (x *PingTarget) GetMode() string {
+	if x != nil {
+		return x.Mode
+	}
+	return ""
+}
+
+func (x *PingTarget) GetEnabled() bool {
+	if x != nil {
+		return x.Enabled
+	}
+	return false
+}
+
+// 单次采样的系统指标
+type SystemMetric struct {
+	state             protoimpl.MessageState `protogen:"open.v1"`
+	Timestamp         int64                  `protobuf:"varint,1,opt,name=timestamp,proto3" json:"timestamp,omitempty"`                                               // Unix 时间戳（秒）
+	CpuPercent        float64                `protobuf:"fixed64,2,opt,name=cpu_percent,json=cpuPercent,proto3" json:"cpu_percent,omitempty"`                          // CPU 使用率 %
+	MemPercent        float64                `protobuf:"fixed64,3,opt,name=mem_percent,json=memPercent,proto3" json:"mem_percent,omitempty"`                          // 内存使用率 %
+	DiskPercent       float64                `protobuf:"fixed64,4,opt,name=disk_percent,json=diskPercent,proto3" json:"disk_percent,omitempty"`                       // 磁盘使用率 %
+	NetUpBps          int64                  `protobuf:"varint,5,opt,name=net_up_bps,json=netUpBps,proto3" json:"net_up_bps,omitempty"`                               // 网络上行 bps
+	NetDownBps        int64                  `protobuf:"varint,6,opt,name=net_down_bps,json=netDownBps,proto3" json:"net_down_bps,omitempty"`                         // 网络下行 bps
+	OsVersion         string                 `protobuf:"bytes,7,opt,name=os_version,json=osVersion,proto3" json:"os_version,omitempty"`                               // 操作系统版本
+	UptimeSeconds     int64                  `protobuf:"varint,8,opt,name=uptime_seconds,json=uptimeSeconds,proto3" json:"uptime_seconds,omitempty"`                  // 运行时长（秒）
+	BootTime          int64                  `protobuf:"varint,9,opt,name=boot_time,json=bootTime,proto3" json:"boot_time,omitempty"`                                 // 启动时间 Unix 时间戳（秒）
+	MemTotalBytes     int64                  `protobuf:"varint,10,opt,name=mem_total_bytes,json=memTotalBytes,proto3" json:"mem_total_bytes,omitempty"`               // 内存总量
+	DiskTotalBytes    int64                  `protobuf:"varint,11,opt,name=disk_total_bytes,json=diskTotalBytes,proto3" json:"disk_total_bytes,omitempty"`            // 根分区磁盘总量
+	CpuModel          string                 `protobuf:"bytes,12,opt,name=cpu_model,json=cpuModel,proto3" json:"cpu_model,omitempty"`                                 // CPU 型号
+	CpuCores          int32                  `protobuf:"varint,13,opt,name=cpu_cores,json=cpuCores,proto3" json:"cpu_cores,omitempty"`                                // CPU 核心数
+	Load1             float64                `protobuf:"fixed64,14,opt,name=load1,proto3" json:"load1,omitempty"`                                                     // 1 分钟负载
+	Load5             float64                `protobuf:"fixed64,15,opt,name=load5,proto3" json:"load5,omitempty"`                                                     // 5 分钟负载
+	Load15            float64                `protobuf:"fixed64,16,opt,name=load15,proto3" json:"load15,omitempty"`                                                   // 15 分钟负载
+	NetUpTotalBytes   int64                  `protobuf:"varint,17,opt,name=net_up_total_bytes,json=netUpTotalBytes,proto3" json:"net_up_total_bytes,omitempty"`       // 累计上传字节
+	NetDownTotalBytes int64                  `protobuf:"varint,18,opt,name=net_down_total_bytes,json=netDownTotalBytes,proto3" json:"net_down_total_bytes,omitempty"` // 累计下载字节
+	Region            string                 `protobuf:"bytes,19,opt,name=region,proto3" json:"region,omitempty"`                                                     // 节点区域（手动配置）
+	Platform          string                 `protobuf:"bytes,20,opt,name=platform,proto3" json:"platform,omitempty"`                                                 // 系统平台，如 ubuntu
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
+}
+
 func (x *SystemMetric) Reset() {
 	*x = SystemMetric{}
-	mi := &file_wukong_proto_msgTypes[2]
+	mi := &file_wukong_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -248,7 +354,7 @@ func (x *SystemMetric) String() string {
 func (*SystemMetric) ProtoMessage() {}
 
 func (x *SystemMetric) ProtoReflect() protoreflect.Message {
-	mi := &file_wukong_proto_msgTypes[2]
+	mi := &file_wukong_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -261,7 +367,7 @@ func (x *SystemMetric) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SystemMetric.ProtoReflect.Descriptor instead.
 func (*SystemMetric) Descriptor() ([]byte, []int) {
-	return file_wukong_proto_rawDescGZIP(), []int{2}
+	return file_wukong_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *SystemMetric) GetTimestamp() int64 {
@@ -313,6 +419,97 @@ func (x *SystemMetric) GetOsVersion() string {
 	return ""
 }
 
+func (x *SystemMetric) GetUptimeSeconds() int64 {
+	if x != nil {
+		return x.UptimeSeconds
+	}
+	return 0
+}
+
+func (x *SystemMetric) GetBootTime() int64 {
+	if x != nil {
+		return x.BootTime
+	}
+	return 0
+}
+
+func (x *SystemMetric) GetMemTotalBytes() int64 {
+	if x != nil {
+		return x.MemTotalBytes
+	}
+	return 0
+}
+
+func (x *SystemMetric) GetDiskTotalBytes() int64 {
+	if x != nil {
+		return x.DiskTotalBytes
+	}
+	return 0
+}
+
+func (x *SystemMetric) GetCpuModel() string {
+	if x != nil {
+		return x.CpuModel
+	}
+	return ""
+}
+
+func (x *SystemMetric) GetCpuCores() int32 {
+	if x != nil {
+		return x.CpuCores
+	}
+	return 0
+}
+
+func (x *SystemMetric) GetLoad1() float64 {
+	if x != nil {
+		return x.Load1
+	}
+	return 0
+}
+
+func (x *SystemMetric) GetLoad5() float64 {
+	if x != nil {
+		return x.Load5
+	}
+	return 0
+}
+
+func (x *SystemMetric) GetLoad15() float64 {
+	if x != nil {
+		return x.Load15
+	}
+	return 0
+}
+
+func (x *SystemMetric) GetNetUpTotalBytes() int64 {
+	if x != nil {
+		return x.NetUpTotalBytes
+	}
+	return 0
+}
+
+func (x *SystemMetric) GetNetDownTotalBytes() int64 {
+	if x != nil {
+		return x.NetDownTotalBytes
+	}
+	return 0
+}
+
+func (x *SystemMetric) GetRegion() string {
+	if x != nil {
+		return x.Region
+	}
+	return ""
+}
+
+func (x *SystemMetric) GetPlatform() string {
+	if x != nil {
+		return x.Platform
+	}
+	return ""
+}
+
 // 单次 Ping 探测结果
 type PingMetric struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -328,7 +525,7 @@ type PingMetric struct {
 
 func (x *PingMetric) Reset() {
 	*x = PingMetric{}
-	mi := &file_wukong_proto_msgTypes[3]
+	mi := &file_wukong_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -340,7 +537,7 @@ func (x *PingMetric) String() string {
 func (*PingMetric) ProtoMessage() {}
 
 func (x *PingMetric) ProtoReflect() protoreflect.Message {
-	mi := &file_wukong_proto_msgTypes[3]
+	mi := &file_wukong_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -353,7 +550,7 @@ func (x *PingMetric) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PingMetric.ProtoReflect.Descriptor instead.
 func (*PingMetric) Descriptor() ([]byte, []int) {
-	return file_wukong_proto_rawDescGZIP(), []int{3}
+	return file_wukong_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *PingMetric) GetTimestamp() int64 {
@@ -412,7 +609,7 @@ type MetricsReport struct {
 
 func (x *MetricsReport) Reset() {
 	*x = MetricsReport{}
-	mi := &file_wukong_proto_msgTypes[4]
+	mi := &file_wukong_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -424,7 +621,7 @@ func (x *MetricsReport) String() string {
 func (*MetricsReport) ProtoMessage() {}
 
 func (x *MetricsReport) ProtoReflect() protoreflect.Message {
-	mi := &file_wukong_proto_msgTypes[4]
+	mi := &file_wukong_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -437,7 +634,7 @@ func (x *MetricsReport) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MetricsReport.ProtoReflect.Descriptor instead.
 func (*MetricsReport) Descriptor() ([]byte, []int) {
-	return file_wukong_proto_rawDescGZIP(), []int{4}
+	return file_wukong_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *MetricsReport) GetAgentId() string {
@@ -490,7 +687,7 @@ type SignedCommand struct {
 
 func (x *SignedCommand) Reset() {
 	*x = SignedCommand{}
-	mi := &file_wukong_proto_msgTypes[5]
+	mi := &file_wukong_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -502,7 +699,7 @@ func (x *SignedCommand) String() string {
 func (*SignedCommand) ProtoMessage() {}
 
 func (x *SignedCommand) ProtoReflect() protoreflect.Message {
-	mi := &file_wukong_proto_msgTypes[5]
+	mi := &file_wukong_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -515,7 +712,7 @@ func (x *SignedCommand) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SignedCommand.ProtoReflect.Descriptor instead.
 func (*SignedCommand) Descriptor() ([]byte, []int) {
-	return file_wukong_proto_rawDescGZIP(), []int{5}
+	return file_wukong_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *SignedCommand) GetCommandId() string {
@@ -572,7 +769,7 @@ type CommandResult struct {
 
 func (x *CommandResult) Reset() {
 	*x = CommandResult{}
-	mi := &file_wukong_proto_msgTypes[6]
+	mi := &file_wukong_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -584,7 +781,7 @@ func (x *CommandResult) String() string {
 func (*CommandResult) ProtoMessage() {}
 
 func (x *CommandResult) ProtoReflect() protoreflect.Message {
-	mi := &file_wukong_proto_msgTypes[6]
+	mi := &file_wukong_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -597,7 +794,7 @@ func (x *CommandResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CommandResult.ProtoReflect.Descriptor instead.
 func (*CommandResult) Descriptor() ([]byte, []int) {
-	return file_wukong_proto_rawDescGZIP(), []int{6}
+	return file_wukong_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *CommandResult) GetCommandId() string {
@@ -635,7 +832,7 @@ type AgentFrame struct {
 
 func (x *AgentFrame) Reset() {
 	*x = AgentFrame{}
-	mi := &file_wukong_proto_msgTypes[7]
+	mi := &file_wukong_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -647,7 +844,7 @@ func (x *AgentFrame) String() string {
 func (*AgentFrame) ProtoMessage() {}
 
 func (x *AgentFrame) ProtoReflect() protoreflect.Message {
-	mi := &file_wukong_proto_msgTypes[7]
+	mi := &file_wukong_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -660,7 +857,7 @@ func (x *AgentFrame) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentFrame.ProtoReflect.Descriptor instead.
 func (*AgentFrame) Descriptor() ([]byte, []int) {
-	return file_wukong_proto_rawDescGZIP(), []int{7}
+	return file_wukong_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *AgentFrame) GetFrame() isAgentFrame_Frame {
@@ -718,7 +915,7 @@ type ServerFrame struct {
 
 func (x *ServerFrame) Reset() {
 	*x = ServerFrame{}
-	mi := &file_wukong_proto_msgTypes[8]
+	mi := &file_wukong_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -730,7 +927,7 @@ func (x *ServerFrame) String() string {
 func (*ServerFrame) ProtoMessage() {}
 
 func (x *ServerFrame) ProtoReflect() protoreflect.Message {
-	mi := &file_wukong_proto_msgTypes[8]
+	mi := &file_wukong_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -743,7 +940,7 @@ func (x *ServerFrame) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ServerFrame.ProtoReflect.Descriptor instead.
 func (*ServerFrame) Descriptor() ([]byte, []int) {
-	return file_wukong_proto_rawDescGZIP(), []int{8}
+	return file_wukong_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *ServerFrame) GetFrame() isServerFrame_Frame {
@@ -799,7 +996,7 @@ type SignRequest struct {
 
 func (x *SignRequest) Reset() {
 	*x = SignRequest{}
-	mi := &file_wukong_proto_msgTypes[9]
+	mi := &file_wukong_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -811,7 +1008,7 @@ func (x *SignRequest) String() string {
 func (*SignRequest) ProtoMessage() {}
 
 func (x *SignRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_wukong_proto_msgTypes[9]
+	mi := &file_wukong_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -824,7 +1021,7 @@ func (x *SignRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SignRequest.ProtoReflect.Descriptor instead.
 func (*SignRequest) Descriptor() ([]byte, []int) {
-	return file_wukong_proto_rawDescGZIP(), []int{9}
+	return file_wukong_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *SignRequest) GetCommandType() string {
@@ -862,7 +1059,7 @@ type SignResponse struct {
 
 func (x *SignResponse) Reset() {
 	*x = SignResponse{}
-	mi := &file_wukong_proto_msgTypes[10]
+	mi := &file_wukong_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -874,7 +1071,7 @@ func (x *SignResponse) String() string {
 func (*SignResponse) ProtoMessage() {}
 
 func (x *SignResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_wukong_proto_msgTypes[10]
+	mi := &file_wukong_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -887,7 +1084,7 @@ func (x *SignResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SignResponse.ProtoReflect.Descriptor instead.
 func (*SignResponse) Descriptor() ([]byte, []int) {
-	return file_wukong_proto_rawDescGZIP(), []int{10}
+	return file_wukong_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *SignResponse) GetSignature() []byte {
@@ -934,7 +1131,7 @@ const file_wukong_proto_rawDesc = "" +
 	"\x05token\x18\x01 \x01(\tR\x05token\x12\x1a\n" +
 	"\bhostname\x18\x02 \x01(\tR\bhostname\x12#\n" +
 	"\ragent_version\x18\x03 \x01(\tR\fagentVersion\x12\x12\n" +
-	"\x04arch\x18\x04 \x01(\tR\x04arch\"\xbb\x01\n" +
+	"\x04arch\x18\x04 \x01(\tR\x04arch\"\x97\x02\n" +
 	"\x10RegisterResponse\x12\x19\n" +
 	"\bagent_id\x18\x01 \x01(\tR\aagentId\x12!\n" +
 	"\fagent_secret\x18\x02 \x01(\tR\vagentSecret\x12)\n" +
@@ -942,7 +1139,16 @@ const file_wukong_proto_rawDesc = "" +
 	"\vserver_name\x18\x04 \x01(\tR\n" +
 	"serverName\x12\x1d\n" +
 	"\n" +
-	"expires_at\x18\x05 \x01(\x03R\texpiresAt\"\xf0\x01\n" +
+	"expires_at\x18\x05 \x01(\x03R\texpiresAt\x12#\n" +
+	"\rping_interval\x18\x06 \x01(\x05R\fpingInterval\x125\n" +
+	"\fping_targets\x18\a \x03(\v2\x12.wukong.PingTargetR\vpingTargets\"r\n" +
+	"\n" +
+	"PingTarget\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12\x0e\n" +
+	"\x02ip\x18\x02 \x01(\tR\x02ip\x12\x12\n" +
+	"\x04port\x18\x03 \x01(\x05R\x04port\x12\x12\n" +
+	"\x04mode\x18\x04 \x01(\tR\x04mode\x12\x18\n" +
+	"\aenabled\x18\x05 \x01(\bR\aenabled\"\x96\x05\n" +
 	"\fSystemMetric\x12\x1c\n" +
 	"\ttimestamp\x18\x01 \x01(\x03R\ttimestamp\x12\x1f\n" +
 	"\vcpu_percent\x18\x02 \x01(\x01R\n" +
@@ -955,7 +1161,21 @@ const file_wukong_proto_rawDesc = "" +
 	"\fnet_down_bps\x18\x06 \x01(\x03R\n" +
 	"netDownBps\x12\x1d\n" +
 	"\n" +
-	"os_version\x18\a \x01(\tR\tosVersion\"\xbb\x01\n" +
+	"os_version\x18\a \x01(\tR\tosVersion\x12%\n" +
+	"\x0euptime_seconds\x18\b \x01(\x03R\ruptimeSeconds\x12\x1b\n" +
+	"\tboot_time\x18\t \x01(\x03R\bbootTime\x12&\n" +
+	"\x0fmem_total_bytes\x18\n" +
+	" \x01(\x03R\rmemTotalBytes\x12(\n" +
+	"\x10disk_total_bytes\x18\v \x01(\x03R\x0ediskTotalBytes\x12\x1b\n" +
+	"\tcpu_model\x18\f \x01(\tR\bcpuModel\x12\x1b\n" +
+	"\tcpu_cores\x18\r \x01(\x05R\bcpuCores\x12\x14\n" +
+	"\x05load1\x18\x0e \x01(\x01R\x05load1\x12\x14\n" +
+	"\x05load5\x18\x0f \x01(\x01R\x05load5\x12\x16\n" +
+	"\x06load15\x18\x10 \x01(\x01R\x06load15\x12+\n" +
+	"\x12net_up_total_bytes\x18\x11 \x01(\x03R\x0fnetUpTotalBytes\x12/\n" +
+	"\x14net_down_total_bytes\x18\x12 \x01(\x03R\x11netDownTotalBytes\x12\x16\n" +
+	"\x06region\x18\x13 \x01(\tR\x06region\x12\x1a\n" +
+	"\bplatform\x18\x14 \x01(\tR\bplatform\"\xbb\x01\n" +
 	"\n" +
 	"PingMetric\x12\x1c\n" +
 	"\ttimestamp\x18\x01 \x01(\x03R\ttimestamp\x12\x19\n" +
@@ -1031,39 +1251,41 @@ func file_wukong_proto_rawDescGZIP() []byte {
 }
 
 var file_wukong_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_wukong_proto_msgTypes = make([]protoimpl.MessageInfo, 11)
+var file_wukong_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
 var file_wukong_proto_goTypes = []any{
 	(CommandType)(0),         // 0: wukong.CommandType
 	(*RegisterRequest)(nil),  // 1: wukong.RegisterRequest
 	(*RegisterResponse)(nil), // 2: wukong.RegisterResponse
-	(*SystemMetric)(nil),     // 3: wukong.SystemMetric
-	(*PingMetric)(nil),       // 4: wukong.PingMetric
-	(*MetricsReport)(nil),    // 5: wukong.MetricsReport
-	(*SignedCommand)(nil),    // 6: wukong.SignedCommand
-	(*CommandResult)(nil),    // 7: wukong.CommandResult
-	(*AgentFrame)(nil),       // 8: wukong.AgentFrame
-	(*ServerFrame)(nil),      // 9: wukong.ServerFrame
-	(*SignRequest)(nil),      // 10: wukong.SignRequest
-	(*SignResponse)(nil),     // 11: wukong.SignResponse
+	(*PingTarget)(nil),       // 3: wukong.PingTarget
+	(*SystemMetric)(nil),     // 4: wukong.SystemMetric
+	(*PingMetric)(nil),       // 5: wukong.PingMetric
+	(*MetricsReport)(nil),    // 6: wukong.MetricsReport
+	(*SignedCommand)(nil),    // 7: wukong.SignedCommand
+	(*CommandResult)(nil),    // 8: wukong.CommandResult
+	(*AgentFrame)(nil),       // 9: wukong.AgentFrame
+	(*ServerFrame)(nil),      // 10: wukong.ServerFrame
+	(*SignRequest)(nil),      // 11: wukong.SignRequest
+	(*SignResponse)(nil),     // 12: wukong.SignResponse
 }
 var file_wukong_proto_depIdxs = []int32{
-	3,  // 0: wukong.MetricsReport.system:type_name -> wukong.SystemMetric
-	4,  // 1: wukong.MetricsReport.pings:type_name -> wukong.PingMetric
-	0,  // 2: wukong.SignedCommand.command_type:type_name -> wukong.CommandType
-	5,  // 3: wukong.AgentFrame.metrics_report:type_name -> wukong.MetricsReport
-	7,  // 4: wukong.AgentFrame.command_result:type_name -> wukong.CommandResult
-	6,  // 5: wukong.ServerFrame.signed_command:type_name -> wukong.SignedCommand
-	1,  // 6: wukong.AgentService.Register:input_type -> wukong.RegisterRequest
-	8,  // 7: wukong.AgentService.ReportStream:input_type -> wukong.AgentFrame
-	10, // 8: wukong.SignerService.Sign:input_type -> wukong.SignRequest
-	2,  // 9: wukong.AgentService.Register:output_type -> wukong.RegisterResponse
-	9,  // 10: wukong.AgentService.ReportStream:output_type -> wukong.ServerFrame
-	11, // 11: wukong.SignerService.Sign:output_type -> wukong.SignResponse
-	9,  // [9:12] is the sub-list for method output_type
-	6,  // [6:9] is the sub-list for method input_type
-	6,  // [6:6] is the sub-list for extension type_name
-	6,  // [6:6] is the sub-list for extension extendee
-	0,  // [0:6] is the sub-list for field type_name
+	3,  // 0: wukong.RegisterResponse.ping_targets:type_name -> wukong.PingTarget
+	4,  // 1: wukong.MetricsReport.system:type_name -> wukong.SystemMetric
+	5,  // 2: wukong.MetricsReport.pings:type_name -> wukong.PingMetric
+	0,  // 3: wukong.SignedCommand.command_type:type_name -> wukong.CommandType
+	6,  // 4: wukong.AgentFrame.metrics_report:type_name -> wukong.MetricsReport
+	8,  // 5: wukong.AgentFrame.command_result:type_name -> wukong.CommandResult
+	7,  // 6: wukong.ServerFrame.signed_command:type_name -> wukong.SignedCommand
+	1,  // 7: wukong.AgentService.Register:input_type -> wukong.RegisterRequest
+	9,  // 8: wukong.AgentService.ReportStream:input_type -> wukong.AgentFrame
+	11, // 9: wukong.SignerService.Sign:input_type -> wukong.SignRequest
+	2,  // 10: wukong.AgentService.Register:output_type -> wukong.RegisterResponse
+	10, // 11: wukong.AgentService.ReportStream:output_type -> wukong.ServerFrame
+	12, // 12: wukong.SignerService.Sign:output_type -> wukong.SignResponse
+	10, // [10:13] is the sub-list for method output_type
+	7,  // [7:10] is the sub-list for method input_type
+	7,  // [7:7] is the sub-list for extension type_name
+	7,  // [7:7] is the sub-list for extension extendee
+	0,  // [0:7] is the sub-list for field type_name
 }
 
 func init() { file_wukong_proto_init() }
@@ -1071,11 +1293,11 @@ func file_wukong_proto_init() {
 	if File_wukong_proto != nil {
 		return
 	}
-	file_wukong_proto_msgTypes[7].OneofWrappers = []any{
+	file_wukong_proto_msgTypes[8].OneofWrappers = []any{
 		(*AgentFrame_MetricsReport)(nil),
 		(*AgentFrame_CommandResult)(nil),
 	}
-	file_wukong_proto_msgTypes[8].OneofWrappers = []any{
+	file_wukong_proto_msgTypes[9].OneofWrappers = []any{
 		(*ServerFrame_SignedCommand)(nil),
 		(*ServerFrame_HeartbeatAck)(nil),
 	}
@@ -1085,7 +1307,7 @@ func file_wukong_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_wukong_proto_rawDesc), len(file_wukong_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   11,
+			NumMessages:   12,
 			NumExtensions: 0,
 			NumServices:   2,
 		},

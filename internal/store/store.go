@@ -11,38 +11,38 @@ import (
 
 // Agent 探针（被监控节点）
 type Agent struct {
-	ID          string    `json:"id"`           // UUID
-	Name        string    `json:"name"`         // 显示名称
-	Hostname    string    `json:"hostname"`     // 系统主机名
-	GroupID     *string   `json:"group_id"`     // 所属分组（nil=未分组）
-	Secret      string    `json:"-"`            // 个体凭证密钥（bcrypt）
-	OSVersion   string    `json:"os_version"`   // 操作系统版本
-	AgentVer    string    `json:"agent_ver"`    // 探针版本
-	Arch        string    `json:"arch"`         // 架构
-	CollectIntv *int      `json:"collect_intv"` // 自定义采集频率（覆盖分组/全局，秒）
-	PingIntv    *int      `json:"ping_intv"`    // 自定义 Ping 频率
-	Online      bool      `json:"online"`       // 是否在线
+	ID          string     `json:"id"`           // UUID
+	Name        string     `json:"name"`         // 显示名称
+	Hostname    string     `json:"hostname"`     // 系统主机名
+	GroupID     *string    `json:"group_id"`     // 所属分组（nil=未分组）
+	Secret      string     `json:"-"`            // 个体凭证密钥（bcrypt）
+	OSVersion   string     `json:"os_version"`   // 操作系统版本
+	AgentVer    string     `json:"agent_ver"`    // 探针版本
+	Arch        string     `json:"arch"`         // 架构
+	CollectIntv *int       `json:"collect_intv"` // 自定义采集频率（覆盖分组/全局，秒）
+	PingIntv    *int       `json:"ping_intv"`    // 自定义 Ping 频率
+	Online      bool       `json:"online"`       // 是否在线
 	LastSeenAt  *time.Time `json:"last_seen_at"` // 最后心跳时间
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	CreatedAt   time.Time  `json:"created_at"`
+	UpdatedAt   time.Time  `json:"updated_at"`
 }
 
 // Group 分组
 type Group struct {
 	ID             string `json:"id"`
 	Name           string `json:"name"`
-	CollectIntv    *int   `json:"collect_intv"`    // 分组采集频率（覆盖全局）
-	PingIntv       *int   `json:"ping_intv"`       // 分组 Ping 频率
+	CollectIntv    *int   `json:"collect_intv"`     // 分组采集频率（覆盖全局）
+	PingIntv       *int   `json:"ping_intv"`        // 分组 Ping 频率
 	TelegramConfID *int64 `json:"telegram_conf_id"` // 分组绑定的 Telegram 配置
 }
 
 // ISP 运营商 Ping 目标
 type ISPTarget struct {
 	ID      int64  `json:"id"`
-	Name    string `json:"name"`    // 运营商名称（如"电信"）
-	IP      string `json:"ip"`      // 目标 IP
-	Port    int    `json:"port"`    // TCP ping 端口
-	Mode    string `json:"mode"`    // "icmp" / "tcp" / "auto"
+	Name    string `json:"name"` // 运营商名称（如"电信"）
+	IP      string `json:"ip"`   // 目标 IP
+	Port    int    `json:"port"` // TCP ping 端口
+	Mode    string `json:"mode"` // "icmp" / "tcp" / "auto"
 	Enabled bool   `json:"enabled"`
 }
 
@@ -50,14 +50,53 @@ type ISPTarget struct {
 
 // LatestMetric 最新一帧系统指标（存内存 map，同步写 SQLite）
 type LatestMetric struct {
-	AgentID   string    `json:"agent_id"`
-	CPU       float64   `json:"cpu"`
-	Mem       float64   `json:"mem"`
-	Disk      float64   `json:"disk"`
-	NetUp     int64     `json:"net_up"`
-	NetDown   int64     `json:"net_down"`
-	OSVersion string    `json:"os_version"`
-	UpdatedAt time.Time `json:"updated_at"`
+	AgentID           string    `json:"agent_id"`
+	CPU               float64   `json:"cpu"`
+	Mem               float64   `json:"mem"`
+	Disk              float64   `json:"disk"`
+	NetUp             int64     `json:"net_up"`
+	NetDown           int64     `json:"net_down"`
+	OSVersion         string    `json:"os_version"`
+	UptimeSeconds     int64     `json:"uptime_seconds"`
+	BootTime          int64     `json:"boot_time"`
+	MemTotalBytes     int64     `json:"mem_total_bytes"`
+	DiskTotalBytes    int64     `json:"disk_total_bytes"`
+	CPUModel          string    `json:"cpu_model"`
+	CPUCores          int       `json:"cpu_cores"`
+	Load1             float64   `json:"load1"`
+	Load5             float64   `json:"load5"`
+	Load15            float64   `json:"load15"`
+	NetUpTotalBytes   int64     `json:"net_up_total_bytes"`
+	NetDownTotalBytes int64     `json:"net_down_total_bytes"`
+	Region            string    `json:"region"`
+	Platform          string    `json:"platform"`
+	UpdatedAt         time.Time `json:"updated_at"`
+}
+
+// SystemMetricInput 是系统指标写入模型。
+// 原因：系统详情字段会持续扩展，使用结构体比不断扩展函数参数更容易保持调用方清晰。
+type SystemMetricInput struct {
+	AgentID           string
+	Timestamp         time.Time
+	CPU               float64
+	Mem               float64
+	Disk              float64
+	NetUp             int64
+	NetDown           int64
+	OSVersion         string
+	UptimeSeconds     int64
+	BootTime          int64
+	MemTotalBytes     int64
+	DiskTotalBytes    int64
+	CPUModel          string
+	CPUCores          int
+	Load1             float64
+	Load5             float64
+	Load15            float64
+	NetUpTotalBytes   int64
+	NetDownTotalBytes int64
+	Region            string
+	Platform          string
 }
 
 // PingAggMin 1 分钟预聚合的 Ping 数据（用于 24h K线查询）
@@ -76,15 +115,15 @@ type PingAggMin struct {
 
 // Alert 告警记录
 type Alert struct {
-	ID         int64     `json:"id"`
-	AgentID    string    `json:"agent_id"`
-	Metric     string    `json:"metric"`     // cpu/mem/disk/ping_loss/ping_latency/offline
-	Threshold  float64   `json:"threshold"`  // 触发阈值
-	Value      float64   `json:"value"`      // 触发时的实际值
-	Status     string    `json:"status"`     // firing / resolved
-	FiredAt    time.Time `json:"fired_at"`
+	ID         int64      `json:"id"`
+	AgentID    string     `json:"agent_id"`
+	Metric     string     `json:"metric"`    // cpu/mem/disk/ping_loss/ping_latency/offline
+	Threshold  float64    `json:"threshold"` // 触发阈值
+	Value      float64    `json:"value"`     // 触发时的实际值
+	Status     string     `json:"status"`    // firing / resolved
+	FiredAt    time.Time  `json:"fired_at"`
 	ResolvedAt *time.Time `json:"resolved_at"`
-	Notified   bool      `json:"notified"`   // 是否已通知
+	Notified   bool       `json:"notified"` // 是否已通知
 }
 
 // ============ 接口定义 ============
@@ -128,7 +167,7 @@ type MetricsStore interface {
 	SetSetting(key, value string) error
 
 	// ----- 时序数据写入 -----
-	WriteSystemMetric(agentID string, ts time.Time, cpu, mem, disk float64, netUp, netDown int64, osVersion string) error
+	WriteSystemMetric(metric *SystemMetricInput) error
 	WritePingMetric(agentID string, ts time.Time, isp, targetIP string, latency, loss, jitter float64) error
 	AggregatePingMin() error // 每分钟聚合上一分钟的 Ping 到 ping_agg_1min 表
 

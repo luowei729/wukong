@@ -1,6 +1,6 @@
 # wukong 监控系统 - 开发规范与提示
 
-> 最后更新: 2026-06-21 15:05 (北京时间)
+> 最后更新: 2026-06-21 18:23 (北京时间)
 
 ## 开发原则
 
@@ -81,7 +81,8 @@ wukong/
 - **2026-06-21 14:10（北京时间）**：生产环境 `server.lkz.pub:443` 当前只验证 HTTP/API 正常，gRPC 注册会超时；`server.lkz.pub:64443` 直连 gRPC 注册和上报已验证成功。因此安装脚本的 Web 下载地址继续使用 `site_domain`，探针注册/上报地址改由 SQLite `agent_server_addr` 固化（格式必须 `host:port`），未配置时才回退按站点域名推导。
 - **2026-06-21 14:43（北京时间）**：页面和 API 响应必须全站带 `Cache-Control: no-store, no-cache, must-revalidate, max-age=0`、`Pragma: no-cache`、`Expires: 0`，公开首页、公开详情页、后台总览、后台设备页每秒静默轮询并给请求加 `?_=${Date.now()}`；默认采集间隔改为 1 秒。管理员修改密码接口为 `PUT /api/auth/password`，必须 JWT 鉴权、校验当前密码，新密码 bcrypt hash 写入 SQLite `settings.admin_password_hash` 固化，登录前优先读取该设置。
 - **2026-06-21 15:05（北京时间）**：生产要求探针只能通过 `server.lkz.pub:443` 连接，不再使用 `64443` 对外直连；探针客户端在目标端口为 443 时使用 TLS gRPC，经 nginx `listen 443 ssl http2` 的 `/wukong.AgentService/` 反代转发到本机 64443，其他端口仍保持明文 gRPC。后台 `agent_server_addr` 生产值应固化为 `server.lkz.pub:443`，安装脚本必须输出 `SERVER_ADDR="server.lkz.pub:443"`。Telegram 设置页不回显 token、不使用 password 类型并提供测试通知；告警阈值页必须显示离线阈值；告警中心空列表要返回/兜底成数组；agent 安装需支持 amd64/arm64，注册后退出并由 systemd 常驻和开机自启；服务器节点名称支持后台自定义修改。
-- **开发后续优先级**：① 探针 Ping 多运营商探测完善 ② Web API 端点完整实现 ③ 告警引擎集成 gRPC 心跳 ④ 前端接入真实 API 数据 ⑤ 安装脚本与升级流程端到端原型
+- **2026-06-21 18:23（北京时间）**：Ping 运营商配置已形成第一阶段闭环：后台“Ping 运营商”页写入 SQLite `isp_targets`，注册响应向探针下发启用目标和 `ping_interval`，探针将目标持久化到 `agent.conf` 并按独立频率执行 ICMP(auto 回退 TCP)/TCP 探测，上报后主控写入小时表并每分钟聚合到 `ping_agg_1min`。公开详情页只暴露启用 ISP 名称和聚合延迟，不泄露目标 IP/端口；服务器详情字段扩展为 Uptime/Boot time/Region/CPU 型号/Load/累计流量等 qio.ng 风格展示。
+- **开发后续优先级**：① 签名配置热更新闭环 ② Web API 端点完整实现 ③ 告警引擎集成 gRPC 心跳 ④ 前端接入真实 API 数据 ⑤ 安装脚本与升级流程端到端原型
 
 ## 部署相关长期提示
 

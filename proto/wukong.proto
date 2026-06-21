@@ -22,6 +22,17 @@ message RegisterResponse {
   int32  collect_interval = 3; // 采集频率（秒）
   string server_name  = 4;  // 注册时探针名称（hostname）
   int64  expires_at   = 5;  // 个体凭证过期时间戳
+  int32  ping_interval = 6; // Ping 频率（秒）
+  repeated PingTarget ping_targets = 7; // 启用的运营商 Ping 目标
+}
+
+// 运营商 Ping 目标配置
+message PingTarget {
+  string name    = 1; // 运营商名称
+  string ip      = 2; // 目标 IP 或域名
+  int32  port    = 3; // TCP 探测端口
+  string mode    = 4; // auto/icmp/tcp
+  bool   enabled = 5; // 是否启用
 }
 
 // ========== 指标数据消息 ==========
@@ -35,6 +46,19 @@ message SystemMetric {
   int64  net_up_bps  = 5;  // 网络上行 bps
   int64  net_down_bps = 6; // 网络下行 bps
   string os_version  = 7;  // 操作系统版本
+  int64  uptime_seconds = 8; // 运行时长（秒）
+  int64  boot_time = 9; // 启动时间 Unix 时间戳（秒）
+  int64  mem_total_bytes = 10; // 内存总量
+  int64  disk_total_bytes = 11; // 根分区磁盘总量
+  string cpu_model = 12; // CPU 型号
+  int32  cpu_cores = 13; // CPU 核心数
+  double load1 = 14; // 1 分钟负载
+  double load5 = 15; // 5 分钟负载
+  double load15 = 16; // 15 分钟负载
+  int64  net_up_total_bytes = 17; // 累计上传字节
+  int64  net_down_total_bytes = 18; // 累计下载字节
+  string region = 19; // 节点区域（手动配置）
+  string platform = 20; // 系统平台，如 ubuntu
 }
 
 // 单次 Ping 探测结果

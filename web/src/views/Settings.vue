@@ -78,6 +78,63 @@
         </div>
       </el-tab-pane>
 
+      <!-- Ping 运营商配置 -->
+      <el-tab-pane label="Ping 运营商" name="isp">
+        <div class="wk-card-solid" style="padding: 20px;">
+          <el-alert
+            title="运营商目标会保存到 SQLite；新注册探针会自动下发，已安装探针重启后读取最新本地配置/后续热更新生效。"
+            type="info"
+            :closable="false"
+            style="margin-bottom: 16px;"
+          />
+          <el-form :inline="true" class="isp-form">
+            <el-form-item label="运营商">
+              <el-input v-model="ispForm.name" placeholder="电信 / 联通 / Cloudflare" style="width: 180px;" />
+            </el-form-item>
+            <el-form-item label="目标 IP/域名">
+              <el-input v-model="ispForm.ip" placeholder="1.1.1.1" style="width: 180px;" />
+            </el-form-item>
+            <el-form-item label="端口">
+              <el-input-number v-model="ispForm.port" :min="1" :max="65535" :step="1" style="width: 130px;" />
+            </el-form-item>
+            <el-form-item label="模式">
+              <el-select v-model="ispForm.mode" style="width: 120px;">
+                <el-option label="auto" value="auto" />
+                <el-option label="icmp" value="icmp" />
+                <el-option label="tcp" value="tcp" />
+              </el-select>
+            </el-form-item>
+            <el-form-item label="启用">
+              <el-switch v-model="ispForm.enabled" />
+            </el-form-item>
+            <el-form-item>
+              <el-button type="primary" :loading="ispSaving" @click="saveISPTarget">
+                {{ ispForm.id ? '保存目标' : '新增目标' }}
+              </el-button>
+              <el-button v-if="ispForm.id" @click="resetISPForm">取消编辑</el-button>
+            </el-form-item>
+          </el-form>
+
+          <el-table v-loading="ispLoading" :data="ispTargets" style="width: 100%; margin-top: 12px;">
+            <el-table-column prop="name" label="运营商" min-width="130" />
+            <el-table-column prop="ip" label="目标" min-width="160" />
+            <el-table-column prop="port" label="端口" width="90" />
+            <el-table-column prop="mode" label="模式" width="90" />
+            <el-table-column label="状态" width="90">
+              <template #default="{ row }">
+                <el-tag :type="row.enabled ? 'success' : 'info'">{{ row.enabled ? '启用' : '停用' }}</el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column label="操作" width="170">
+              <template #default="{ row }">
+                <el-button size="small" text type="primary" @click="editISPTarget(row)">编辑</el-button>
+                <el-button size="small" text type="danger" @click="deleteISPTarget(row)">删除</el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+        </div>
+      </el-tab-pane>
+
       <!-- 修改密码 -->
       <el-tab-pane label="修改密码" name="security">
         <div class="wk-card-solid" style="padding: 20px;">
@@ -173,7 +230,7 @@
 
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import axios from 'axios'
 
 const activeTab = ref('theme')
@@ -221,6 +278,19 @@ const thresholds = reactive({
   metric_duration_seconds: 60,
 })
 const thresholdSaving = ref(false)
+
+// Ping 运营商目标
+const ispTargets = ref<any[]>([])
+const ispLoading = ref(false)
+const ispSaving = ref(false)
+const ispForm = reactive({
+  id: 0,
+  name: '',
+  ip: '',
+  port: 80,
+  mode: 'auto',
+  enabled: true,
+})
 
 function authHeaders() {
   const token = localStorage.getItem('access_token')
@@ -378,6 +448,83 @@ async function saveThresholds() {
   }
 }
 
+async function loadISPTargets() {
+  ispLoading.value = true
+  try {
+    const res = await axios.get(`/api/isp-targets?_=${Date.now()}`, { headers: authHeaders() })
+    ispTargets.value = res.data || []
+  } catch (e: any) {
+    ElMessage.error(e.response?.data?.error || '加载 Ping 运营商目标失败')
+  } finally {
+    ispLoading.value = false
+  }
+}
+
+function resetISPForm() {
+  ispForm.id = 0
+  ispForm.name = ''
+  ispForm.ip = ''
+  ispForm.port = 80
+  ispForm.mode = 'auto'
+  ispForm.enabled = true
+}
+
+function editISPTarget(row: any) {
+  ispForm.id = row.id
+  ispForm.name = row.name || ''
+  ispForm.ip = row.ip || ''
+  ispForm.port = row.port || 80
+  ispForm.mode = row.mode || 'auto'
+  ispForm.enabled = Boolean(row.enabled)
+}
+
+async function saveISPTarget() {
+  if (!ispForm.name.trim() || !ispForm.ip.trim()) {
+    ElMessage.warning('运营商名称和目标不能为空')
+    return
+  }
+  ispSaving.value = true
+  try {
+    const payload = {
+      name: ispForm.name.trim(),
+      ip: ispForm.ip.trim(),
+      port: ispForm.port,
+      mode: ispForm.mode,
+      enabled: ispForm.enabled,
+    }
+    if (ispForm.id) {
+      await axios.put(`/api/isp-targets/${ispForm.id}`, payload, { headers: authHeaders() })
+      ElMessage.success('Ping 目标已保存')
+    } else {
+      await axios.post('/api/isp-targets', payload, { headers: authHeaders() })
+      ElMessage.success('Ping 目标已新增')
+    }
+    resetISPForm()
+    await loadISPTargets()
+  } catch (e: any) {
+    ElMessage.error(e.response?.data?.error || '保存 Ping 目标失败')
+  } finally {
+    ispSaving.value = false
+  }
+}
+
+async function deleteISPTarget(row: any) {
+  try {
+    await ElMessageBox.confirm(`确认删除 Ping 目标“${row.name}”？`, '删除确认', {
+      confirmButtonText: '删除',
+      cancelButtonText: '取消',
+      type: 'warning',
+    })
+    await axios.delete(`/api/isp-targets/${row.id}`, { headers: authHeaders() })
+    ElMessage.success('Ping 目标已删除')
+    await loadISPTargets()
+  } catch (e: any) {
+    if (e !== 'cancel') {
+      ElMessage.error(e.response?.data?.error || '删除 Ping 目标失败')
+    }
+  }
+}
+
 onMounted(async () => {
   try {
     const res = await axios.get(`/api/theme?_=${Date.now()}`, { headers: authHeaders() })
@@ -389,7 +536,7 @@ onMounted(async () => {
     themeForm.agent_server_addr = res.data.agent_server_addr || ''
     applyTheme()
   } catch {}
-  await Promise.all([loadTelegram(), loadThresholds()])
+  await Promise.all([loadTelegram(), loadThresholds(), loadISPTargets()])
 })
 </script>
 

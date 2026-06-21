@@ -63,10 +63,15 @@
           <div class="chart-head">
             <div>
               <h2>网络延迟</h2>
-              <p>公开 Ping 数据需要指定 ISP，当前先展示占位，后续可自动发现线路。</p>
+              <p>最近 24 小时真实 Ping 延迟 / 丢包率</p>
             </div>
+            <el-select v-model="selectedISP" placeholder="选择线路" style="width: 180px;" @change="loadPingAgg">
+              <el-option v-for="isp in pingISPs" :key="isp.name" :label="isp.name" :value="isp.name" />
+            </el-select>
           </div>
-          <el-empty description="暂无公开 Ping 数据" />
+          <el-empty v-if="!selectedISP" description="暂无公开 Ping 线路" />
+          <el-empty v-else-if="pingPoints.length === 0" description="暂无公开 Ping 数据" />
+          <div v-else ref="pingChartRef" class="chart" />
         </section>
       </template>
     </main>
@@ -93,6 +98,23 @@ interface PublicServer {
   disk?: number
   net_up?: number
   net_down?: number
+  uptime_seconds?: number
+  boot_time?: number
+  mem_total_bytes?: number
+  disk_total_bytes?: number
+  cpu_model?: string
+  cpu_cores?: number
+  load1?: number
+  load5?: number
+  load15?: number
+  net_up_total_bytes?: number
+  net_down_total_bytes?: number
+  region?: string
+  platform?: string
+}
+
+interface PingISP {
+  name: string
 }
 
 interface MetricPoint {
@@ -104,29 +126,48 @@ interface MetricPoint {
   net_down: number
 }
 
+interface PingPoint {
+  timestamp: string
+  count: number
+  avg_lat: number
+  min_lat: number
+  max_lat: number
+  loss_rate: number
+}
+
 const route = useRoute()
 const router = useRouter()
 const server = ref<PublicServer | null>(null)
 const metricPoints = ref<MetricPoint[]>([])
+const pingISPs = ref<PingISP[]>([])
+const selectedISP = ref('')
+const pingPoints = ref<PingPoint[]>([])
 const loading = ref(false)
 const error = ref('')
 const chartRef = ref<HTMLDivElement>()
+const pingChartRef = ref<HTMLDivElement>()
 let chart: echarts.ECharts | null = null
+let pingChart: echarts.ECharts | null = null
 let refreshTimer: ReturnType<typeof setInterval> | null = null
 let metricsTimer: ReturnType<typeof setInterval> | null = null
+let pingTimer: ReturnType<typeof setInterval> | null = null
 
 const hasToken = computed(() => Boolean(localStorage.getItem('access_token')))
 const serverID = computed(() => route.params.id as string)
 
 const serverSpecs = computed(() => [
   { label: 'Status', value: statusText(server.value?.status || 'unknown') },
+  { label: 'Uptime', value: formatDuration(server.value?.uptime_seconds) },
   { label: 'Arch', value: archText(server.value?.arch) },
-  { label: 'System', value: systemText(server.value?.os_version) },
-  { label: 'CPU', value: formatPercent(server.value?.cpu) },
-  { label: 'Mem', value: formatPercent(server.value?.mem) },
-  { label: 'Disk', value: formatPercent(server.value?.disk) },
-  { label: 'Upload', value: `${formatBytes(server.value?.net_up)}/s` },
-  { label: 'Download', value: `${formatBytes(server.value?.net_down)}/s` },
+  { label: 'Mem', value: formatBytes(server.value?.mem_total_bytes) },
+  { label: 'Disk', value: formatBytes(server.value?.disk_total_bytes) },
+  { label: 'Region', value: server.value?.region || '-' },
+  { label: 'System', value: systemText(server.value?.platform || server.value?.os_version) },
+  { label: 'CPU', value: cpuText(server.value) },
+  { label: 'Load', value: loadText(server.value) },
+  { label: 'Upload', value: formatBytes(server.value?.net_up_total_bytes) },
+  { label: 'Download', value: formatBytes(server.value?.net_down_total_bytes) },
+  { label: 'Boot time', value: formatUnixTime(server.value?.boot_time) },
   { label: 'Last active time', value: formatDateTime(server.value?.updated_at || server.value?.last_seen_at) },
 ])
 
@@ -145,6 +186,11 @@ async function loadServer(showLoading = false) {
   try {
     const res = await axios.get(`/api/public/servers/${serverID.value}?_=${Date.now()}`)
     server.value = res.data.server
+    pingISPs.value = res.data.ping_isps || []
+    if (!selectedISP.value && pingISPs.value.length > 0) {
+      selectedISP.value = pingISPs.value[0].name
+      await loadPingAgg()
+    }
   } catch (e: any) {
     error.value = e.response?.data?.error || '无法加载服务器详情'
   } finally {
@@ -163,6 +209,20 @@ async function loadMetrics() {
   }
 }
 
+async function loadPingAgg() {
+  if (!selectedISP.value) return
+  try {
+    const res = await axios.get(`/api/public/servers/${serverID.value}/ping-agg`, {
+      params: { isp: selectedISP.value, range: '24h', _: Date.now() },
+    })
+    pingPoints.value = res.data.points || []
+    await nextTick()
+    renderPingChart()
+  } catch {
+    pingPoints.value = []
+  }
+}
+
 function renderChart() {
   if (!chartRef.value || metricPoints.value.length === 0) return
   if (!chart) chart = echarts.init(chartRef.value, 'dark')
@@ -178,6 +238,29 @@ function renderChart() {
       lineSeries('CPU', metricPoints.value.map((item) => item.cpu), '#38bdf8'),
       lineSeries('内存', metricPoints.value.map((item) => item.mem), '#22c55e'),
       lineSeries('磁盘', metricPoints.value.map((item) => item.disk), '#f59e0b'),
+    ],
+  })
+}
+
+function renderPingChart() {
+  if (!pingChartRef.value || pingPoints.value.length === 0) return
+  if (!pingChart) pingChart = echarts.init(pingChartRef.value, 'dark')
+  const labels = pingPoints.value.map((item) => formatTime(item.timestamp))
+  pingChart.setOption({
+    tooltip: { trigger: 'axis', backgroundColor: 'rgba(15, 23, 42, 0.92)', borderColor: 'rgba(56, 189, 248, 0.3)' },
+    legend: { textStyle: { color: 'var(--wk-text-muted)' } },
+    grid: { left: '3%', right: '4%', bottom: '8%', containLabel: true },
+    xAxis: { type: 'category', data: labels, axisLabel: { color: 'var(--wk-text-muted)' }, axisLine: { lineStyle: { color: 'var(--wk-chart-grid)' } } },
+    yAxis: [
+      { type: 'value', name: 'ms', axisLabel: { color: 'var(--wk-text-muted)' }, splitLine: { lineStyle: { color: 'var(--wk-chart-grid)' } } },
+      { type: 'value', name: '丢包%', min: 0, max: 100, axisLabel: { color: 'var(--wk-text-muted)' }, splitLine: { show: false } },
+    ],
+    dataZoom: [{ type: 'inside' }, { type: 'slider', height: 18, bottom: 4 }],
+    series: [
+      lineSeries('平均延迟', pingPoints.value.map((item) => item.avg_lat), '#38bdf8'),
+      lineSeries('最小延迟', pingPoints.value.map((item) => item.min_lat), '#22c55e'),
+      lineSeries('最大延迟', pingPoints.value.map((item) => item.max_lat), '#f59e0b'),
+      { ...lineSeries('丢包率', pingPoints.value.map((item) => Number((item.loss_rate * 100).toFixed(2))), '#ef4444'), yAxisIndex: 1 },
     ],
   })
 }
@@ -204,14 +287,43 @@ function formatPercent(value?: number) {
 
 function formatBytes(value?: number) {
   if (!value) return '0 B'
-  const units = ['B', 'KB', 'MB', 'GB']
+  const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB']
   let size = value
   let index = 0
   while (size >= 1024 && index < units.length - 1) {
     size /= 1024
     index++
   }
-  return `${size.toFixed(size >= 10 ? 0 : 1)} ${units[index]}`
+  return `${size.toFixed(size >= 10 ? 2 : 2)} ${units[index]}`
+}
+
+function formatDuration(seconds?: number) {
+  if (!seconds) return '-'
+  const days = Math.floor(seconds / 86400)
+  const hours = Math.floor((seconds % 86400) / 3600)
+  const minutes = Math.floor((seconds % 3600) / 60)
+  return `${days} Days ${hours} Hours ${minutes} Min`
+}
+
+function formatUnixTime(value?: number) {
+  if (!value) return '-'
+  return new Date(value * 1000).toLocaleString()
+}
+
+function cpuText(value?: PublicServer | null) {
+  if (!value) return '-'
+  const model = value.cpu_model || 'CPU'
+  const cores = value.cpu_cores ? `${value.cpu_cores} Virtual Core` : ''
+  return `${model}${cores ? ` ${cores}` : ''}`
+}
+
+function loadText(value?: PublicServer | null) {
+  if (!value) return '-'
+  return `1m ${formatLoad(value.load1)} / 5m ${formatLoad(value.load5)} / 15m ${formatLoad(value.load15)}`
+}
+
+function formatLoad(value?: number) {
+  return typeof value === 'number' ? value.toFixed(2) : '-'
 }
 
 function systemText(value?: string) {
@@ -252,6 +364,7 @@ function formatTime(value: string) {
 
 function handleResize() {
   chart?.resize()
+  pingChart?.resize()
 }
 
 onMounted(() => {
@@ -260,13 +373,16 @@ onMounted(() => {
   // 详情页当前指标每秒刷新；趋势图低频刷新且不销毁重建，避免图表无限闪烁。
   refreshTimer = setInterval(() => loadServer(false), 1000)
   metricsTimer = setInterval(() => loadMetrics(), 60000)
+  pingTimer = setInterval(() => loadPingAgg(), 60000)
   window.addEventListener('resize', handleResize)
 })
 
 onUnmounted(() => {
   if (refreshTimer) clearInterval(refreshTimer)
   if (metricsTimer) clearInterval(metricsTimer)
+  if (pingTimer) clearInterval(pingTimer)
   chart?.dispose()
+  pingChart?.dispose()
   window.removeEventListener('resize', handleResize)
 })
 </script>

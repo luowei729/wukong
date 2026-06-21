@@ -99,6 +99,20 @@ func (a *Agent) Register(token string) error {
 	if resp.CollectInterval > 0 {
 		a.cfg.CollectInterval = int(resp.CollectInterval)
 	}
+	if resp.PingInterval > 0 {
+		a.cfg.PingInterval = int(resp.PingInterval)
+	}
+	a.cfg.PingTargets = make([]config.PingTargetConfig, 0, len(resp.PingTargets))
+	for _, target := range resp.PingTargets {
+		// 注册响应里的 Ping 目标来自主控 SQLite，写入本地配置后探针重启仍可继续探测。
+		a.cfg.PingTargets = append(a.cfg.PingTargets, config.PingTargetConfig{
+			Name:    target.Name,
+			IP:      target.Ip,
+			Port:    int(target.Port),
+			Mode:    target.Mode,
+			Enabled: target.Enabled,
+		})
+	}
 
 	// 保存配置到文件
 	if err := config.SaveAgentConfig(a.cfg, ""); err != nil {
@@ -140,7 +154,12 @@ func (a *Agent) Stop() {
 
 // initCollectors 初始化采集器
 func (a *Agent) initCollectors() {
-	a.collectors = append(a.collectors, &SystemCollector{})
+	// 系统采集器负责资源使用率、硬件规格、启动时间和区域等公开详情字段。
+	a.collectors = append(a.collectors, &SystemCollector{region: a.cfg.Region})
+	if len(a.cfg.PingTargets) > 0 {
+		// Ping 采集器内部按 PingInterval 限频，避免默认 1 秒系统采集频率导致每秒探测运营商目标。
+		a.collectors = append(a.collectors, NewPingCollector(a.cfg.PingInterval, a.cfg.PingTargets))
+	}
 }
 
 // reportLoop 采集并上报循环
@@ -308,14 +327,23 @@ func (a *Agent) handleUpdateConfig(payload []byte) {
 		return
 	}
 
-	// 更新采集频率
+	// 更新采集频率和 Ping 配置；实时 ticker 重建后续由签名下发闭环统一处理，本阶段保存后重启生效。
 	if newCfg.CollectInterval > 0 {
 		a.cfg.CollectInterval = newCfg.CollectInterval
+	}
+	if newCfg.PingInterval > 0 {
+		a.cfg.PingInterval = newCfg.PingInterval
+	}
+	if len(newCfg.PingTargets) > 0 {
+		a.cfg.PingTargets = newCfg.PingTargets
+	}
+	if newCfg.Region != "" {
+		a.cfg.Region = newCfg.Region
 	}
 
 	// 保存配置
 	config.SaveAgentConfig(a.cfg, "")
-	log.Printf("配置已更新，新采集频率: %ds", a.cfg.CollectInterval)
+	log.Printf("配置已更新，采集频率: %ds，Ping 频率: %ds", a.cfg.CollectInterval, a.cfg.PingInterval)
 }
 
 // handleRestartAgent 重启探针自身

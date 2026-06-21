@@ -27,23 +27,41 @@ type publicServersSummary struct {
 }
 
 type publicServerSummary struct {
-	ID         string     `json:"id"`
-	Name       string     `json:"name"`
-	Online     bool       `json:"online"`
-	Status     string     `json:"status"`
-	LastSeenAt *time.Time `json:"last_seen_at,omitempty"`
-	UpdatedAt  *time.Time `json:"updated_at,omitempty"`
-	OSVersion  string     `json:"os_version,omitempty"`
-	Arch       string     `json:"arch,omitempty"`
-	CPU        *float64   `json:"cpu,omitempty"`
-	Mem        *float64   `json:"mem,omitempty"`
-	Disk       *float64   `json:"disk,omitempty"`
-	NetUp      *int64     `json:"net_up,omitempty"`
-	NetDown    *int64     `json:"net_down,omitempty"`
+	ID                string     `json:"id"`
+	Name              string     `json:"name"`
+	Online            bool       `json:"online"`
+	Status            string     `json:"status"`
+	LastSeenAt        *time.Time `json:"last_seen_at,omitempty"`
+	UpdatedAt         *time.Time `json:"updated_at,omitempty"`
+	OSVersion         string     `json:"os_version,omitempty"`
+	Arch              string     `json:"arch,omitempty"`
+	CPU               *float64   `json:"cpu,omitempty"`
+	Mem               *float64   `json:"mem,omitempty"`
+	Disk              *float64   `json:"disk,omitempty"`
+	NetUp             *int64     `json:"net_up,omitempty"`
+	NetDown           *int64     `json:"net_down,omitempty"`
+	UptimeSeconds     int64      `json:"uptime_seconds,omitempty"`
+	BootTime          int64      `json:"boot_time,omitempty"`
+	MemTotalBytes     int64      `json:"mem_total_bytes,omitempty"`
+	DiskTotalBytes    int64      `json:"disk_total_bytes,omitempty"`
+	CPUModel          string     `json:"cpu_model,omitempty"`
+	CPUCores          int        `json:"cpu_cores,omitempty"`
+	Load1             float64    `json:"load1,omitempty"`
+	Load5             float64    `json:"load5,omitempty"`
+	Load15            float64    `json:"load15,omitempty"`
+	NetUpTotalBytes   int64      `json:"net_up_total_bytes,omitempty"`
+	NetDownTotalBytes int64      `json:"net_down_total_bytes,omitempty"`
+	Region            string     `json:"region,omitempty"`
+	Platform          string     `json:"platform,omitempty"`
+}
+
+type publicISPTarget struct {
+	Name string `json:"name"`
 }
 
 type publicServerDetailResponse struct {
-	Server publicServerSummary `json:"server"`
+	Server   publicServerSummary `json:"server"`
+	PingISPs []publicISPTarget   `json:"ping_isps"`
 }
 
 type publicMetricPoint struct {
@@ -123,7 +141,10 @@ func (h *Handler) handlePublicGetServer(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	metric, _ := h.store.GetLatestMetrics(id)
-	writeJSON(w, http.StatusOK, publicServerDetailResponse{Server: buildPublicServerSummary(agent, metric)})
+	writeJSON(w, http.StatusOK, publicServerDetailResponse{
+		Server:   buildPublicServerSummary(agent, metric),
+		PingISPs: h.publicPingISPs(),
+	})
 }
 
 func (h *Handler) handlePublicGetServerMetrics(w http.ResponseWriter, r *http.Request) {
@@ -219,11 +240,42 @@ func buildPublicServerSummary(agent *store.Agent, metric *store.LatestMetric) pu
 		server.Disk = &disk
 		server.NetUp = &metric.NetUp
 		server.NetDown = &metric.NetDown
+		server.UptimeSeconds = metric.UptimeSeconds
+		server.BootTime = metric.BootTime
+		server.MemTotalBytes = metric.MemTotalBytes
+		server.DiskTotalBytes = metric.DiskTotalBytes
+		server.CPUModel = metric.CPUModel
+		server.CPUCores = metric.CPUCores
+		server.Load1 = metric.Load1
+		server.Load5 = metric.Load5
+		server.Load15 = metric.Load15
+		server.NetUpTotalBytes = metric.NetUpTotalBytes
+		server.NetDownTotalBytes = metric.NetDownTotalBytes
+		server.Region = metric.Region
+		server.Platform = metric.Platform
 	} else if agent.OSVersion != "" {
 		server.OSVersion = agent.OSVersion
 	}
 	server.Online = server.Status == "online"
 	return server
+}
+
+func (h *Handler) publicPingISPs() []publicISPTarget {
+	// 公开详情只暴露启用运营商名称，隐藏目标 IP/端口等管理配置。
+	targets, err := h.store.ListISPTargets()
+	if err != nil {
+		return []publicISPTarget{}
+	}
+	items := make([]publicISPTarget, 0, len(targets))
+	seen := make(map[string]bool)
+	for _, target := range targets {
+		if target == nil || !target.Enabled || target.Name == "" || seen[target.Name] {
+			continue
+		}
+		seen[target.Name] = true
+		items = append(items, publicISPTarget{Name: target.Name})
+	}
+	return items
 }
 
 func publicStatus(agent *store.Agent, metric *store.LatestMetric) string {

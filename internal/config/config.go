@@ -64,6 +64,16 @@ type ServerConfig struct {
 	DefaultTelegramChatID   int64  `json:"-"` // 默认 Telegram chat ID（从环境变量 TG_CHAT_ID 读）
 }
 
+// PingTargetConfig 探针侧持久化的运营商 Ping 目标。
+// 原因：主控的 ISP targets 通过注册响应下发，探针重启后也要能继续按本地配置探测。
+type PingTargetConfig struct {
+	Name    string `json:"name"`
+	IP      string `json:"ip"`
+	Port    int    `json:"port"`
+	Mode    string `json:"mode"`
+	Enabled bool   `json:"enabled"`
+}
+
 // 探针配置
 type AgentConfig struct {
 	ServerAddr  string `json:"server_addr"`  // 主控地址（域名:443）
@@ -71,8 +81,10 @@ type AgentConfig struct {
 	AgentSecret string `json:"agent_secret"` // 个体凭证密钥
 	DataDir     string `json:"data_dir"`     // 探针本地数据目录
 
-	CollectInterval int `json:"collect_interval"` // 采集频率（秒）
-	PingInterval    int `json:"ping_interval"`    // Ping 频率（秒）
+	CollectInterval int                `json:"collect_interval"` // 采集频率（秒）
+	PingInterval    int                `json:"ping_interval"`    // Ping 频率（秒）
+	PingTargets     []PingTargetConfig `json:"ping_targets"`     // 运营商 Ping 目标
+	Region          string             `json:"region"`           // 节点区域（手动配置，不自动请求外部定位）
 
 	BufferMinutes int    `json:"buffer_minutes"` // 本地缓冲分钟数（默认 10）
 	LogLevel      string `json:"log_level"`
@@ -149,6 +161,13 @@ func LoadServerConfig(path string) (*ServerConfig, error) {
 	if v := os.Getenv("WUKONG_TG_BOT_TOKEN"); v != "" {
 		cfg.DefaultTelegramBotToken = v
 	}
+	if v := os.Getenv("WUKONG_TG_CHAT_ID"); v != "" {
+		// Telegram Chat ID 仅作为部署默认值读取；解析失败时保持 0，由设置页提示用户修正。
+		var chatID int64
+		if _, err := fmt.Sscanf(v, "%d", &chatID); err == nil {
+			cfg.DefaultTelegramChatID = chatID
+		}
+	}
 
 	// === 自动生成默认值（用于 Docker 等无配置场景） ===
 
@@ -201,12 +220,19 @@ func LoadAgentConfig(path string) (*AgentConfig, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
+			if v := os.Getenv("WUKONG_AGENT_REGION"); v != "" {
+				cfg.Region = v
+			}
 			return cfg, nil
 		}
 		return nil, fmt.Errorf("读取探针配置 %s 失败: %w", path, err)
 	}
 	if err := json.Unmarshal(data, cfg); err != nil {
 		return nil, fmt.Errorf("解析探针配置 %s 失败: %w", path, err)
+	}
+	if v := os.Getenv("WUKONG_AGENT_REGION"); v != "" {
+		// 区域只支持手动配置，避免探针为自动定位去请求第三方服务。
+		cfg.Region = v
 	}
 	return cfg, nil
 }

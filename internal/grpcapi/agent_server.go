@@ -47,12 +47,18 @@ func (s *AgentServer) Register(ctx context.Context, req *pb.RegisterRequest) (*p
 		return nil, status.Errorf(codes.InvalidArgument, "注册失败: %v", err)
 	}
 
+	collectInterval := s.effectiveCollectInterval(agent)
+	pingInterval := s.effectivePingInterval(agent)
+	pingTargets := s.enabledPingTargets()
+
 	return &pb.RegisterResponse{
 		AgentId:         agent.ID,
 		AgentSecret:     secret,
-		CollectInterval: int32(s.cfg.DefaultCollectInterval),
+		CollectInterval: int32(collectInterval),
 		ServerName:      agent.Hostname,
 		ExpiresAt:       time.Now().Add(365 * 24 * time.Hour).Unix(), // 一年有效
+		PingInterval:    int32(pingInterval),
+		PingTargets:     pingTargets,
 	}, nil
 }
 
@@ -139,13 +145,33 @@ func (s *AgentServer) ReportStream(stream pb.AgentService_ReportStreamServer) er
 
 // handleMetricsReport 处理探针上报的指标数据
 func (s *AgentServer) handleMetricsReport(agentID string, r *pb.MetricsReport) {
-	// 写入系统指标
+	// 写入系统指标。使用结构体映射，后续继续扩展公开详情字段时不再膨胀存储接口参数。
 	sys := r.System
 	if sys != nil {
 		ts := time.Unix(sys.Timestamp, 0)
-		if err := s.store.WriteSystemMetric(agentID, ts,
-			sys.CpuPercent, sys.MemPercent, sys.DiskPercent,
-			sys.NetUpBps, sys.NetDownBps, sys.OsVersion); err != nil {
+		if err := s.store.WriteSystemMetric(&store.SystemMetricInput{
+			AgentID:           agentID,
+			Timestamp:         ts,
+			CPU:               sys.CpuPercent,
+			Mem:               sys.MemPercent,
+			Disk:              sys.DiskPercent,
+			NetUp:             sys.NetUpBps,
+			NetDown:           sys.NetDownBps,
+			OSVersion:         sys.OsVersion,
+			UptimeSeconds:     sys.UptimeSeconds,
+			BootTime:          sys.BootTime,
+			MemTotalBytes:     sys.MemTotalBytes,
+			DiskTotalBytes:    sys.DiskTotalBytes,
+			CPUModel:          sys.CpuModel,
+			CPUCores:          int(sys.CpuCores),
+			Load1:             sys.Load1,
+			Load5:             sys.Load5,
+			Load15:            sys.Load15,
+			NetUpTotalBytes:   sys.NetUpTotalBytes,
+			NetDownTotalBytes: sys.NetDownTotalBytes,
+			Region:            sys.Region,
+			Platform:          sys.Platform,
+		}); err != nil {
 			log.Printf("写入系统指标失败: agent=%s err=%v", agentID, err)
 		}
 	}
@@ -158,6 +184,51 @@ func (s *AgentServer) handleMetricsReport(agentID string, r *pb.MetricsReport) {
 			log.Printf("写入 Ping 指标失败: agent=%s isp=%s err=%v", agentID, ping.IspName, err)
 		}
 	}
+}
+
+func (s *AgentServer) effectiveCollectInterval(agent *store.Agent) int {
+	// 注册阶段先按探针自定义值优先，未配置时回退主控默认值；分组热更新后续通过签名配置下发补齐。
+	if agent != nil && agent.CollectIntv != nil && *agent.CollectIntv > 0 {
+		return *agent.CollectIntv
+	}
+	if s.cfg.DefaultCollectInterval > 0 {
+		return s.cfg.DefaultCollectInterval
+	}
+	return 1
+}
+
+func (s *AgentServer) effectivePingInterval(agent *store.Agent) int {
+	// Ping 频率也必须随注册响应下发并写入探针本地配置，避免探针重启后丢失运营商探测周期。
+	if agent != nil && agent.PingIntv != nil && *agent.PingIntv > 0 {
+		return *agent.PingIntv
+	}
+	if s.cfg.DefaultPingInterval > 0 {
+		return s.cfg.DefaultPingInterval
+	}
+	return 60
+}
+
+func (s *AgentServer) enabledPingTargets() []*pb.PingTarget {
+	targets, err := s.store.ListISPTargets()
+	if err != nil {
+		log.Printf("读取 Ping 运营商目标失败: %v", err)
+		return nil
+	}
+	result := make([]*pb.PingTarget, 0, len(targets))
+	for _, target := range targets {
+		if target == nil || !target.Enabled {
+			continue
+		}
+		// 只下发启用目标；目标来自 SQLite 配置，不包含任何管理端密钥。
+		result = append(result, &pb.PingTarget{
+			Name:    target.Name,
+			Ip:      target.IP,
+			Port:    int32(target.Port),
+			Mode:    target.Mode,
+			Enabled: target.Enabled,
+		})
+	}
+	return result
 }
 
 // CheckAgentOnline 检查探针是否在线（告警引擎用）

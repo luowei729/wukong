@@ -2,6 +2,50 @@
 
 所有变更记录使用北京时间（UTC+8）。
 
+## [2026-06-21 18:23] - 补齐 Ping 运营商配置、服务器配置与详情字段
+
+### 改动前总结
+Ping 运营商目标只有数据库表和部分 API，探针没有真实 PingCollector，注册响应也不会下发运营商目标；后台设置页不能维护 Ping 线路，节点详情页 Ping 图使用随机模拟数据。公开服务器详情字段仍偏简陋，缺少 Uptime、Boot time、Region、CPU 型号/核心、Load、内存/磁盘总量和累计流量等 qio.ng 风格字段。
+
+### 改动后总结
+1. `SystemMetric` 追加 uptime、boot time、mem/disk total、CPU 型号/核心、load、累计上下行、region、platform 等字段，并重新生成 Go proto。
+2. 探针系统采集器接入 gopsutil 的 host/load/cpu/mem/disk/net 数据；区域只读取本地配置或环境变量，不自动访问第三方定位服务。
+3. 新增探针 `PingCollector`，按 `ping_interval` 独立限流，支持 ICMP(auto 回退 TCP) 和 TCP 探测，失败按丢包上报。
+4. 注册响应下发启用的 Ping 运营商目标和 Ping 频率，探针注册后写入本地配置，重启后仍可持续探测。
+5. SQLite 系统指标小时表新增详情列并带旧表兼容；Ping 原始数据每分钟聚合到 `ping_agg_1min`，主控后台循环负责聚合和历史清理。
+6. 后台“Ping 运营商”页支持新增、编辑、删除、启停线路；后端校验名称、目标、模式和端口范围，并写入 SQLite 固化。
+7. 节点详情页新增服务器配置表单，可保存节点名称、采集频率和 Ping 频率；Ping 图删除随机数据，改为读取真实 `/api/agents/{id}/ping-agg`。
+8. 公开详情 API 返回脱敏后的新增规格字段和启用 ISP 名称；公开详情页展示 Status/Uptime/Arch/Mem/Disk/Region/System/CPU/Load/Upload/Download/Boot time/Last active time，并显示真实 Ping 聚合图。
+
+### 验证结果
+- `PATH="$(go env GOPATH)/bin:$PATH" make proto` 已重新生成 proto。
+- `go test ./...` 已通过。
+- `npm --prefix /root/wukong/web run build` 已通过，Vite chunk size warning 不影响构建；构建产物已按当前仓库策略还原，避免提交 dist hash 删除。
+- 无头 Chrome、远程部署验证将在本次后续步骤继续执行。
+
+### 涉及文件
+- `proto/wukong.proto`
+- `proto/gen/wukong.pb.go`
+- `internal/config/config.go`
+- `internal/agentcore/agent.go`
+- `internal/agentcore/collector.go`
+- `internal/agentcore/ping_collector.go`
+- `internal/grpcapi/agent_server.go`
+- `internal/store/store.go`
+- `internal/store/sqlite.go`
+- `internal/webapi/handlers.go`
+- `internal/webapi/public.go`
+- `cmd/server/main.go`
+- `web/src/views/Settings.vue`
+- `web/src/views/NodeDetail.vue`
+- `web/src/views/public/PublicServerDetail.vue`
+- `AGENTS.md`
+- `CHANGELOG.md`
+- `PROJECT_PLAN.md`
+- `DEPLOY_CREDENTIALS.md`
+
+---
+
 ## [2026-06-21 15:05] - 完善 Telegram、告警、探针安装与 443 gRPC 连接
 
 ### 改动前总结

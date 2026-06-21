@@ -13,13 +13,13 @@ import (
 	"syscall"
 	"time"
 
+	"wukong/internal/alert"
+	"wukong/internal/auth"
 	"wukong/internal/config"
+	"wukong/internal/grpcapi"
+	"wukong/internal/notify"
 	"wukong/internal/store"
 	"wukong/internal/webapi"
-	"wukong/internal/grpcapi"
-	"wukong/internal/alert"
-	"wukong/internal/notify"
-	"wukong/internal/auth"
 
 	"github.com/soheilhy/cmux"
 	"google.golang.org/grpc"
@@ -47,6 +47,11 @@ func main() {
 		log.Fatalf("初始化表结构失败: %v", err)
 	}
 	log.Println("数据库初始化完成")
+
+	// === 启动时序聚合与清理任务 ===
+	maintenanceCtx, maintenanceCancel := context.WithCancel(context.Background())
+	defer maintenanceCancel()
+	go runMaintenanceLoop(maintenanceCtx, s)
 
 	// === 初始化告警引擎 ===
 	alertEngine := alert.NewEngine(s, cfg)
@@ -114,4 +119,32 @@ func main() {
 	httpServer.Shutdown(ctx)
 	listener.Close()
 	log.Println("wukong 主控已停止")
+}
+
+func runMaintenanceLoop(ctx context.Context, s store.MetricsStore) {
+	// Ping 原始数据按小时表写入，前端 24h 图表读取分钟聚合；这里每分钟滚动聚合上一分钟数据。
+	pingTicker := time.NewTicker(time.Minute)
+	defer pingTicker.Stop()
+
+	// 历史清理低频执行，避免 SQLite 文件无限增长；失败只记录日志，不影响主控服务。
+	cleanupTicker := time.NewTicker(6 * time.Hour)
+	defer cleanupTicker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-pingTicker.C:
+			if err := s.AggregatePingMin(); err != nil {
+				log.Printf("聚合 Ping 分钟数据失败: %v", err)
+			}
+		case <-cleanupTicker.C:
+			if err := s.CleanOldAggData(24 * 30); err != nil {
+				log.Printf("清理旧 Ping 聚合数据失败: %v", err)
+			}
+			if err := s.DropOldHourlyTables(24 * 30); err != nil {
+				log.Printf("清理旧小时表失败: %v", err)
+			}
+		}
+	}
 }

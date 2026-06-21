@@ -451,7 +451,8 @@ func (s *SQLiteStore) DeleteGroup(id string) error {
 // ---- ISP ----
 
 func (s *SQLiteStore) ListISPTargets() ([]*ISPTarget, error) {
-	rows, err := s.db.Query("SELECT id, name, ip, port, mode, enabled FROM isp_targets WHERE enabled = 1")
+	// 管理页需要看到已停用目标，注册下发和公开展示再按 Enabled 过滤。
+	rows, err := s.db.Query("SELECT id, name, ip, port, mode, enabled FROM isp_targets ORDER BY id")
 	if err != nil {
 		return nil, err
 	}
@@ -513,9 +514,12 @@ func tableNameForTime(prefix string, ts time.Time) string {
 	return fmt.Sprintf("%s_%s", prefix, ts.Format("2006010215"))
 }
 
-func (s *SQLiteStore) WriteSystemMetric(agentID string, ts time.Time, cpu, mem, disk float64, netUp, netDown int64, osVersion string) error {
-	table := tableNameForTime("metrics_sys", ts)
-	// 使用 CREATE TABLE IF NOT EXISTS 按需创建小时表
+func (s *SQLiteStore) WriteSystemMetric(metric *SystemMetricInput) error {
+	if metric == nil {
+		return fmt.Errorf("系统指标为空")
+	}
+	table := tableNameForTime("metrics_sys", metric.Timestamp)
+	// 使用 CREATE TABLE IF NOT EXISTS 按需创建小时表；新详情列一并写入，便于公开详情页展示 qio.ng 风格规格。
 	createSQL := fmt.Sprintf(
 		`CREATE TABLE IF NOT EXISTS %s (
 			ts INTEGER NOT NULL,
@@ -525,19 +529,96 @@ func (s *SQLiteStore) WriteSystemMetric(agentID string, ts time.Time, cpu, mem, 
 			disk REAL,
 			net_up INTEGER,
 			net_down INTEGER,
-			os_version TEXT
+			os_version TEXT,
+			uptime_seconds INTEGER,
+			boot_time INTEGER,
+			mem_total_bytes INTEGER,
+			disk_total_bytes INTEGER,
+			cpu_model TEXT,
+			cpu_cores INTEGER,
+			load1 REAL,
+			load5 REAL,
+			load15 REAL,
+			net_up_total_bytes INTEGER,
+			net_down_total_bytes INTEGER,
+			region TEXT,
+			platform TEXT
 		)`, table)
 	if _, err := s.db.Exec(createSQL); err != nil {
 		return fmt.Errorf("创建小时表 %s 失败: %w", table, err)
 	}
-	// 创建索引（IF NOT EXISTS）
+	if err := s.ensureSystemMetricColumns(table); err != nil {
+		return err
+	}
+	// 创建索引（IF NOT EXISTS），索引失败也返回错误，避免静默退化到全表扫描。
 	indexSQL := fmt.Sprintf("CREATE INDEX IF NOT EXISTS idx_%s_agent_ts ON %s(agent_id, ts)", table, table)
-	s.db.Exec(indexSQL)
+	if _, err := s.db.Exec(indexSQL); err != nil {
+		return fmt.Errorf("创建小时表索引 %s 失败: %w", table, err)
+	}
 
 	_, err := s.db.Exec(
-		fmt.Sprintf("INSERT INTO %s (ts, agent_id, cpu, mem, disk, net_up, net_down, os_version) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", table),
-		ts.Unix(), agentID, cpu, mem, disk, netUp, netDown, osVersion)
+		fmt.Sprintf(`INSERT INTO %s (
+			ts, agent_id, cpu, mem, disk, net_up, net_down, os_version,
+			uptime_seconds, boot_time, mem_total_bytes, disk_total_bytes, cpu_model, cpu_cores,
+			load1, load5, load15, net_up_total_bytes, net_down_total_bytes, region, platform
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, table),
+		metric.Timestamp.Unix(), metric.AgentID, metric.CPU, metric.Mem, metric.Disk, metric.NetUp, metric.NetDown, metric.OSVersion,
+		metric.UptimeSeconds, metric.BootTime, metric.MemTotalBytes, metric.DiskTotalBytes, metric.CPUModel, metric.CPUCores,
+		metric.Load1, metric.Load5, metric.Load15, metric.NetUpTotalBytes, metric.NetDownTotalBytes, metric.Region, metric.Platform)
 	return err
+}
+
+func (s *SQLiteStore) ensureSystemMetricColumns(table string) error {
+	// 旧小时表不会因为 CREATE TABLE IF NOT EXISTS 自动补列；写入前按列检查，保证热升级跨小时不报 no such column。
+	columns := map[string]string{
+		"uptime_seconds":       "INTEGER",
+		"boot_time":            "INTEGER",
+		"mem_total_bytes":      "INTEGER",
+		"disk_total_bytes":     "INTEGER",
+		"cpu_model":            "TEXT",
+		"cpu_cores":            "INTEGER",
+		"load1":                "REAL",
+		"load5":                "REAL",
+		"load15":               "REAL",
+		"net_up_total_bytes":   "INTEGER",
+		"net_down_total_bytes": "INTEGER",
+		"region":               "TEXT",
+		"platform":             "TEXT",
+	}
+	existing, err := s.tableColumns(table)
+	if err != nil {
+		return err
+	}
+	for name, typ := range columns {
+		if existing[name] {
+			continue
+		}
+		if _, err := s.db.Exec(fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s", table, name, typ)); err != nil {
+			return fmt.Errorf("补齐小时表 %s.%s 失败: %w", table, name, err)
+		}
+	}
+	return nil
+}
+
+func (s *SQLiteStore) tableColumns(table string) (map[string]bool, error) {
+	rows, err := s.db.Query(fmt.Sprintf("PRAGMA table_info(%s)", table))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	columns := make(map[string]bool)
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notNull int
+		var defaultValue interface{}
+		var pk int
+		if err := rows.Scan(&cid, &name, &typ, &notNull, &defaultValue, &pk); err != nil {
+			return nil, err
+		}
+		columns[name] = true
+	}
+	return columns, rows.Err()
 }
 
 func (s *SQLiteStore) WritePingMetric(agentID string, ts time.Time, isp, targetIP string, latency, loss, jitter float64) error {
@@ -589,26 +670,90 @@ func (s *SQLiteStore) AggregatePingMin() error {
 
 // ---- 时序数据查询 ----
 
+func (s *SQLiteStore) systemMetricSelect(table string, includeAgent bool) (string, error) {
+	columns, err := s.tableColumns(table)
+	if err != nil {
+		return "", err
+	}
+	pick := func(name, fallback string) string {
+		if columns[name] {
+			return name
+		}
+		return fallback + " AS " + name
+	}
+	fields := []string{}
+	if includeAgent {
+		fields = append(fields, "agent_id")
+	}
+	fields = append(fields,
+		"cpu", "mem", "disk", "net_up", "net_down", "os_version",
+		pick("uptime_seconds", "0"),
+		pick("boot_time", "0"),
+		pick("mem_total_bytes", "0"),
+		pick("disk_total_bytes", "0"),
+		pick("cpu_model", "''"),
+		pick("cpu_cores", "0"),
+		pick("load1", "0"),
+		pick("load5", "0"),
+		pick("load15", "0"),
+		pick("net_up_total_bytes", "0"),
+		pick("net_down_total_bytes", "0"),
+		pick("region", "''"),
+		pick("platform", "''"),
+		"ts",
+	)
+	return strings.Join(fields, ", "), nil
+}
+
+func scanLatestMetric(scanner interface{ Scan(dest ...any) error }, includeAgent bool, agentID string) (*LatestMetric, error) {
+	m := &LatestMetric{AgentID: agentID}
+	var osVer, cpuModel, region, platform sql.NullString
+	var ts int64
+	dest := []any{}
+	if includeAgent {
+		dest = append(dest, &m.AgentID)
+	}
+	dest = append(dest,
+		&m.CPU, &m.Mem, &m.Disk, &m.NetUp, &m.NetDown, &osVer,
+		&m.UptimeSeconds, &m.BootTime, &m.MemTotalBytes, &m.DiskTotalBytes, &cpuModel, &m.CPUCores,
+		&m.Load1, &m.Load5, &m.Load15, &m.NetUpTotalBytes, &m.NetDownTotalBytes, &region, &platform, &ts,
+	)
+	if err := scanner.Scan(dest...); err != nil {
+		return nil, err
+	}
+	if osVer.Valid {
+		m.OSVersion = osVer.String
+	}
+	if cpuModel.Valid {
+		m.CPUModel = cpuModel.String
+	}
+	if region.Valid {
+		m.Region = region.String
+	}
+	if platform.Valid {
+		m.Platform = platform.String
+	}
+	m.UpdatedAt = time.Unix(ts, 0)
+	return m, nil
+}
+
 func (s *SQLiteStore) GetLatestMetrics(agentID string) (*LatestMetric, error) {
-	// 从当前小时和上一小时查最新一条，避免整点附近刚切表时页面没有最新数据。
+	// 从当前小时和上一小时查最新一条，且动态兼容升级前缺少详情列的旧小时表。
 	now := time.Now()
 	for i := 0; i < 2; i++ {
 		table := tableNameForTime("metrics_sys", now.Add(-time.Duration(i)*time.Hour))
 		if !s.tableExists(table) {
 			continue
 		}
+		fields, err := s.systemMetricSelect(table, false)
+		if err != nil {
+			return nil, err
+		}
 		row := s.db.QueryRow(
-			fmt.Sprintf("SELECT cpu, mem, disk, net_up, net_down, os_version, ts FROM %s WHERE agent_id = ? ORDER BY ts DESC LIMIT 1", table),
+			fmt.Sprintf("SELECT %s FROM %s WHERE agent_id = ? ORDER BY ts DESC LIMIT 1", fields, table),
 			agentID)
-		m := &LatestMetric{AgentID: agentID}
-		var osVer sql.NullString
-		var ts int64
-		err := row.Scan(&m.CPU, &m.Mem, &m.Disk, &m.NetUp, &m.NetDown, &osVer, &ts)
+		m, err := scanLatestMetric(row, false, agentID)
 		if err == nil {
-			if osVer.Valid {
-				m.OSVersion = osVer.String
-			}
-			m.UpdatedAt = time.Unix(ts, 0)
 			return m, nil
 		}
 	}
@@ -616,8 +761,7 @@ func (s *SQLiteStore) GetLatestMetrics(agentID string) (*LatestMetric, error) {
 }
 
 func (s *SQLiteStore) GetAllLatestMetrics() (map[string]*LatestMetric, error) {
-	// 从当前小时和上一小时合并每台探针的最新指标，并正确写入 UpdatedAt。
-	// 原先 SELECT MAX(ts) 但没有扫描 ts，会导致首页无法判断数据新鲜度。
+	// 从当前小时和上一小时合并每台探针的最新指标，并兼容旧小时表缺少新增详情列。
 	now := time.Now()
 	result := make(map[string]*LatestMetric)
 	for i := 0; i < 2; i++ {
@@ -625,22 +769,19 @@ func (s *SQLiteStore) GetAllLatestMetrics() (map[string]*LatestMetric, error) {
 		if !s.tableExists(table) {
 			continue
 		}
-		rows, err := s.db.Query(
-			fmt.Sprintf("SELECT agent_id, cpu, mem, disk, net_up, net_down, os_version, ts FROM %s ORDER BY ts DESC", table))
+		fields, err := s.systemMetricSelect(table, true)
+		if err != nil {
+			return nil, err
+		}
+		rows, err := s.db.Query(fmt.Sprintf("SELECT %s FROM %s ORDER BY ts DESC", fields, table))
 		if err != nil {
 			return nil, err
 		}
 		for rows.Next() {
-			m := &LatestMetric{}
-			var osVer sql.NullString
-			var ts int64
-			if err := rows.Scan(&m.AgentID, &m.CPU, &m.Mem, &m.Disk, &m.NetUp, &m.NetDown, &osVer, &ts); err != nil {
+			m, err := scanLatestMetric(rows, true, "")
+			if err != nil {
 				rows.Close()
 				return nil, err
-			}
-			m.UpdatedAt = time.Unix(ts, 0)
-			if osVer.Valid {
-				m.OSVersion = osVer.String
 			}
 			if existing, ok := result[m.AgentID]; !ok || m.UpdatedAt.After(existing.UpdatedAt) {
 				result[m.AgentID] = m
@@ -673,7 +814,9 @@ func (s *SQLiteStore) GetPingAgg(agentID, isp string, since, until time.Time) ([
 			return nil, err
 		}
 		p.BucketMin = time.Unix(bucket, 0)
-		p.LossRate = float64(lossCnt) / float64(p.Count)
+		if p.Count > 0 {
+			p.LossRate = float64(lossCnt) / float64(p.Count)
+		}
 		results = append(results, p)
 	}
 	return results, nil
