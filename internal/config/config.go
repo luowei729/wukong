@@ -3,12 +3,17 @@
 package config
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"time"
+
+	"golang.org/x/crypto/bcrypt"
 )
 
 // 默认路径
@@ -33,7 +38,7 @@ type ServerConfig struct {
 	SignerSocket string `json:"signer_socket"` // 签名服务 Unix Socket 路径
 
 	// 管理员鉴权
-	AdminUsername     string `json:"admin_username"`     // 管理员用户名
+	AdminUsername     string `json:"admin_username"`     // 管理员用户名（默认 "admin"）
 	AdminPasswordHash string `json:"-"`                  // 密码 bcrypt 哈希（不从配置读取）
 	AdminTOTPSecret   string `json:"-"`                  // TOTP 密钥（不从配置读取）
 	JWTSecret         string `json:"jwt_secret"`         // JWT 签名密钥
@@ -79,6 +84,7 @@ func DefaultServerConfig() *ServerConfig {
 		ListenAddr:             DefaultListenAddr,
 		DataDir:                filepath.Join(DefaultDir, "data"),
 		DBPath:                 DefaultDBPath,
+		AdminUsername:          "admin",
 		JWTSecret:              randomHex(32),
 		JWTAccessExpiry:        "15m",
 		JWTRefreshExpiry:       "168h",
@@ -143,6 +149,31 @@ func LoadServerConfig(path string) (*ServerConfig, error) {
 	if v := os.Getenv("WUKONG_TG_BOT_TOKEN"); v != "" {
 		cfg.DefaultTelegramBotToken = v
 	}
+
+	// === 自动生成默认值（用于 Docker 等无配置场景） ===
+
+	// 如果 JWT 密钥为空，自动生成随机密钥
+	if cfg.JWTSecret == "" {
+		cfg.JWTSecret = randomHex(32)
+		log.Printf("[自动生成] JWT_SECRET=%s", cfg.JWTSecret)
+	}
+
+	// 如果管理员密码为空，自动生成随机密码并 bcrypt 哈希
+	if cfg.AdminPasswordHash == "" {
+		plainPwd := randomHex(16) // 16 字符随机密码
+		hash, err := bcrypt.GenerateFromPassword([]byte(plainPwd), bcrypt.DefaultCost)
+		if err != nil {
+			return nil, fmt.Errorf("生成管理员密码 hash 失败: %w", err)
+		}
+		cfg.AdminPasswordHash = string(hash)
+		// 日志打印明文密码，首次启动时展示给用户
+		log.Printf("========================================")
+		log.Printf("  管理员用户名: %s", cfg.AdminUsername)
+		log.Printf("  管理员密码:   %s", plainPwd)
+		log.Printf("  （请登录后立即修改密码）")
+		log.Printf("========================================")
+	}
+
 	return cfg, nil
 }
 
@@ -217,13 +248,15 @@ func (c *ServerConfig) GetRefreshExpiry() time.Duration {
 	return ParseDuration(c.JWTRefreshExpiry, 7*24*time.Hour)
 }
 
-// randomHex 生成随机十六进制字符串（用于默认密钥生成）
+// randomHex 生成随机十六进制字符串（用于默认密钥和密码生成）
 func randomHex(n int) string {
-	const hexChars = "0123456789abcdef"
 	b := make([]byte, n)
-	for i := range b {
-		// 生产环境使用 crypto/rand
-		b[i] = hexChars[i%len(hexChars)]
+	if _, err := rand.Read(b); err != nil {
+		// 极端情况回退到时间种子（几乎不会发生）
+		log.Printf("[警告] crypto/rand 读取失败: %v, 使用备用方案", err)
+		for i := range b {
+			b[i] = byte(time.Now().UnixNano() >> (i % 8))
+		}
 	}
-	return string(b)
+	return hex.EncodeToString(b)
 }

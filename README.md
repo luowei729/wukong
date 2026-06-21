@@ -10,21 +10,32 @@
 
 ### 方式一：Docker 一键运行（推荐）
 
-无需编译、无需 nginx，直接运行：
+无需编译、无需 nginx，无需设置任何环境变量，直接运行：
 
 ```bash
-# 1. 从 GHCR 拉取并启动
+# 1. 从 GHCR 拉取并启动（密码和 JWT 密钥自动生成）
+docker run -d --name wukong \
+  -p 64443:64443 \
+  ghcr.io/luowei729/wukong:latest
+
+# 2. 查看自动生成的密码
+docker logs wukong | grep 管理员
+
+# 3. 验证
+curl http://127.0.0.1:64443/api/health
+
+# 4. 浏览器打开 http://你的IP:64443
+# 用户名: admin / 密码: docker logs 中查看
+```
+
+如果需要指定密码（生产环境推荐）：
+
+```bash
 docker run -d --name wukong \
   -p 64443:64443 \
   -e WUKONG_ADMIN_PASSWORD="你的密码" \
   -e WUKONG_JWT_SECRET="32位随机密钥" \
   ghcr.io/luowei729/wukong:latest
-
-# 2. 验证
-curl http://127.0.0.1:64443/api/health
-
-# 3. 浏览器打开 http://你的IP:64443
-# 用户名: admin / 密码: 你设置的密码
 ```
 
 或使用 docker compose：

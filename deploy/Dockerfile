@@ -45,10 +45,8 @@ RUN mkdir -p /opt/wukong/data
 # 复制二进制
 COPY --from=backend-builder /build/wukong-server /opt/wukong/wukong
 
-# 环境变量覆盖配置（无需配置文件即可运行）
+# 环境变量覆盖配置（无需配置文件即可运行，不设默认值则代码自动生成随机值）
 ENV WUKONG_LISTEN_ADDR=0.0.0.0:64443
-ENV WUKONG_ADMIN_PASSWORD=""
-ENV WUKONG_JWT_SECRET=""
 ENV WUKONG_DATA_DIR=/opt/wukong/data
 ENV WUKONG_DB_PATH=/opt/wukong/data/wukong.db
 ENV WUKONG_LOG_LEVEL=info

@@ -141,7 +141,52 @@ wukong/
 - 探针注册逻辑需要后端 `/api/agents/register` 端点（目前只有 gRPC 注册）
 - 自动备份 timer 文件可独立为 `deploy/systemd/wukong-backup.service` 和 `.timer`
 
-## [2026-06-21 10:45] - 修复 Actions CI + 推 GHCR 验证通过
+## [2026-06-21 11:30] - 默认密码自动生成 + JWT 随机密钥
+
+### 改动前总结
+`WUKONG_ADMIN_PASSWORD` 和 `WUKONG_JWT_SECRET` 必须由用户指定。`randomHex` 使用确定性算法（非随机），安全性差。Docker 和 docker-compose 强制要求环境变量，不设则报错。
+
+### 改动后总结
+1. **config.go 自动生成随机密码**
+   - `AdminPasswordHash` 为空时自动生成 16 字符随机明文密码，bcrypt 哈希存配置
+   - 日志打印用户名+密码，方便首次登录
+   - `AdminUsername` 默认值设为 `"admin"`
+
+2. **config.go 自动生成随机 JWT 密钥**
+   - `JWTSecret` 为空时自动调用 `randomHex(32)` 生成
+
+3. **randomHex 改用 crypto/rand**
+   - 从确定性算法改为 `crypto/rand.Read` 安全随机数
+   - 极端回退方案保留（时间种子）
+
+4. **Dockerfile 去掉空 ENV 声明**
+   - 删掉 `ENV WUKONG_ADMIN_PASSWORD=""` 和 `ENV WUKONG_JWT_SECRET=""`，避免空值覆盖自动生成
+
+5. **docker-compose.yml 简化**
+   - 不强制要求环境变量，注释示例
+   - 镜像地址改为 `ghcr.io/luowei729/wukong`
+
+### 验证结果
+```bash
+# 不设任何环境变量启动
+docker run -d --name wukong -p 64443:64443 ghcr.io/luowei729/wukong:latest
+
+# 日志自动输出
+# ========================================
+#   管理员用户名: admin
+#   管理员密码:   5987ad38b274f29a1dbd5b7252305757
+# ========================================
+
+# API 正常
+curl http://127.0.0.1:64443/api/health
+→ {"status":"ok"}
+```
+
+### 涉及文件
+- `internal/config/config.go`（密码生成、JWT 生成、randomHex 安全随机、默认用户名）
+- `deploy/Dockerfile`（去掉空 ENV）
+- `deploy/docker-compose.yml`（去掉 required 标志）
+- `AGENTS.md` / `CHANGELOG.md`（当前记录）
 
 ### 改动前总结
 Actions 首次运行因 cache 后端 `type=local` 失败。Dockerfile 中 `CMD ["--config", ""]` 但配置不存在时的环境变量覆盖在第一次修改后才生效。
