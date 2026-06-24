@@ -2,6 +2,29 @@
 
 所有变更记录使用北京时间（UTC+8）。
 
+## [2026-06-25 07:15] - 修复自动升级架构误判、并发崩溃和 ff1 Ping 聚合漏数
+
+### 改动前总结
+1. 自动升级目标版本开启后，主控因 `onlineAgents` map 并发写入崩溃，容器反复重启。
+2. 4 台 arm64 节点因旧探针注册时把架构写成 amd64，收到错误架构升级包后离线。
+3. ff1 原始 Ping 表中有数据，但 `ping_agg_1min` 无聚合数据，前端 Ping 图为空。
+4. GitHub Actions 构建未传 Docker build args，线上版本显示 `dev`。
+
+### 改动后总结
+1. `AgentServer.onlineAgents` 增加 `sync.RWMutex`，修复 `fatal error: concurrent map writes`。
+2. `MetricsReport` 新增 `agent_version` / `arch` 字段，探针每次上报当前版本和架构，主控实时更新 agents 表，避免下次自动升级继续按旧架构下发。
+3. `AggregatePingMin` 改为滚动聚合最近 10 分钟并按 `(ts/60)*60` 计算分钟桶，避免低频/延迟上报节点漏聚合；生产已回填 ff1 历史聚合数据。
+4. `.github/workflows/docker.yml` 给 Docker 构建传入 `VERSION/COMMIT/BUILD_TIME`，线上版本显示 commit SHA。
+5. 生产手动更新 4 台 arm64 探针：129.150.44.117、146.56.173.198、64.110.72.71、134.185.89.93；随后设置 `agent_target_version=a35fe13...`，其余 amd64 探针已自动升级。当前 13/13 节点在线，ff1 Cloudflare Ping 24h 已有 96 个聚合点。
+6. 管理员密码已统一为 `782094Abc`。
+
+### 涉及文件
+- `proto/wukong.proto`、`proto/gen/wukong.pb.go` — MetricsReport 新增 agent_version/arch
+- `internal/agentcore/agent.go` — 上报版本和架构
+- `internal/grpcapi/agent_server.go` — onlineAgents 加锁；同步探针版本/架构
+- `internal/store/sqlite.go` — Ping 分钟聚合滚动补偿
+- `.github/workflows/docker.yml` — Docker build args 注入版本信息
+
 ## [2026-06-25 15:30] - 探针版本自增/自动升级、全屏布局、架构修复、登录过期调整
 
 ### 改动前总结
