@@ -648,8 +648,14 @@ func getPublicIPs() (string, string) {
 
 		ipV4 = <-v4Ch
 		ipV6 = <-v6Ch
+		if !isPublicIP(ipV4) {
+			ipV4 = ""
+		}
+		if !isPublicIP(ipV6) {
+			ipV6 = ""
+		}
 
-		// 如果外部 API 都失败，回退到本机网卡地址
+		// 如果外部 API 都失败，回退到本机网卡地址（仅接受公网地址）
 		if ipV4 == "" && ipV6 == "" {
 			ipV4, ipV6 = getLocalIPs()
 		}
@@ -679,14 +685,24 @@ func getLocalIPs() (string, string) {
 		if !ok || ipNet.IP.IsLoopback() {
 			continue
 		}
-		if ipNet.IP.To4() != nil && ipV4 == "" {
+		if ipNet.IP.To4() != nil && ipV4 == "" && isPublicIP(ipNet.IP.String()) {
 			ipV4 = ipNet.IP.String()
 		}
-		if ipNet.IP.To4() == nil && ipV6 == "" {
+		if ipNet.IP.To4() == nil && ipV6 == "" && isPublicIP(ipNet.IP.String()) {
 			ipV6 = ipNet.IP.String()
 		}
 	}
 	return ipV4, ipV6
+}
+
+// isPublicIP 只允许公网出口 IP 上报。
+// 过滤 10/172.16/192.168、loopback、link-local(fe80::/10)、ULA(fc00::/7) 等非公网地址。
+func isPublicIP(value string) bool {
+	ip := net.ParseIP(strings.TrimSpace(value))
+	if ip == nil {
+		return false
+	}
+	return ip.IsGlobalUnicast() && !ip.IsPrivate() && !ip.IsLoopback() && !ip.IsLinkLocalUnicast() && !ip.IsLinkLocalMulticast() && !ip.IsUnspecified()
 }
 
 func minDuration(a, b time.Duration) time.Duration {

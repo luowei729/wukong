@@ -241,7 +241,7 @@ function renderChart() {
 function formatTime(value: string) {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return value
-  return `${date.getHours().toString().padStart(2, '0')}:${date.getMinutes().toString().padStart(2, '0')}`
+  return `${date.getHours().toString().padStart(2, '0')}:${date.getMinutes().toString().padStart(2, '0')}:${date.getSeconds().toString().padStart(2, '0')}`
 }
 
 onMounted(async () => {

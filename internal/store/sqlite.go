@@ -836,29 +836,45 @@ func (s *SQLiteStore) GetAllLatestMetrics() (map[string]*LatestMetric, error) {
 }
 
 func (s *SQLiteStore) GetPingAgg(agentID, isp string, since, until time.Time) ([]*PingAggMin, error) {
-	rows, err := s.db.Query(
-		`SELECT bucket_min, cnt, avg_lat, min_lat, max_lat, loss_cnt FROM ping_agg_1min
-		 WHERE agent_id = ? AND isp = ? AND bucket_min >= ? AND bucket_min < ?
-		 ORDER BY bucket_min`,
-		agentID, isp, since.Unix(), until.Unix())
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
+	// 网络延时 K 线需要秒级颗粒度：直接从原始 Ping 小时表按 ts 秒聚合，而不是读 1 分钟预聚合表。
+	// 1 分钟预聚合仍保留给历史统计/兜底，但前端 24h K 线按原始秒级数据展示。
+	start := since.Truncate(time.Hour)
+	end := until.Truncate(time.Hour)
 	var results []*PingAggMin
-	for rows.Next() {
-		p := &PingAggMin{AgentID: agentID, ISP: isp}
-		var bucket int64
-		var lossCnt int
-		err := rows.Scan(&bucket, &p.Count, &p.AvgLat, &p.MinLat, &p.MaxLat, &lossCnt)
+	for t := start; !t.After(end); t = t.Add(time.Hour) {
+		table := tableNameForTime("metrics_ping", t)
+		query := fmt.Sprintf(`SELECT ts, COUNT(*), AVG(latency), MIN(latency), MAX(latency),
+			SUM(CASE WHEN loss > 0 THEN 1 ELSE 0 END)
+			FROM %s
+			WHERE agent_id = ? AND isp = ? AND ts >= ? AND ts < ?
+			GROUP BY ts
+			ORDER BY ts`, table)
+		rows, err := s.db.Query(query, agentID, isp, since.Unix(), until.Unix())
 		if err != nil {
+			if strings.Contains(err.Error(), "no such table") {
+				continue
+			}
 			return nil, err
 		}
-		p.BucketMin = time.Unix(bucket, 0)
-		if p.Count > 0 {
-			p.LossRate = float64(lossCnt) / float64(p.Count)
+		for rows.Next() {
+			p := &PingAggMin{AgentID: agentID, ISP: isp}
+			var bucket int64
+			var lossCnt int
+			if err := rows.Scan(&bucket, &p.Count, &p.AvgLat, &p.MinLat, &p.MaxLat, &lossCnt); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			p.BucketMin = time.Unix(bucket, 0)
+			if p.Count > 0 {
+				p.LossRate = float64(lossCnt) / float64(p.Count)
+			}
+			results = append(results, p)
 		}
-		results = append(results, p)
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		rows.Close()
 	}
 	return results, nil
 }

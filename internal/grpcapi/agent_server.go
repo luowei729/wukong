@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"sync"
 	"time"
 
@@ -271,11 +272,11 @@ func (s *AgentServer) handleMetricsReport(agentID string, r *pb.MetricsReport) {
 				agent.Arch = r.Arch
 				changed = true
 			}
-			if r.IpV4 != "" && agent.IPv4 != r.IpV4 {
+			if r.IpV4 != "" && isPublicIP(r.IpV4) && agent.IPv4 != r.IpV4 {
 				agent.IPv4 = r.IpV4
 				changed = true
 			}
-			if r.IpV6 != "" && agent.IPv6 != r.IpV6 {
+			if r.IpV6 != "" && isPublicIP(r.IpV6) && agent.IPv6 != r.IpV6 {
 				agent.IPv6 = r.IpV6
 				changed = true
 			}
@@ -400,4 +401,12 @@ func min(a, b int) int {
 		return a
 	}
 	return b
+}
+
+func isPublicIP(value string) bool {
+	ip := net.ParseIP(value)
+	if ip == nil {
+		return false
+	}
+	return ip.IsGlobalUnicast() && !ip.IsPrivate() && !ip.IsLoopback() && !ip.IsLinkLocalUnicast() && !ip.IsLinkLocalMulticast() && !ip.IsUnspecified()
 }

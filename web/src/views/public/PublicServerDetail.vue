@@ -402,7 +402,7 @@ function relativeTime(value?: string) {
 
 function formatTime(value: string) {
   const d = new Date(value)
-  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:${String(d.getSeconds()).padStart(2, '0')}`
 }
 
 function handleResize() {

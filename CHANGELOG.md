@@ -2,6 +2,23 @@
 
 所有变更记录使用北京时间（UTC+8）。
 
+## [2026-06-25 07:55] - 过滤非公网出口 IP，Ping K 线改为秒级颗粒度
+
+### 改动前总结
+1. 出口 IP 回退逻辑会把本机网卡私网地址当作出口 IP 上报，例如 `172.31.*` 和 IPv6 link-local `fe80::*`。
+2. Ping K 线接口读取 1 分钟聚合表，前端时间标签只显示 `HH:mm`，不是每秒颗粒度。
+
+### 改动后总结
+1. 探针和主控双侧过滤非公网 IP：私网 IPv4、loopback、link-local、IPv6 ULA/link-local 均不会作为出口 IP 入库或显示。
+2. Ping K 线接口改为直接读取原始 `metrics_ping_YYYYMMDDHH` 小时表，按 `ts` 秒级聚合返回；前端时间标签显示 `HH:mm:ss`。
+3. `ping_agg_1min` 仍保留用于历史维护/兜底，但 K 线展示使用秒级原始数据。
+
+### 涉及文件
+- `internal/agentcore/agent.go` — 过滤非公网出口 IP
+- `internal/grpcapi/agent_server.go` — 入库前再次过滤非公网 IP
+- `internal/store/sqlite.go` — Ping K 线查询改为秒级原始数据
+- `web/src/views/NodeDetail.vue`、`web/src/views/public/PublicServerDetail.vue` — 时间标签显示秒
+
 ## [2026-06-25 07:40] - Ping 1 秒配置热更新与出口 IPv4/IPv6 上报显示闭环
 
 ### 改动前总结
