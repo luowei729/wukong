@@ -48,7 +48,7 @@
 import { ref, reactive } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import axios from 'axios'
+import http from '@/utils/http'
 
 const router = useRouter()
 const route = useRoute()
@@ -76,7 +76,7 @@ async function handleLogin() {
   error.value = ''
 
   try {
-    const res = await axios.post('/api/auth/login', {
+    const res = await http.post('/api/auth/login', {
       username: form.username,
       password: form.password,
       totp_code: form.totpCode,

@@ -2,6 +2,34 @@
 
 所有变更记录使用北京时间（UTC+8）。
 
+## [2026-06-21 18:39] - 生产部署并验证 443 探针与公开详情
+
+### 改动前总结
+Ping 运营商配置和 qio.ng 风格详情字段已完成代码实现、提交并推送，GHCR 镜像构建成功，但生产服务器尚未拉取最新镜像；远程本机探针没有运行，也没有 `agent.conf`，因此生产公开详情暂时还缺少新增系统规格字段和 Ping 聚合数据。
+
+### 改动后总结
+1. 远程服务器已拉取 `ghcr.io/luowei729/wukong:latest` 最新镜像并重建 `wukong` 容器，端口继续保持 `127.0.0.1:64443->64443/tcp`，不对公网暴露 64443。
+2. 已确认生产 SQLite 设置仍为 `site_domain=https://server.lkz.pub`、`agent_server_addr=server.lkz.pub:443`。
+3. 生产 SQLite 已写入一个启用的 Cloudflare TCP Ping 目标用于验证链路；公开 API 只暴露 ISP 名称和聚合延迟，不暴露目标 IP/端口。
+4. 远程本机探针已通过在线安装脚本注册，`agent.conf` 固化 `server_addr=server.lkz.pub:443`、`collect_interval=1`、`ping_interval=60` 和 1 个 Ping 目标，并由 systemd 常驻运行。
+5. 公开详情 API 已返回 Uptime、Boot time、Mem/Disk total、CPU 型号/核心、Load、累计流量、Platform 等新增字段，并能读取 Cloudflare Ping 聚合点。
+6. 无头 Chrome 已打开生产首页和公开详情页，DOM 非空，详情页包含 Status/Uptime/Arch/Mem/Disk/System/CPU/Load/Upload/Download/Boot time/Last active time/网络延迟/Cloudflare 等内容。
+
+### 验证结果
+- 远程 Docker：`wukong ghcr.io/luowei729/wukong:latest 127.0.0.1:64443->64443/tcp`。
+- 健康接口：`https://server.lkz.pub/api/health` 返回 `{"status":"ok","version":"0.1.0"}`。
+- 生产探针日志显示已连接到 `server.lkz.pub:443`。
+- 公开 API 脱敏检查未发现 `agent_secret`、`secret`、`token`、`jwt`、`totp`、`telegram` 或 Ping 目标地址。
+- 无头 Chrome 截图已生成到 `/tmp/wukong-chrome-final/home.png` 和 `/tmp/wukong-chrome-final/detail.png`。
+
+### 涉及文件
+- `AGENTS.md`
+- `CHANGELOG.md`
+- `PROJECT_PLAN.md`
+- `DEPLOY_CREDENTIALS.md`
+
+---
+
 ## [2026-06-21 18:23] - 补齐 Ping 运营商配置、服务器配置与详情字段
 
 ### 改动前总结

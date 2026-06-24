@@ -1,6 +1,6 @@
 # wukong 监控系统 - 开发规范与提示
 
-> 最后更新: 2026-06-21 18:23 (北京时间)
+> 最后更新: 2026-06-21 18:39 (北京时间)
 
 ## 开发原则
 
@@ -82,6 +82,7 @@ wukong/
 - **2026-06-21 14:43（北京时间）**：页面和 API 响应必须全站带 `Cache-Control: no-store, no-cache, must-revalidate, max-age=0`、`Pragma: no-cache`、`Expires: 0`，公开首页、公开详情页、后台总览、后台设备页每秒静默轮询并给请求加 `?_=${Date.now()}`；默认采集间隔改为 1 秒。管理员修改密码接口为 `PUT /api/auth/password`，必须 JWT 鉴权、校验当前密码，新密码 bcrypt hash 写入 SQLite `settings.admin_password_hash` 固化，登录前优先读取该设置。
 - **2026-06-21 15:05（北京时间）**：生产要求探针只能通过 `server.lkz.pub:443` 连接，不再使用 `64443` 对外直连；探针客户端在目标端口为 443 时使用 TLS gRPC，经 nginx `listen 443 ssl http2` 的 `/wukong.AgentService/` 反代转发到本机 64443，其他端口仍保持明文 gRPC。后台 `agent_server_addr` 生产值应固化为 `server.lkz.pub:443`，安装脚本必须输出 `SERVER_ADDR="server.lkz.pub:443"`。Telegram 设置页不回显 token、不使用 password 类型并提供测试通知；告警阈值页必须显示离线阈值；告警中心空列表要返回/兜底成数组；agent 安装需支持 amd64/arm64，注册后退出并由 systemd 常驻和开机自启；服务器节点名称支持后台自定义修改。
 - **2026-06-21 18:23（北京时间）**：Ping 运营商配置已形成第一阶段闭环：后台“Ping 运营商”页写入 SQLite `isp_targets`，注册响应向探针下发启用目标和 `ping_interval`，探针将目标持久化到 `agent.conf` 并按独立频率执行 ICMP(auto 回退 TCP)/TCP 探测，上报后主控写入小时表并每分钟聚合到 `ping_agg_1min`。公开详情页只暴露启用 ISP 名称和聚合延迟，不泄露目标 IP/端口；服务器详情字段扩展为 Uptime/Boot time/Region/CPU 型号/Load/累计流量等 qio.ng 风格展示。
+- **2026-06-21 18:39（北京时间）**：生产已部署 commit `61f033a` 对应的 GHCR 最新镜像，远程 Docker 容器继续保持 `127.0.0.1:64443->64443/tcp`，SQLite `site_domain=https://server.lkz.pub` 与 `agent_server_addr=server.lkz.pub:443` 已确认。生产本机探针已通过在线安装脚本注册并由 systemd 常驻，日志显示连接 `server.lkz.pub:443`；公开详情已拿到 qio.ng 风格系统字段和 Cloudflare Ping 聚合数据，无头 Chrome 验证首页与详情页均不是白屏。
 - **开发后续优先级**：① 签名配置热更新闭环 ② Web API 端点完整实现 ③ 告警引擎集成 gRPC 心跳 ④ 前端接入真实 API 数据 ⑤ 安装脚本与升级流程端到端原型
 
 ## 部署相关长期提示

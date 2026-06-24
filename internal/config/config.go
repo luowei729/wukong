@@ -11,6 +11,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"golang.org/x/crypto/bcrypt"
@@ -152,8 +153,19 @@ func LoadServerConfig(path string) (*ServerConfig, error) {
 		cfg.LogLevel = v
 	}
 	// 从环境变量读取敏感信息（不落盘）
+	// WUKONG_ADMIN_PASSWORD 支持传入明文密码，此处自动 bcrypt 哈希；
+	// 如果传入的值已经是 $2a$ 开头的 bcrypt hash，则直接使用，避免双重哈希。
 	if v := os.Getenv("WUKONG_ADMIN_PASSWORD"); v != "" {
-		cfg.AdminPasswordHash = v
+		if strings.HasPrefix(v, "$2a$") || strings.HasPrefix(v, "$2b$") {
+			cfg.AdminPasswordHash = v
+		} else {
+			hash, err := bcrypt.GenerateFromPassword([]byte(v), bcrypt.DefaultCost)
+			if err != nil {
+				return nil, fmt.Errorf("bcrypt 哈希管理员密码失败: %w", err)
+			}
+			cfg.AdminPasswordHash = string(hash)
+			log.Printf("[环境变量] WUKONG_ADMIN_PASSWORD 已转为 bcrypt 哈希")
+		}
 	}
 	if v := os.Getenv("WUKONG_TOTP_SECRET"); v != "" {
 		cfg.AdminTOTPSecret = v

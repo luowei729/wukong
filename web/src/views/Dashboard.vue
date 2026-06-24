@@ -54,7 +54,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
-import axios from 'axios'
+import http from '@/utils/http'
 
 const router = useRouter()
 const nodeList = ref<any[]>([])
@@ -70,11 +70,9 @@ const stats = ref([
 
 async function fetchNodes() {
   try {
-    const token = localStorage.getItem('access_token')
-    const headers = { Authorization: `Bearer ${token}` }
     const [agentsRes, latestRes] = await Promise.all([
-      axios.get(`/api/agents?_=${Date.now()}`, { headers }),
-      axios.get(`/api/agents/latest?_=${Date.now()}`, { headers }),
+      http.get(`/api/agents?_=${Date.now()}`),
+      http.get(`/api/agents/latest?_=${Date.now()}`),
     ])
     const latest = latestRes.data || {}
     nodeList.value = (agentsRes.data || []).map((node: any) => ({

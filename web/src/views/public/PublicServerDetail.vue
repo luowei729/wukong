@@ -81,7 +81,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import axios from 'axios'
+import http from '@/utils/http'
 import * as echarts from 'echarts'
 
 interface PublicServer {
@@ -184,7 +184,7 @@ async function loadServer(showLoading = false) {
   if (showLoading) loading.value = true
   error.value = ''
   try {
-    const res = await axios.get(`/api/public/servers/${serverID.value}?_=${Date.now()}`)
+    const res = await http.get(`/api/public/servers/${serverID.value}?_=${Date.now()}`)
     server.value = res.data.server
     pingISPs.value = res.data.ping_isps || []
     if (!selectedISP.value && pingISPs.value.length > 0) {
@@ -200,7 +200,7 @@ async function loadServer(showLoading = false) {
 
 async function loadMetrics() {
   try {
-    const res = await axios.get(`/api/public/servers/${serverID.value}/metrics?range=24h&_=${Date.now()}`)
+    const res = await http.get(`/api/public/servers/${serverID.value}/metrics?range=24h&_=${Date.now()}`)
     metricPoints.value = res.data.points || []
     await nextTick()
     renderChart()
@@ -212,7 +212,7 @@ async function loadMetrics() {
 async function loadPingAgg() {
   if (!selectedISP.value) return
   try {
-    const res = await axios.get(`/api/public/servers/${serverID.value}/ping-agg`, {
+    const res = await http.get(`/api/public/servers/${serverID.value}/ping-agg`, {
       params: { isp: selectedISP.value, range: '24h', _: Date.now() },
     })
     pingPoints.value = res.data.points || []

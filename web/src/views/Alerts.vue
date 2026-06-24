@@ -35,23 +35,16 @@
 
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue'
-import axios from 'axios'
+import http from '@/utils/http'
 
 const alertList = ref<any[]>([])
 const loading = ref(false)
 let refreshTimer: ReturnType<typeof setInterval> | null = null
 
-function authHeaders() {
-  const token = localStorage.getItem('access_token')
-  return { Authorization: `Bearer ${token}` }
-}
-
 async function fetchAlerts(showLoading = false) {
   if (showLoading) loading.value = true
   try {
-    const res = await axios.get(`/api/alerts/active?_=${Date.now()}`, {
-      headers: authHeaders(),
-    })
+    const res = await http.get(`/api/alerts/active?_=${Date.now()}`)
     // 后端无告警时可能返回 null；前端必须兜底成数组，避免表格闪现后因 .length 报错消失。
     alertList.value = Array.isArray(res.data) ? res.data : []
   } catch (e) {

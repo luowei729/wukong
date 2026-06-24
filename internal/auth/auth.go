@@ -98,11 +98,11 @@ func (s *Service) Authenticate(username, password, totpCode string) (*LoginRespo
 	s.clearFailure(ip)
 
 	// 生成令牌
-	return s.generateTokens(username)
+	return s.GenerateTokens(username)
 }
 
-// generateTokens 生成 access + refresh 令牌
-func (s *Service) generateTokens(username string) (*LoginResponse, error) {
+// GenerateTokens 生成 access + refresh 令牌
+func (s *Service) GenerateTokens(username string) (*LoginResponse, error) {
 	now := time.Now()
 
 	// Access Token

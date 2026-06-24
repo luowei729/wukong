@@ -57,7 +57,7 @@ import { ref, reactive, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRoute } from 'vue-router'
 import { ArrowLeft } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import axios from 'axios'
+import http from '@/utils/http'
 import * as echarts from 'echarts'
 
 const route = useRoute()
@@ -78,16 +78,9 @@ const configForm = reactive({
 let chart: echarts.ECharts | null = null
 let pingTimer: number | null = null
 
-function authHeaders() {
-  const token = localStorage.getItem('access_token')
-  return { Authorization: `Bearer ${token}` }
-}
-
 async function fetchNode() {
   try {
-    const res = await axios.get(`/api/agents/${agentId}?_=${Date.now()}`, {
-      headers: authHeaders(),
-    })
+    const res = await http.get(`/api/agents/${agentId}?_=${Date.now()}`)
     node.value = res.data
     nodeName.value = res.data.name || res.data.hostname || `节点 ${agentId.slice(0, 8)}`
     configForm.name = nodeName.value
@@ -107,9 +100,7 @@ async function openRename() {
       inputPattern: /^.{1,64}$/,
       inputErrorMessage: '节点名称长度必须为 1-64 个字符',
     })
-    await axios.put(`/api/agents/${agentId}`, { name: value }, {
-      headers: authHeaders(),
-    })
+    await http.put(`/api/agents/${agentId}`, { name: value })
     ElMessage.success('节点名称已保存')
     await fetchNode()
   } catch (e: any) {
@@ -126,11 +117,11 @@ async function saveConfig() {
   }
   savingConfig.value = true
   try {
-    await axios.put(`/api/agents/${agentId}`, {
+    await http.put(`/api/agents/${agentId}`, {
       name: configForm.name.trim(),
       collect_intv: configForm.collect_intv,
       ping_intv: configForm.ping_intv,
-    }, { headers: authHeaders() })
+    })
     ElMessage.success('服务器配置已保存')
     await fetchNode()
   } catch (e: any) {
@@ -142,7 +133,7 @@ async function saveConfig() {
 
 async function loadISPTargets() {
   try {
-    const res = await axios.get(`/api/isp-targets?_=${Date.now()}`, { headers: authHeaders() })
+    const res = await http.get(`/api/isp-targets?_=${Date.now()}`)
     ispTargets.value = (res.data || []).filter((item: any) => item.enabled)
     if (!selectedISP.value && ispTargets.value.length > 0) {
       selectedISP.value = ispTargets.value[0].name
@@ -156,9 +147,8 @@ async function loadPingAgg() {
   if (!selectedISP.value) return
   pingLoading.value = true
   try {
-    const res = await axios.get(`/api/agents/${agentId}/ping-agg`, {
+    const res = await http.get(`/api/agents/${agentId}/ping-agg`, {
       params: { isp: selectedISP.value, _: Date.now() },
-      headers: authHeaders(),
     })
     pingPoints.value = res.data || []
     await nextTick()

@@ -74,7 +74,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import axios from 'axios'
+import http from '@/utils/http'
 
 interface PublicServer {
   id: string
@@ -101,7 +101,7 @@ async function loadData(showLoading = false) {
   // 公开首页只访问 /api/public/servers，不携带 JWT，确保未登录也可展示；定时刷新时不切 loading，避免每秒闪烁。
   if (showLoading) loading.value = true
   try {
-    const res = await axios.get(`/api/public/servers?_=${Date.now()}`)
+    const res = await http.get(`/api/public/servers?_=${Date.now()}`)
     servers.value = res.data.servers || []
   } finally {
     if (showLoading) loading.value = false

@@ -44,8 +44,8 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
-import axios from 'axios'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import http from '@/utils/http'
 
 const router = useRouter()
 const nodeList = ref<any[]>([])
@@ -53,11 +53,9 @@ let refreshTimer: ReturnType<typeof setInterval> | null = null
 
 async function fetchNodes() {
   try {
-    const token = localStorage.getItem('access_token')
-    const headers = { Authorization: `Bearer ${token}` }
     const [agentsRes, latestRes] = await Promise.all([
-      axios.get(`/api/agents?_=${Date.now()}`, { headers }),
-      axios.get(`/api/agents/latest?_=${Date.now()}`, { headers }),
+      http.get(`/api/agents?_=${Date.now()}`),
+      http.get(`/api/agents/latest?_=${Date.now()}`),
     ])
     const latest = latestRes.data || {}
     nodeList.value = (agentsRes.data || []).map((node: any) => ({
@@ -82,10 +80,7 @@ async function openRename(row: any) {
       inputPattern: /^.{1,64}$/,
       inputErrorMessage: '节点名称长度必须为 1-64 个字符',
     })
-    const token = localStorage.getItem('access_token')
-    await axios.put(`/api/agents/${row.id}`, { name: value }, {
-      headers: { Authorization: `Bearer ${token}` },
-    })
+    await http.put(`/api/agents/${row.id}`, { name: value })
     ElMessage.success('节点名称已保存')
     await fetchNodes()
   } catch (e: any) {

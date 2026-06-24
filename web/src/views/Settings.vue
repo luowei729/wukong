@@ -231,7 +231,7 @@
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import axios from 'axios'
+import http from '@/utils/http'
 
 const activeTab = ref('theme')
 
@@ -292,15 +292,10 @@ const ispForm = reactive({
   enabled: true,
 })
 
-function authHeaders() {
-  const token = localStorage.getItem('access_token')
-  return { Authorization: `Bearer ${token}` }
-}
-
 async function saveTheme() {
   saving.value = true
   try {
-    await axios.put('/api/theme', themeForm, { headers: authHeaders() })
+    await http.put('/api/theme', themeForm)
     applyTheme()
     ElMessage.success('主题和站点地址已保存')
   } catch (e: any) {
@@ -323,7 +318,7 @@ async function generateToken() {
   installReady.value = false
   installMessage.value = ''
   try {
-    const res = await axios.post('/api/install-tokens', {}, { headers: authHeaders() })
+    const res = await http.post('/api/install-tokens', {})
     installReady.value = Boolean(res.data.ready)
     installCommand.value = res.data.script_url || ''
     installMessage.value = res.data.message || ''
@@ -369,10 +364,10 @@ async function changePassword() {
 
   passwordSaving.value = true
   try {
-    await axios.put('/api/auth/password', {
+    await http.put('/api/auth/password', {
       old_password: passwordForm.old_password,
       new_password: passwordForm.new_password,
-    }, { headers: authHeaders() })
+    })
     passwordForm.old_password = ''
     passwordForm.new_password = ''
     passwordForm.confirm_password = ''
@@ -386,7 +381,7 @@ async function changePassword() {
 
 async function loadTelegram() {
   try {
-    const res = await axios.get(`/api/telegram?_=${Date.now()}`, { headers: authHeaders() })
+    const res = await http.get(`/api/telegram?_=${Date.now()}`)
     tgForm.bot_token = ''
     tgForm.chat_id = res.data.chat_id || ''
     tgForm.has_bot_token = Boolean(res.data.has_bot_token)
@@ -396,10 +391,10 @@ async function loadTelegram() {
 async function saveTelegram() {
   telegramSaving.value = true
   try {
-    await axios.put('/api/telegram', {
+    await http.put('/api/telegram', {
       bot_token: tgForm.bot_token,
       chat_id: tgForm.chat_id,
-    }, { headers: authHeaders() })
+    })
     tgForm.bot_token = ''
     await loadTelegram()
     ElMessage.success('Telegram 配置已保存')
@@ -413,10 +408,10 @@ async function saveTelegram() {
 async function testTelegram() {
   telegramTesting.value = true
   try {
-    await axios.post('/api/telegram/test', {
+    await http.post('/api/telegram/test', {
       bot_token: tgForm.bot_token,
       chat_id: tgForm.chat_id,
-    }, { headers: authHeaders() })
+    })
     ElMessage.success('测试通知已发送')
   } catch (e: any) {
     ElMessage.error(e.response?.data?.error || '测试通知发送失败')
@@ -427,7 +422,7 @@ async function testTelegram() {
 
 async function loadThresholds() {
   try {
-    const res = await axios.get(`/api/alert-settings?_=${Date.now()}`, { headers: authHeaders() })
+    const res = await http.get(`/api/alert-settings?_=${Date.now()}`)
     thresholds.cpu = res.data.cpu ?? thresholds.cpu
     thresholds.mem = res.data.mem ?? thresholds.mem
     thresholds.disk = res.data.disk ?? thresholds.disk
@@ -439,7 +434,7 @@ async function loadThresholds() {
 async function saveThresholds() {
   thresholdSaving.value = true
   try {
-    await axios.put('/api/alert-settings', thresholds, { headers: authHeaders() })
+    await http.put('/api/alert-settings', thresholds)
     ElMessage.success('告警阈值已保存')
   } catch (e: any) {
     ElMessage.error(e.response?.data?.error || '保存告警阈值失败')
@@ -451,7 +446,7 @@ async function saveThresholds() {
 async function loadISPTargets() {
   ispLoading.value = true
   try {
-    const res = await axios.get(`/api/isp-targets?_=${Date.now()}`, { headers: authHeaders() })
+    const res = await http.get(`/api/isp-targets?_=${Date.now()}`)
     ispTargets.value = res.data || []
   } catch (e: any) {
     ElMessage.error(e.response?.data?.error || '加载 Ping 运营商目标失败')
@@ -493,10 +488,10 @@ async function saveISPTarget() {
       enabled: ispForm.enabled,
     }
     if (ispForm.id) {
-      await axios.put(`/api/isp-targets/${ispForm.id}`, payload, { headers: authHeaders() })
+      await http.put(`/api/isp-targets/${ispForm.id}`, payload)
       ElMessage.success('Ping 目标已保存')
     } else {
-      await axios.post('/api/isp-targets', payload, { headers: authHeaders() })
+      await http.post('/api/isp-targets', payload)
       ElMessage.success('Ping 目标已新增')
     }
     resetISPForm()
@@ -515,7 +510,7 @@ async function deleteISPTarget(row: any) {
       cancelButtonText: '取消',
       type: 'warning',
     })
-    await axios.delete(`/api/isp-targets/${row.id}`, { headers: authHeaders() })
+    await http.delete(`/api/isp-targets/${row.id}`)
     ElMessage.success('Ping 目标已删除')
     await loadISPTargets()
   } catch (e: any) {
@@ -527,7 +522,7 @@ async function deleteISPTarget(row: any) {
 
 onMounted(async () => {
   try {
-    const res = await axios.get(`/api/theme?_=${Date.now()}`, { headers: authHeaders() })
+    const res = await http.get(`/api/theme?_=${Date.now()}`)
     if (res.data.preset) themeForm.preset = res.data.preset
     if (res.data.primary) themeForm.primary = res.data.primary
     if (res.data.title) themeForm.title = res.data.title

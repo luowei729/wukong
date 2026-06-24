@@ -90,8 +90,34 @@ func (h *Handler) handleLogin(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) handleRefreshToken(w http.ResponseWriter, r *http.Request) {
-	// 刷新令牌端点预留，当前前端主要使用登录签发的 access token。
-	writeJSON(w, http.StatusNotImplemented, map[string]string{"message": "refresh endpoint 待实现"})
+	// 刷新令牌：前端 access token 过期后，使用 refresh token 获取新的 access token。
+	// 避免用户频繁重新输入密码，同时保持安全性。
+	var req struct {
+		RefreshToken string `json:"refresh_token"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "请求体解析失败")
+		return
+	}
+	if req.RefreshToken == "" {
+		writeError(w, http.StatusBadRequest, "refresh_token 不能为空")
+		return
+	}
+
+	// 验证 refresh token 是否有效
+	claims, err := h.authSvc.ValidateToken(req.RefreshToken)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, fmt.Sprintf("refresh token 无效: %v", err))
+		return
+	}
+
+	// 重新生成令牌
+	resp, err := h.authSvc.GenerateTokens(claims.Username)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "生成新令牌失败")
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 func (h *Handler) handleChangePassword(w http.ResponseWriter, r *http.Request) {
