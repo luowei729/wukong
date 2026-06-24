@@ -2,6 +2,43 @@
 
 所有变更记录使用北京时间（UTC+8）。
 
+## [2026-06-24 17:08] - 生产部署、恢复旧数据卷并更新本机探针
+
+### 改动前总结
+最新镜像部署时一度使用 `/opt/wukong/data` 新目录挂载，导致生产页面临时显示 0 台服务器；旧生产 SQLite 实际仍在 Docker 匿名卷中。`us4` 节点系统版本显示为 `linux 22.04`，因为旧探针二进制使用 `hostInfo.OS + PlatformVersion` 上报。后台节点页缺少删除按钮，公开首页仍有手动刷新按钮，且公开首页没有读取后台设置的站点标题。
+
+### 改动后总结
+1. 生产容器已拉取 `ghcr.io/luowei729/wukong:latest` 并重建，继续只绑定 `127.0.0.1:64443:64443`。
+2. 已定位旧生产数据库在 Docker 匿名卷 `_data/wukong.db`，复制恢复到固定目录 `/opt/wukong/data/`，并备份误建空库到 `/opt/wukong/backups/`，后续部署使用固定挂载避免再次丢数据。
+3. 已从最新容器复制 `wukong-agent-amd64` 替换生产本机 `/opt/wukong/agent/wukong-agent`，并重启 `wukong-agent.service`。
+4. `us4` 最新公开 API 已显示 `os_version=Ubuntu 22.04`、`platform=ubuntu`，修复 `linux 22.04` 展示问题。
+5. 新增公开主题接口 `/api/public/theme`，公开首页读取后台设置的站点标题和页脚。
+6. 后台节点列表新增“删除”按钮和二次确认；公开首页去掉“刷新状态”按钮，保留 1 秒自动刷新。
+7. 探针自动升级链路已实现：后台“探针升级”设置目标版本/下载 URL，主控按心跳下发升级指令，探针下载新二进制、备份、替换并退出由 systemd 拉起。
+8. Telegram Bot Token 已验证可用（`getMe` 成功返回 `@lkz_nezha_bot`），但尚未拿到 Chat ID；需要先给 bot 发消息后才能发送测试通知。
+
+### 验证结果
+- GHCR 最新镜像构建成功并已拉取到生产。
+- `https://server.lkz.pub/api/health` 返回 `{"status":"ok","version":"0.1.0"}`。
+- `https://server.lkz.pub/api/public/servers` 已恢复 3 台服务器，其中 `us4` 在线。
+- `us4` 已上报 `Ubuntu 22.04`。
+- 容器端口仍为 `127.0.0.1:64443->64443/tcp`。
+
+### 涉及文件
+- `internal/agentcore/collector.go`
+- `internal/agentcore/agent.go`
+- `internal/grpcapi/agent_server.go`
+- `internal/webapi/handler.go`
+- `internal/webapi/public.go`
+- `proto/wukong.proto`
+- `proto/gen/wukong.pb.go`
+- `web/src/views/Nodes.vue`
+- `web/src/views/Settings.vue`
+- `web/src/views/public/PublicHome.vue`
+- `CHANGELOG.md`
+
+---
+
 ## [2026-06-24 16:00] - 优化公开首页 qio.ng 风格统计摘要
 
 ### 改动前总结

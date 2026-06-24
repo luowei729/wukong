@@ -85,6 +85,7 @@ wukong/
 - **2026-06-21 18:39（北京时间）**：生产已部署 commit `61f033a` 对应的 GHCR 最新镜像，远程 Docker 容器继续保持 `127.0.0.1:64443->64443/tcp`，SQLite `site_domain=https://server.lkz.pub` 与 `agent_server_addr=server.lkz.pub:443` 已确认。生产本机探针已通过在线安装脚本注册并由 systemd 常驻，日志显示连接 `server.lkz.pub:443`；公开详情已拿到 qio.ng 风格系统字段和 Cloudflare Ping 聚合数据，无头 Chrome 验证首页与详情页均不是白屏。
 - **开发后续优先级**：① 签名配置热更新闭环 ② Web API 端点完整实现 ③ 告警引擎集成 gRPC 心跳 ④ 前端接入真实 API 数据 ⑤ 安装脚本与升级流程端到端原型
 - **2026-06-24 15:50（北京时间）**：修复登录问题并完善鉴权流程。新增 `web/src/utils/http.ts` 全局 axios 拦截器，自动在请求头附加 JWT Token、401 时清除 Token 并跳转登录页，所有 Vue 组件不再手动添加 `authHeaders()`。修复 `WUKONG_ADMIN_PASSWORD` 环境变量传入明文密码时直接赋值给 `AdminPasswordHash` 导致 bcrypt 比对失败的严重 bug，现自动检测 `$2a$`/`$2b$` 前缀区分明文和 hash。实现 `POST /api/auth/refresh` 刷新令牌端点，前端 access token 过期后可无感续期。`auth.Service.generateTokens` 改为公开方法 `GenerateTokens`。
+- **2026-06-24 17:08（北京时间）**：生产部署最新 GHCR 镜像时必须保持数据卷。旧生产数据库位于 Docker 匿名卷 `/var/lib/docker/volumes/5e192c.../_data/wukong.db`，已复制恢复到固定目录 `/opt/wukong/data/`，后续 `docker run` 必须使用 `-v /opt/wukong/data:/opt/wukong/data`。本次已修复 `us4` 系统版本显示为 `Ubuntu 22.04`，原因是探针改用 `hostInfo.Platform + PlatformVersion`；主控更新后还必须同步替换生产本机 `/opt/wukong/agent/wukong-agent` 并重启 systemd 探针。公开首页标题通过 `/api/public/theme` 读取后台设置；节点页有删除按钮；首页无手动刷新按钮。Telegram bot `@lkz_nezha_bot` token 可用，但需用户先给 bot 发消息才能拿到 Chat ID 测试发送。
 
 ## 部署相关长期提示
 
