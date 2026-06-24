@@ -13,7 +13,6 @@
         </div>
       </div>
       <div class="nav-actions">
-        <el-button text @click="loadData">刷新状态</el-button>
         <el-button type="primary" plain @click="goAdmin">
           {{ hasToken ? '管理后台' : '管理登录' }}
         </el-button>

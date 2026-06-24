@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 	"time"
 
 	pb "wukong/proto/gen"
@@ -93,12 +94,25 @@ func (c *SystemCollector) Collect() (*CollectResult, error) {
 		c.lastNetTime = now
 	}
 
-	// 操作系统版本、启动时间与运行时长
+	// 操作系统版本：使用 Platform + PlatformVersion 组合显示
+	// hostInfo.OS 返回 "linux"，hostInfo.Platform 返回 "ubuntu"，hostInfo.PlatformVersion 返回 "22.04"
+	// 组合后显示为 "Ubuntu 22.04" 而不是 "linux 22.04"
 	hostInfo, err := host.Info()
 	if err != nil {
 		log.Printf("采集系统版本失败: %v", err)
 	} else {
-		sys.OsVersion = fmt.Sprintf("%s %s", hostInfo.OS, hostInfo.PlatformVersion)
+		if hostInfo.Platform != "" {
+			// 首字母大写：ubuntu → Ubuntu，centos → CentOS，debian → Debian
+			plat := strings.Title(hostInfo.Platform)
+			if hostInfo.PlatformVersion != "" {
+				sys.OsVersion = fmt.Sprintf("%s %s", plat, hostInfo.PlatformVersion)
+			} else {
+				sys.OsVersion = plat
+			}
+		} else {
+			// 回退到 OS 字段（如 "linux"）
+			sys.OsVersion = hostInfo.OS
+		}
 		sys.Platform = hostInfo.Platform
 		sys.UptimeSeconds = int64(hostInfo.Uptime)
 		sys.BootTime = int64(hostInfo.BootTime)

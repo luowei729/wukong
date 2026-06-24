@@ -30,11 +30,10 @@
       <el-table-column label="最后上报" width="180">
         <template #default="{ row }">{{ row.last_seen_at || '-' }}</template>
       </el-table-column>
-      <el-table-column label="操作" width="120">
+      <el-table-column label="操作" width="140">
         <template #default="{ row }">
-          <el-button size="small" type="primary" link @click="goToNode(row.id)">
-            详情
-          </el-button>
+          <el-button size="small" type="primary" link @click="goToNode(row.id)">详情</el-button>
+          <el-button size="small" type="danger" link @click="deleteNode(row)">删除</el-button>
         </template>
       </el-table-column>
     </el-table>
@@ -71,6 +70,7 @@ function formatPercent(value?: number) {
   return typeof value === 'number' ? `${value.toFixed(1)}%` : '-'
 }
 
+// 修改节点名称
 async function openRename(row: any) {
   try {
     const { value } = await ElMessageBox.prompt('请输入新的服务器节点名称', '修改节点名称', {
@@ -86,6 +86,28 @@ async function openRename(row: any) {
   } catch (e: any) {
     if (e !== 'cancel') {
       ElMessage.error(e.response?.data?.error || '修改节点名称失败')
+    }
+  }
+}
+
+// 删除节点
+async function deleteNode(row: any) {
+  try {
+    await ElMessageBox.confirm(
+      `确认删除节点"${row.name || row.hostname || row.id}"？删除后该节点的探针需要重新注册才能恢复。`,
+      '删除确认',
+      {
+        confirmButtonText: '删除',
+        cancelButtonText: '取消',
+        type: 'warning',
+      }
+    )
+    await http.delete(`/api/agents/${row.id}`)
+    ElMessage.success('节点已删除')
+    await fetchNodes()
+  } catch (e: any) {
+    if (e !== 'cancel') {
+      ElMessage.error(e.response?.data?.error || '删除节点失败')
     }
   }
 }
