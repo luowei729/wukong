@@ -21,12 +21,26 @@ import (
 
 // SystemCollector 系统指标采集器
 type SystemCollector struct {
-	lastNetCounters []net.IOCountersStat
+	lastNetCounters map[string]net.IOCountersStat
 	lastNetTime     time.Time
 	region          string
 }
 
 func (c *SystemCollector) Name() string { return "system" }
+
+func isPublicNetInterface(name string) bool {
+	name = strings.ToLower(name)
+	if name == "" || name == "lo" {
+		return false
+	}
+	ignoredPrefixes := []string{"docker", "veth", "br-", "virbr", "cni", "flannel", "tailscale", "wg", "tun", "tap"}
+	for _, prefix := range ignoredPrefixes {
+		if strings.HasPrefix(name, prefix) {
+			return false
+		}
+	}
+	return true
+}
 
 func (c *SystemCollector) Collect() (*CollectResult, error) {
 	result := &CollectResult{}
@@ -73,24 +87,44 @@ func (c *SystemCollector) Collect() (*CollectResult, error) {
 		sys.DiskTotalBytes = int64(diskInfo.Total)
 	}
 
-	// 网络上下行（bps）
-	netCounters, err := net.IOCounters(false)
+	// 网络上下行（字节/秒）。
+	// 必须按网卡明细过滤掉 lo/docker/veth/br 等虚拟接口，否则 Docker/本机回环流量会把公网速率统计错。
+	netCounters, err := net.IOCounters(true)
 	if err != nil {
 		log.Printf("采集网络失败: %v", err)
 	} else if len(netCounters) > 0 {
 		now := time.Now()
-		sys.NetUpTotalBytes = int64(netCounters[0].BytesSent)
-		sys.NetDownTotalBytes = int64(netCounters[0].BytesRecv)
+		current := make(map[string]net.IOCountersStat)
+		var totalSent, totalRecv uint64
+		var deltaSent, deltaRecv uint64
+		for _, item := range netCounters {
+			if !isPublicNetInterface(item.Name) {
+				continue
+			}
+			current[item.Name] = item
+			totalSent += item.BytesSent
+			totalRecv += item.BytesRecv
+			if c.lastNetCounters != nil {
+				if prev, ok := c.lastNetCounters[item.Name]; ok {
+					if item.BytesSent >= prev.BytesSent {
+						deltaSent += item.BytesSent - prev.BytesSent
+					}
+					if item.BytesRecv >= prev.BytesRecv {
+						deltaRecv += item.BytesRecv - prev.BytesRecv
+					}
+				}
+			}
+		}
+		sys.NetUpTotalBytes = int64(totalSent)
+		sys.NetDownTotalBytes = int64(totalRecv)
 		if c.lastNetCounters != nil {
 			elapsed := now.Sub(c.lastNetTime).Seconds()
 			if elapsed > 0 {
-				bytesUp := netCounters[0].BytesSent - c.lastNetCounters[0].BytesSent
-				bytesDown := netCounters[0].BytesRecv - c.lastNetCounters[0].BytesRecv
-				sys.NetUpBps = int64(float64(bytesUp) / elapsed * 8)
-				sys.NetDownBps = int64(float64(bytesDown) / elapsed * 8)
+				sys.NetUpBps = int64(float64(deltaSent) / elapsed)
+				sys.NetDownBps = int64(float64(deltaRecv) / elapsed)
 			}
 		}
-		c.lastNetCounters = netCounters
+		c.lastNetCounters = current
 		c.lastNetTime = now
 	}
 
