@@ -8,7 +8,7 @@
       <div class="brand">
         <span class="brand-mark">悟</span>
         <div>
-          <strong>wukong status</strong>
+          <strong>{{ siteTitle }}</strong>
           <small>Public server monitor</small>
         </div>
       </div>
@@ -126,6 +126,11 @@
           </div>
         </article>
       </section>
+
+      <!-- 页脚 -->
+      <footer v-if="siteFooter" class="public-footer">
+        {{ siteFooter }}
+      </footer>
     </main>
   </div>
 </template>
@@ -158,8 +163,23 @@ interface PublicServer {
 const router = useRouter()
 const loading = ref(false)
 const servers = ref<PublicServer[]>([])
+const siteTitle = ref('wukong 监控')
+const siteFooter = ref('')
 const hasToken = computed(() => Boolean(localStorage.getItem('access_token')))
 let refreshTimer: ReturnType<typeof setInterval> | null = null
+
+// 加载站点主题（标题和页脚），公开首页也需要显示后台设置的标题
+async function loadTheme() {
+  try {
+    const res = await http.get(`/api/public/theme?_=${Date.now()}`)
+    if (res.data.title) siteTitle.value = res.data.title
+    if (res.data.footer_text) siteFooter.value = res.data.footer_text
+    if (res.data.preset) {
+      document.documentElement.dataset.theme = res.data.preset
+      document.documentElement.classList.toggle('dark', res.data.preset === 'dark')
+    }
+  } catch {}
+}
 
 // 统计摘要计算
 const onlineCount = computed(() => servers.value.filter(s => s.status === 'online').length)
@@ -262,6 +282,7 @@ function relativeTime(value?: string) {
 }
 
 onMounted(() => {
+  loadTheme()
   loadData(true)
   // 首页状态卡片每秒刷新一次，保证公开展示接近实时
   refreshTimer = setInterval(() => loadData(false), 1000)
@@ -532,5 +553,13 @@ onUnmounted(() => {
   .summary-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+}
+/* 页脚 */
+.public-footer {
+  text-align: center;
+  padding: 24px 0 48px;
+  color: var(--wk-text-muted);
+  font-size: 12px;
+  opacity: 0.6;
 }
 </style>

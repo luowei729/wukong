@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"wukong/internal/store"
@@ -327,6 +328,28 @@ func parsePublicTimeRange(r *http.Request) (time.Time, time.Time, error) {
 		since = until.Add(-72 * time.Hour)
 	}
 	return since, until, nil
+}
+
+// handlePublicGetTheme 公开主题接口，让未登录首页也能读取站点标题和页脚。
+// 只返回前端展示所需的安全字段，不暴露 JWT 密钥、管理员配置等敏感信息。
+func (h *Handler) handlePublicGetTheme(w http.ResponseWriter, r *http.Request) {
+	title, _ := h.store.GetSetting("theme_title")
+	footer, _ := h.store.GetSetting("theme_footer_text")
+	preset, _ := h.store.GetSetting("theme_preset")
+
+	// 默认值
+	if strings.TrimSpace(title) == "" {
+		title = "wukong 监控"
+	}
+	if strings.TrimSpace(preset) == "" {
+		preset = "dark"
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{
+		"title":       title,
+		"footer_text": footer,
+		"preset":      preset,
+	})
 }
 
 func roundMetric(v float64) float64 {

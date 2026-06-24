@@ -134,6 +134,7 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/public/servers/{id}", h.handlePublicGetServer)
 	mux.HandleFunc("GET /api/public/servers/{id}/metrics", h.handlePublicGetServerMetrics)
 	mux.HandleFunc("GET /api/public/servers/{id}/ping-agg", h.handlePublicGetServerPingAgg)
+	mux.HandleFunc("GET /api/public/theme", h.handlePublicGetTheme)
 
 	// 静态资源（前端 SPA）
 	staticFS, err := fs.Sub(distFS, "dist")
