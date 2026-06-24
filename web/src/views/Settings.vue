@@ -198,27 +198,21 @@
         </div>
       </el-tab-pane>
 
-      <!-- 探针升级 -->
+      <!-- 探针升级（自动升级，无需手动配置） -->
       <el-tab-pane label="探针升级" name="upgrade">
         <div class="wk-card-solid" style="padding: 20px;">
           <el-alert
-            title="设置目标版本后，在线探针会在心跳时收到升级指令；升级完成后由 systemd 自动重启。下载地址留空时使用站点域名下的 /api/agent/binary/{version}/{arch}。"
-            type="info"
+            title="探针自动升级机制：每次编译构建时版本号自动递增，探针每 5 分钟自动检查版本，发现新版本时自动下载、替换并重启。无需手动配置目标版本。"
+            type="success"
             :closable="false"
             style="margin-bottom: 16px;"
           />
-          <el-form label-position="top">
-            <el-form-item label="目标探针版本">
-              <el-input v-model="upgradeForm.target_version" placeholder="例如 0.1.1；留空表示不自动升级" />
-            </el-form-item>
-            <el-form-item label="自定义下载地址（可选）">
-              <el-input v-model="upgradeForm.upgrade_url" placeholder="https://example.com/wukong-agent-linux-amd64" />
-              <div class="form-tip">通常留空即可。主控会按站点域名、目标版本和探针架构自动拼接下载地址。</div>
-            </el-form-item>
-            <el-form-item>
-              <el-button type="primary" :loading="upgradeSaving" @click="saveUpgradeSettings">保存升级配置</el-button>
-            </el-form-item>
-          </el-form>
+          <el-descriptions :column="1" border>
+            <el-descriptions-item label="升级方式">自动升级（探针主动检查，无需干预）</el-descriptions-item>
+            <el-descriptions-item label="检查频率">每 5 分钟</el-descriptions-item>
+            <el-descriptions-item label="升级流程">下载新版本 → 备份当前 → 原子替换 → systemd 重启</el-descriptions-item>
+            <el-descriptions-item label="回滚机制">升级失败自动回滚到备份版本</el-descriptions-item>
+          </el-descriptions>
         </div>
       </el-tab-pane>
 

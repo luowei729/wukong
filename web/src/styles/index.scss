@@ -51,52 +51,32 @@
   font-weight: 600;
 }
 
-// 侧边栏
-.wk-sidebar {
+// 侧边栏已移除，改为顶部导航栏全屏布局
+.wk-topbar {
   background: var(--wk-bg-soft);
-  border-right: 1px solid var(--wk-border);
-  width: 240px;
-  height: 100vh;
-  position: fixed;
-  left: 0;
-  top: 0;
-  z-index: 100;
-  padding: 16px 0;
-  overflow-y: auto;
+  border-bottom: 1px solid var(--wk-border);
 }
 
-.wk-sidebar-logo {
-  padding: 0 20px;
-  margin-bottom: 24px;
+.wk-nav {
   display: flex;
   align-items: center;
-  gap: 10px;
-
-  .logo-text {
-    font-size: 20px;
-    font-weight: 700;
-    color: var(--wk-primary);
-  }
+  gap: 4px;
 }
 
-.wk-sidebar-menu {
-  list-style: none;
-  padding: 0;
+.wk-nav-item {
+  padding: 8px 16px;
+  cursor: pointer;
+  color: var(--wk-text-muted);
+  transition: $wk-transition;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+  border-radius: 6px;
 
-  li {
-    padding: 10px 20px;
-    cursor: pointer;
-    color: var(--wk-text-muted);
-    transition: $wk-transition;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    font-size: 14px;
-
-    &:hover, &.active {
-      color: var(--wk-primary);
-      background: rgba(56, 189, 248, 0.08);
-    }
+  &:hover, &.active {
+    color: var(--wk-primary);
+    background: rgba(56, 189, 248, 0.08);
   }
 }
 
@@ -110,14 +90,14 @@
   padding: 0 24px;
 }
 
-// 主内容区
+// 主内容区：全屏铺满，不再有 margin-left 偏移
 .wk-main {
-  margin-left: 240px;
-  min-height: 100vh;
+  min-height: calc(100vh - 56px);
 }
 
 .wk-content {
   padding: 24px;
+  min-height: calc(100vh - 56px);
 }
 
 // Element Plus 暗黑覆盖

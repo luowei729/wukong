@@ -2,8 +2,9 @@
 # 目标: 单二进制主控(embed前端) + 单二进制探针 + 签名服务
 .PHONY: all build build-server build-agent build-signer build-frontend clean proto dev
 
-# 版本
-VERSION := 0.1.0
+# 版本号：优先使用 git tag，没有 tag 时使用日期格式（如 0.2.20260625）
+# 每次编译时版本号自动递增，无需手动修改
+VERSION := $(shell git describe --tags --always --dirty 2>/dev/null | sed 's/^v//' || echo "0.2.$(shell date -u '+%Y%m%d%H%M')")
 COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || echo "dev")
 BUILD_TIME := $(shell date -u '+%Y-%m-%d_%H:%M:%S')
 LDFLAGS := -ldflags "-X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.buildTime=$(BUILD_TIME)"

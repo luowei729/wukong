@@ -25,6 +25,13 @@ import (
 	"google.golang.org/grpc"
 )
 
+// 构建时通过 -ldflags 注入的版本信息
+var (
+	version   = "dev"   // 版本号，如 0.2.0
+	commit    = "none"  // Git commit hash
+	buildTime = "none"  // 构建时间
+)
+
 func main() {
 	configPath := flag.String("config", config.DefaultConfigFile, "配置文件路径")
 	flag.Parse()
@@ -34,7 +41,7 @@ func main() {
 		log.Fatalf("加载配置失败: %v", err)
 	}
 
-	log.Printf("wukong 主控启动中，监听 %s ...", cfg.ListenAddr)
+	log.Printf("wukong 主控启动中，版本: %s (commit: %s, 构建: %s)，监听 %s ...", version, commit, buildTime, cfg.ListenAddr)
 
 	// === 初始化 SQLite 存储层 ===
 	s, err := store.NewSQLiteStore(cfg.DBPath)

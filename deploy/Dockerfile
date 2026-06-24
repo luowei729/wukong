@@ -32,9 +32,13 @@ COPY . .
 COPY --from=frontend-builder /app/internal/webapi/dist/ ./internal/webapi/dist/
 
 # 编译主控和探针（CGO_ENABLED=1 因为 SQLite 需要 CGO；同时内置 agent 供在线安装脚本下载）
-RUN CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o /build/wukong-server ./cmd/server && \
-    CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o /build/wukong-agent-amd64 ./cmd/agent && \
-    CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags="-s -w" -o /build/wukong-agent-arm64 ./cmd/agent
+# 版本号通过 ARG 注入，每次构建自动递增
+ARG VERSION=dev
+ARG COMMIT=unknown
+ARG BUILD_TIME=unknown
+RUN CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w -X main.version=${VERSION} -X main.commit=${COMMIT} -X main.buildTime=${BUILD_TIME}" -o /build/wukong-server ./cmd/server && \
+    CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w -X main.version=${VERSION} -X main.commit=${COMMIT} -X main.buildTime=${BUILD_TIME}" -o /build/wukong-agent-amd64 ./cmd/agent && \
+    CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags="-s -w -X main.version=${VERSION} -X main.commit=${COMMIT} -X main.buildTime=${BUILD_TIME}" -o /build/wukong-agent-arm64 ./cmd/agent
 
 # ---- Stage 3: 运行 ----
 FROM alpine:3.20

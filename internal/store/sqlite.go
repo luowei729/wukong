@@ -54,6 +54,8 @@ func (s *SQLiteStore) InitSchema() error {
 		os_version   TEXT NOT NULL DEFAULT '',
 		agent_ver    TEXT NOT NULL DEFAULT '',
 		arch         TEXT NOT NULL DEFAULT '',
+			ip_v4        TEXT NOT NULL DEFAULT '',
+			ip_v6        TEXT NOT NULL DEFAULT '',
 		collect_intv INTEGER,
 		ping_intv    INTEGER,
 		online       INTEGER NOT NULL DEFAULT 0,
@@ -121,8 +123,22 @@ func (s *SQLiteStore) InitSchema() error {
 		PRIMARY KEY (agent_id, isp, bucket_min)
 	) WITHOUT ROWID;
 	`
+	// 先创建表结构
 	_, err := s.db.Exec(schema)
-	return err
+	if err != nil {
+		return err
+	}
+
+	// 数据库迁移：为已有数据库添加 ip_v4/ip_v6 列（新数据库已包含，忽略错误即可）
+	migrations := []string{
+		`ALTER TABLE agents ADD COLUMN ip_v4 TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE agents ADD COLUMN ip_v6 TEXT NOT NULL DEFAULT ''`,
+	}
+	for _, m := range migrations {
+		// SQLite ALTER TABLE ADD COLUMN 失败时（列已存在）忽略错误
+		s.db.Exec(m)
+	}
+	return nil
 }
 
 // ---- 管理员 ----
@@ -192,7 +208,7 @@ func (s *SQLiteStore) ConsumeInstallToken(token string) (bool, error) {
 }
 
 // RegisterAgent 用 token 注册探针，返回 Agent 信息和个体凭证
-func (s *SQLiteStore) RegisterAgent(token, hostname, agentVer, arch string) (*Agent, string, error) {
+func (s *SQLiteStore) RegisterAgent(token, hostname, agentVer, arch, ipV4, ipV6 string) (*Agent, string, error) {
 	ok, err := s.ConsumeInstallToken(token)
 	if err != nil {
 		return nil, "", fmt.Errorf("验证 token 失败: %w", err)
@@ -210,9 +226,9 @@ func (s *SQLiteStore) RegisterAgent(token, hostname, agentVer, arch string) (*Ag
 
 	now := time.Now()
 	_, err = s.db.Exec(
-		`INSERT INTO agents (id, hostname, agent_ver, arch, secret, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		agentID, hostname, agentVer, arch, string(secretHash), now, now,
+		`INSERT INTO agents (id, hostname, agent_ver, arch, ip_v4, ip_v6, secret, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		agentID, hostname, agentVer, arch, ipV4, ipV6, string(secretHash), now, now,
 	)
 	if err != nil {
 		return nil, "", fmt.Errorf("插入探针记录失败: %w", err)
@@ -223,6 +239,8 @@ func (s *SQLiteStore) RegisterAgent(token, hostname, agentVer, arch string) (*Ag
 		Hostname:  hostname,
 		AgentVer:  agentVer,
 		Arch:      arch,
+		IPv4:      ipV4,
+		IPv6:      ipV6,
 		CreatedAt: now,
 	}
 	return agent, agentSecret, nil
@@ -240,14 +258,14 @@ func (s *SQLiteStore) ValidateAgent(agentID, secret string) bool {
 func (s *SQLiteStore) GetAgent(id string) (*Agent, error) {
 	row := s.db.QueryRow(
 		`SELECT id, name, hostname, group_id, os_version, agent_ver, arch,
-		        collect_intv, ping_intv, online, last_seen_at, created_at, updated_at
+		        ip_v4, ip_v6, collect_intv, ping_intv, online, last_seen_at, created_at, updated_at
 		 FROM agents WHERE id = ?`, id)
 	a := &Agent{}
-	var groupID, osVer, agentVer, arch, hostname sql.NullString
+	var groupID, osVer, agentVer, arch, hostname, ipV4, ipV6 sql.NullString
 	var collectIntv, pingIntv sql.NullInt64
 	var lastSeen sql.NullTime
 	err := row.Scan(&a.ID, &a.Name, &hostname, &groupID, &osVer, &agentVer, &arch,
-		&collectIntv, &pingIntv, &a.Online, &lastSeen, &a.CreatedAt, &a.UpdatedAt)
+		&ipV4, &ipV6, &collectIntv, &pingIntv, &a.Online, &lastSeen, &a.CreatedAt, &a.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -265,6 +283,12 @@ func (s *SQLiteStore) GetAgent(id string) (*Agent, error) {
 	}
 	if arch.Valid {
 		a.Arch = arch.String
+	}
+	if ipV4.Valid {
+		a.IPv4 = ipV4.String
+	}
+	if ipV6.Valid {
+		a.IPv6 = ipV6.String
 	}
 	if collectIntv.Valid {
 		v := int(collectIntv.Int64)
@@ -288,7 +312,7 @@ func (s *SQLiteStore) GetAgent(id string) (*Agent, error) {
 func (s *SQLiteStore) ListAgents() ([]*Agent, error) {
 	rows, err := s.db.Query(
 		`SELECT id, name, hostname, group_id, os_version, agent_ver, arch,
-		        collect_intv, ping_intv, online, last_seen_at, created_at, updated_at
+		        ip_v4, ip_v6, collect_intv, ping_intv, online, last_seen_at, created_at, updated_at
 		 FROM agents ORDER BY name`)
 	if err != nil {
 		return nil, err
@@ -297,11 +321,11 @@ func (s *SQLiteStore) ListAgents() ([]*Agent, error) {
 	var agents []*Agent
 	for rows.Next() {
 		a := &Agent{}
-		var groupID, osVer, agentVer, arch, hostname sql.NullString
+		var groupID, osVer, agentVer, arch, hostname, ipV4, ipV6 sql.NullString
 		var collectIntv, pingIntv sql.NullInt64
 		var lastSeen sql.NullTime
 		err := rows.Scan(&a.ID, &a.Name, &hostname, &groupID, &osVer, &agentVer, &arch,
-			&collectIntv, &pingIntv, &a.Online, &lastSeen, &a.CreatedAt, &a.UpdatedAt)
+			&ipV4, &ipV6, &collectIntv, &pingIntv, &a.Online, &lastSeen, &a.CreatedAt, &a.UpdatedAt)
 		if err != nil {
 			return nil, err
 		}
@@ -319,6 +343,12 @@ func (s *SQLiteStore) ListAgents() ([]*Agent, error) {
 		}
 		if arch.Valid {
 			a.Arch = arch.String
+		}
+		if ipV4.Valid {
+			a.IPv4 = ipV4.String
+		}
+		if ipV6.Valid {
+			a.IPv6 = ipV6.String
 		}
 		if collectIntv.Valid {
 			v := int(collectIntv.Int64)
@@ -343,10 +373,10 @@ func (s *SQLiteStore) UpdateAgent(agent *Agent) error {
 	agent.UpdatedAt = time.Now()
 	_, err := s.db.Exec(
 		`UPDATE agents SET name=?, group_id=?, os_version=?, agent_ver=?,
-		 arch=?, collect_intv=?, ping_intv=?, updated_at=?
+		 arch=?, ip_v4=?, ip_v6=?, collect_intv=?, ping_intv=?, updated_at=?
 		 WHERE id=?`,
 		agent.Name, agent.GroupID, agent.OSVersion, agent.AgentVer,
-		agent.Arch, agent.CollectIntv, agent.PingIntv, agent.UpdatedAt, agent.ID)
+		agent.Arch, agent.IPv4, agent.IPv6, agent.CollectIntv, agent.PingIntv, agent.UpdatedAt, agent.ID)
 	return err
 }
 

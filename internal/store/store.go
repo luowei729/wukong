@@ -19,6 +19,8 @@ type Agent struct {
 	OSVersion   string     `json:"os_version"`   // 操作系统版本
 	AgentVer    string     `json:"agent_ver"`    // 探针版本
 	Arch        string     `json:"arch"`         // 架构
+	IPv4        string     `json:"ip_v4"`        // 公网 IPv4 地址（探针上报，不显示前端避免暴露）
+	IPv6        string     `json:"ip_v6"`        // 公网 IPv6 地址（有则上报，不显示前端避免暴露）
 	CollectIntv *int       `json:"collect_intv"` // 自定义采集频率（覆盖分组/全局，秒）
 	PingIntv    *int       `json:"ping_intv"`    // 自定义 Ping 频率
 	Online      bool       `json:"online"`       // 是否在线
@@ -141,7 +143,7 @@ type MetricsStore interface {
 	GetTOTPSecret() (string, error)
 
 	// ----- 探针管理 -----
-	RegisterAgent(token, hostname, agentVer, arch string) (*Agent, string, error)
+	RegisterAgent(token, hostname, agentVer, arch, ipV4, ipV6 string) (*Agent, string, error)
 	ValidateAgent(agentID, secret string) bool
 	GetAgent(id string) (*Agent, error)
 	ListAgents() ([]*Agent, error)

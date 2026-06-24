@@ -41,9 +41,11 @@ func RegisterService(grpcServer *grpc.Server, s store.MetricsStore, alert interf
 
 // Register 探针一次性 token 注册
 func (s *AgentServer) Register(ctx context.Context, req *pb.RegisterRequest) (*pb.RegisterResponse, error) {
-	log.Printf("探针注册请求: token=%s hostname=%s arch=%s", req.Token[:min(16, len(req.Token))]+"...", req.Hostname, req.Arch)
+	log.Printf("探针注册请求: token=%s hostname=%s arch=%s ipv4=%s ipv6=%s",
+		req.Token[:min(16, len(req.Token))]+"...", req.Hostname, req.Arch, req.IpV4, req.IpV6)
 
-	agent, secret, err := s.store.RegisterAgent(req.Token, req.Hostname, req.AgentVersion, req.Arch)
+	// 注册时保存探针上报的公网 IPv4/IPv6 地址，用于后端管理，不显示前端避免暴露
+	agent, secret, err := s.store.RegisterAgent(req.Token, req.Hostname, req.AgentVersion, req.Arch, req.IpV4, req.IpV6)
 	if err != nil {
 		log.Printf("注册失败: %v", err)
 		return nil, status.Errorf(codes.InvalidArgument, "注册失败: %v", err)
@@ -260,7 +262,7 @@ func (s *AgentServer) effectivePingInterval(agent *store.Agent) int {
 	if s.cfg.DefaultPingInterval > 0 {
 		return s.cfg.DefaultPingInterval
 	}
-	return 60
+	return 1
 }
 
 func (s *AgentServer) enabledPingTargets() []*pb.PingTarget {

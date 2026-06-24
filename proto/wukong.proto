@@ -13,6 +13,8 @@ message RegisterRequest {
   string hostname     = 2;  // 探针主机名
   string agent_version = 3; // 探针版本号
   string arch         = 4;  // 架构 amd64/arm64
+  string ip_v4        = 5;  // 探针公网 IPv4 地址（探针启动时自动获取，可能为空）
+  string ip_v6        = 6;  // 探针公网 IPv6 地址（有则上报，无则为空）
 }
 
 // 注册响应：下发个体凭证和初始配置

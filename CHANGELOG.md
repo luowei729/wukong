@@ -2,6 +2,64 @@
 
 所有变更记录使用北京时间（UTC+8）。
 
+## [2026-06-25 15:30] - 探针版本自增/自动升级、全屏布局、架构修复、登录过期调整
+
+### 改动前总结
+1. 节点列表不显示探针版本
+2. 探针版本号硬编码 "0.1.0"，无自动递增机制
+3. 探针升级需要管理员在系统设置手动配置目标版本
+4. 后端管理页面使用固定侧边栏，内容区只占左侧部分，不够全屏
+5. `getArch()` 硬编码返回 "amd64"，arm64 节点被错误标识
+6. 管理员 access token 仅 15 分钟就过期，且前端没有自动刷新机制，用户频繁被登出
+
+### 改动后总结
+1. **节点列表新增探针版本列**：显示 `agent_ver` 字段
+2. **探针版本号自增**：Makefile 使用 `git describe --tags` 自动生成版本号；cmd/agent/main.go 和 cmd/server/main.go 新增 `var version/commit/buildTime` 接收 ldflags 注入；Dockerfile 同步添加 `ARG VERSION/COMMIT/BUILD_TIME` 注入
+3. **探针每 5 分钟自动检查升级**：新增 `autoUpgradeCheck` 和 `checkAndUpgrade` 函数，发现新版本自动下载替换重启；系统设置"探针升级"改为只读信息展示
+4. **后端页面全屏铺满**：侧边栏改为顶部导航栏，`.wk-main` 不再有 `margin-left: 240px`，内容区占满全屏
+5. **修复架构检测**：`getArch()` 从硬编码 "amd64" 改为 `runtime.GOARCH` 动态获取
+6. **登录过期调整**：access token 15min→2h，refresh token 7d→30d；前端 `http.ts` 新增 401 自动用 refresh token 续期逻辑
+
+### 涉及文件
+- `cmd/agent/main.go` — 新增 version/commit/buildTime 变量，使用 NewAgentWithVersion
+- `cmd/server/main.go` — 新增 version/commit/buildTime 变量
+- `internal/agentcore/agent.go` — NewAgentWithVersion、getArch 改用 runtime.GOARCH、autoUpgradeCheck/checkAndUpgrade
+- `internal/config/config.go` — JWT 过期时间调整
+- `Makefile` — 版本号自动生成
+- `deploy/Dockerfile` — 版本号 ARG 注入
+- `web/src/views/Nodes.vue` — 新增探针版本列
+- `web/src/views/Settings.vue` — 探针升级改为只读
+- `web/src/layouts/MainLayout.vue` — 侧边栏改顶部导航
+- `web/src/styles/index.scss` — 全屏布局样式
+- `web/src/utils/http.ts` — 401 自动刷新 token
+
+## [2026-06-25 13:30] - IPv4/IPv6 存储、Ping IPv6、Ping 频率 1s、丢包率显示
+
+### 改动前总结
+1. 节点不存储/显示 IP 地址，无法区分 IPv4/IPv6
+2. Ping ICMP 模式不支持 IPv6 目标（未加 `-6` 标志）
+3. Ping 默认频率 60 秒，采集间隔 1 秒但 Ping 太慢
+4. 延时 K 线图只显示延迟，不显示丢包率（后端已有 loss_rate 数据但前端未使用）
+
+### 改动后总结
+1. **节点 IPv4/IPv6 存储**：proto RegisterRequest 新增 `ip_v4`/`ip_v6` 字段，探针注册时通过 ipify.org 获取公网 IP 并上报，主控存入 agents 表新列 `ip_v4`/`ip_v6`，**前端不显示 IP 避免暴露**；已有数据库通过 ALTER TABLE 迁移自动添加新列
+2. **Ping IPv6 支持**：ICMP 模式自动检测 IPv6 目标，使用 `ping6` 或 `ping -6` 探测；TCP 模式天然支持 IPv6
+3. **Ping 默认频率 60→1 秒**：ServerConfig/AgentConfig/PingCollector/agent_server 兜底值全部改为 1
+4. **延时 K 线图显示丢包百分比**：图例名追加丢包率（如"上海电信 2%loss"），tooltip 同时显示延时和丢包率
+
+### 涉及文件
+- `proto/wukong.proto` — RegisterRequest 新增 ip_v4/ip_v6
+- `proto/gen/wukong.pb.go` — 重新生成
+- `proto/gen/wukong_grpc.pb.go` — 重新生成
+- `internal/store/store.go` — Agent 结构体和接口新增 IPv4/IPv6
+- `internal/store/sqlite.go` — 表结构、RegisterAgent、UpdateAgent、GetAgent、ListAgents、迁移
+- `internal/grpcapi/agent_server.go` — Register 传递 IPv4/IPv6，PingInterval 兜底 1
+- `internal/agentcore/agent.go` — 注册时获取并上报公网 IP
+- `internal/agentcore/ping_collector.go` — IPv6 ICMP 支持，默认频率 1s
+- `internal/config/config.go` — DefaultPingInterval/PingInterval 60→1
+- `web/src/views/NodeDetail.vue` — 丢包率显示、Ping 频率默认 1s
+- `web/src/views/public/PublicServerDetail.vue` — 丢包率显示
+
 ## [2026-06-24 17:08] - 生产部署、恢复旧数据卷并更新本机探针
 
 ### 改动前总结

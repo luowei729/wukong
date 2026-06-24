@@ -84,6 +84,8 @@ type RegisterRequest struct {
 	Hostname      string                 `protobuf:"bytes,2,opt,name=hostname,proto3" json:"hostname,omitempty"`                             // 探针主机名
 	AgentVersion  string                 `protobuf:"bytes,3,opt,name=agent_version,json=agentVersion,proto3" json:"agent_version,omitempty"` // 探针版本号
 	Arch          string                 `protobuf:"bytes,4,opt,name=arch,proto3" json:"arch,omitempty"`                                     // 架构 amd64/arm64
+	IpV4          string                 `protobuf:"bytes,5,opt,name=ip_v4,json=ipV4,proto3" json:"ip_v4,omitempty"`                         // 探针公网 IPv4 地址（探针启动时自动获取，可能为空）
+	IpV6          string                 `protobuf:"bytes,6,opt,name=ip_v6,json=ipV6,proto3" json:"ip_v6,omitempty"`                         // 探针公网 IPv6 地址（有则上报，无则为空）
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -142,6 +144,20 @@ func (x *RegisterRequest) GetAgentVersion() string {
 func (x *RegisterRequest) GetArch() string {
 	if x != nil {
 		return x.Arch
+	}
+	return ""
+}
+
+func (x *RegisterRequest) GetIpV4() string {
+	if x != nil {
+		return x.IpV4
+	}
+	return ""
+}
+
+func (x *RegisterRequest) GetIpV6() string {
+	if x != nil {
+		return x.IpV6
 	}
 	return ""
 }
@@ -1137,12 +1153,14 @@ var File_wukong_proto protoreflect.FileDescriptor
 
 const file_wukong_proto_rawDesc = "" +
 	"\n" +
-	"\fwukong.proto\x12\x06wukong\"|\n" +
+	"\fwukong.proto\x12\x06wukong\"\xa6\x01\n" +
 	"\x0fRegisterRequest\x12\x14\n" +
 	"\x05token\x18\x01 \x01(\tR\x05token\x12\x1a\n" +
 	"\bhostname\x18\x02 \x01(\tR\bhostname\x12#\n" +
 	"\ragent_version\x18\x03 \x01(\tR\fagentVersion\x12\x12\n" +
-	"\x04arch\x18\x04 \x01(\tR\x04arch\"\xbe\x02\n" +
+	"\x04arch\x18\x04 \x01(\tR\x04arch\x12\x13\n" +
+	"\x05ip_v4\x18\x05 \x01(\tR\x04ipV4\x12\x13\n" +
+	"\x05ip_v6\x18\x06 \x01(\tR\x04ipV6\"\xbe\x02\n" +
 	"\x10RegisterResponse\x12\x19\n" +
 	"\bagent_id\x18\x01 \x01(\tR\aagentId\x12!\n" +
 	"\fagent_secret\x18\x02 \x01(\tR\vagentSecret\x12)\n" +

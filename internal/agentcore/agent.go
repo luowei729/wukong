@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"time"
 
@@ -66,10 +67,19 @@ type CollectResult struct {
 }
 
 func NewAgent(cfg *config.AgentConfig) (*Agent, error) {
+	return NewAgentWithVersion(cfg, "dev")
+}
+
+// NewAgentWithVersion 创建探针实例，使用构建时注入的版本号。
+// 原因：cmd/agent/main.go 通过 ldflags 注入版本号，需要传入而非硬编码。
+func NewAgentWithVersion(cfg *config.AgentConfig, ver string) (*Agent, error) {
+	if ver == "" {
+		ver = "dev"
+	}
 	return &Agent{
 		cfg:        cfg,
 		bufferSize: (cfg.BufferMinutes * 60) / cfg.CollectInterval, // 缓冲条数
-		version:    "0.1.0",
+		version:    ver,
 	}, nil
 }
 
@@ -86,12 +96,17 @@ func (a *Agent) Register(token string) error {
 	client := pb.NewAgentServiceClient(conn)
 	hostname, _ := os.Hostname()
 
+	// 获取本机公网 IPv4/IPv6 地址，注册时上报给主控存储（不显示前端避免暴露）
+	ipV4, ipV6 := getPublicIPs()
+
 	// 发送注册请求
 	resp, err := client.Register(context.Background(), &pb.RegisterRequest{
 		Token:        token,
 		Hostname:     hostname,
 		AgentVersion: a.version,
 		Arch:         getArch(),
+		IpV4:         ipV4,
+		IpV6:         ipV6,
 	})
 	if err != nil {
 		return fmt.Errorf("注册失败: %w", err)
@@ -143,6 +158,9 @@ func (a *Agent) Start(ctx context.Context) error {
 
 	// 初始化采集器
 	a.initCollectors()
+
+	// 每 5 分钟自动检查是否有新版本可升级
+	go a.autoUpgradeCheck(ctx)
 
 	// 启动 gRPC 连接和上报循环
 	go a.reportLoop(ctx)
@@ -471,8 +489,143 @@ func (a *Agent) flushBuffer(stream pb.AgentService_ReportStreamClient) {
 }
 
 func getArch() string {
-	// 简化实现
-	return "amd64"
+	// 使用 runtime.GOARCH 获取实际系统架构，替代之前的硬编码 "amd64"
+	return runtime.GOARCH
+}
+
+// autoUpgradeCheck 每 5 分钟自动检查主控是否有新版本可升级。
+// 原因：探针应主动检查版本而非完全依赖主控下发升级指令，确保即使指令下发失败也能及时升级。
+// 流程：通过 gRPC 查询主控的 target_version → 与当前版本比较 → 下载新二进制 → 替换重启。
+func (a *Agent) autoUpgradeCheck(ctx context.Context) {
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if a.client == nil {
+				continue
+			}
+			// 通过 gRPC 注册接口查询主控当前 target_version
+			// 原因：没有独立的版本查询 API，复用注册响应中的 target_version 字段
+			// 实际上主控在心跳中会下发升级指令，这里作为主动补充检查
+			a.checkAndUpgrade()
+		}
+	}
+}
+
+// checkAndUpgrade 检查主控是否有新版本并执行升级
+func (a *Agent) checkAndUpgrade() {
+	if a.targetVersion == "" || a.targetVersion == a.version {
+		return
+	}
+	log.Printf("[自动升级] 发现新版本: %s -> %s，开始升级", a.version, a.targetVersion)
+
+	// 构造升级 payload
+	payload, _ := json.Marshal(map[string]string{
+		"target_version": a.targetVersion,
+	})
+
+	cmd := &pb.SignedCommand{
+		CommandId:   fmt.Sprintf("auto-upgrade-%d", time.Now().Unix()),
+		CommandType: pb.CommandType_COMMAND_UPGRADE_AGENT,
+		Payload:     payload,
+		IssuedAt:    time.Now().Unix(),
+		ExpiresAt:   time.Now().Add(10 * time.Minute).Unix(),
+	}
+	a.handleSignedCommand(cmd)
+}
+
+// getPublicIPs 获取本机公网 IPv4 和 IPv6 地址。
+// 原因：探针注册时需要上报公网 IP 给主控存储，用于后端管理。
+// 方法：并发请求外部 API 获取，失败则回退到本机网卡地址，超时不阻塞注册流程。
+func getPublicIPs() (string, string) {
+	type ipResult struct {
+		v4  string
+		v6  string
+		err error
+	}
+	ch := make(chan ipResult, 1)
+
+	go func() {
+		var ipV4, ipV6 string
+		var errV4, errV6 error
+
+		// 并发获取 IPv4 和 IPv6
+		v4Ch := make(chan string, 1)
+		v6Ch := make(chan string, 1)
+
+		go func() {
+			// 通过外部 API 获取公网 IPv4
+			client := &http.Client{Timeout: 5 * time.Second}
+			resp, err := client.Get("https://api4.ipify.org")
+			if err != nil {
+				v4Ch <- ""
+				return
+			}
+			defer resp.Body.Close()
+			buf := make([]byte, 64)
+			n, _ := resp.Body.Read(buf)
+			v4Ch <- strings.TrimSpace(string(buf[:n]))
+		}()
+
+		go func() {
+			// 通过外部 API 获取公网 IPv6
+			client := &http.Client{Timeout: 5 * time.Second}
+			resp, err := client.Get("https://api6.ipify.org")
+			if err != nil {
+				v6Ch <- ""
+				return
+			}
+			defer resp.Body.Close()
+			buf := make([]byte, 64)
+			n, _ := resp.Body.Read(buf)
+			v6Ch <- strings.TrimSpace(string(buf[:n]))
+		}()
+
+		ipV4 = <-v4Ch
+		ipV6 = <-v6Ch
+
+		// 如果外部 API 都失败，回退到本机网卡地址
+		if ipV4 == "" && ipV6 == "" {
+			ipV4, ipV6 = getLocalIPs()
+		}
+
+		ch <- ipResult{v4: ipV4, v6: ipV6, err: fmt.Errorf("ipv4 err=%v ipv6 err=%v", errV4, errV6)}
+	}()
+
+	// 最多等待 6 秒，超时则回退到本机地址
+	select {
+	case result := <-ch:
+		return result.v4, result.v6
+	case <-time.After(6 * time.Second):
+		log.Println("获取公网 IP 超时，回退到本机地址")
+		return getLocalIPs()
+	}
+}
+
+// getLocalIPs 从本机网卡获取 IPv4/IPv6 地址（回退方案）
+func getLocalIPs() (string, string) {
+	var ipV4, ipV6 string
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		return "", ""
+	}
+	for _, addr := range addrs {
+		ipNet, ok := addr.(*net.IPNet)
+		if !ok || ipNet.IP.IsLoopback() {
+			continue
+		}
+		if ipNet.IP.To4() != nil && ipV4 == "" {
+			ipV4 = ipNet.IP.String()
+		}
+		if ipNet.IP.To4() == nil && ipV6 == "" {
+			ipV6 = ipNet.IP.String()
+		}
+	}
+	return ipV4, ipV6
 }
 
 func minDuration(a, b time.Duration) time.Duration {

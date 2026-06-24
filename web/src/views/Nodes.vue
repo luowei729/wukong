@@ -27,6 +27,11 @@
       <el-table-column label="系统版本" min-width="150">
         <template #default="{ row }">{{ row.os_version || '-' }}</template>
       </el-table-column>
+      <el-table-column label="探针版本" width="120">
+        <template #default="{ row }">
+          <span>{{ row.agent_ver || '-' }}</span>
+        </template>
+      </el-table-column>
       <el-table-column label="最后上报" width="180">
         <template #default="{ row }">{{ row.last_seen_at || '-' }}</template>
       </el-table-column>

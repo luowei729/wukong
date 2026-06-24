@@ -259,14 +259,44 @@ function renderPingChart() {
     Object.values(pingSeries.value).flatMap(points => points.map(item => item.timestamp))
   )).sort()
   const labels = allTimestamps.map((item) => formatTime(item))
+
+  // 计算每个 ISP 的最新丢包率，用于图例名称显示（如"上海电信 2%loss"）
   const series = Object.entries(pingSeries.value).map(([isp, points], index) => {
     const byTime = new Map(points.map(item => [item.timestamp, item.avg_lat]))
-    return lineSeries(isp, allTimestamps.map(ts => byTime.get(ts) ?? null), colorList[index % colorList.length])
+    const lastPoint = points.length > 0 ? points[points.length - 1] : null
+    const lossPercent = lastPoint ? (Number(lastPoint.loss_rate || 0) * 100).toFixed(1) : '0.0'
+    const displayName = `${isp} ${lossPercent}%loss`
+    return lineSeries(displayName, allTimestamps.map(ts => byTime.get(ts) ?? null), colorList[index % colorList.length])
   })
 
   pingChart.setOption({
     animation: false,
-    tooltip: { trigger: 'axis', confine: true, transitionDuration: 0, backgroundColor: 'rgba(15, 23, 42, 0.92)', borderColor: 'rgba(56, 189, 248, 0.3)' },
+    tooltip: {
+      trigger: 'axis',
+      confine: true,
+      transitionDuration: 0,
+      backgroundColor: 'rgba(15, 23, 42, 0.92)',
+      borderColor: 'rgba(56, 189, 248, 0.3)',
+      // 自定义 tooltip 显示延时和丢包率
+      formatter: (params: any) => {
+        if (!Array.isArray(params)) return ''
+        let html = `<div style="font-size:12px;color:#94a3b8;margin-bottom:4px">${params[0].axisValue}</div>`
+        params.forEach((p: any) => {
+          const color = p.color || '#38bdf8'
+          const match = p.seriesName.match(/^(.+?)\s+([\d.]+)%loss$/)
+          const ispName = match ? match[1] : p.seriesName
+          const lossPct = match ? match[2] : '0.0'
+          const lat = p.value !== null && p.value !== undefined ? `${p.value.toFixed(2)} ms` : '-'
+          html += `<div style="display:flex;align-items:center;gap:6px;font-size:12px">
+            <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${color}"></span>
+            <span style="color:#e2e8f0">${ispName}</span>
+            <span style="color:#94a3b8;margin-left:auto">${lat}</span>
+            <span style="color:#f59e0b;font-size:11px">${lossPct}%loss</span>
+          </div>`
+        })
+        return html
+      },
+    },
     legend: { type: 'scroll', textStyle: { color: 'var(--wk-text-muted)' } },
     grid: { left: '3%', right: '4%', bottom: '8%', containLabel: true },
     xAxis: { type: 'category', data: labels, axisLabel: { color: 'var(--wk-text-muted)' }, axisLine: { lineStyle: { color: 'var(--wk-chart-grid)' } } },

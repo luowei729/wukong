@@ -51,7 +51,7 @@ type ServerConfig struct {
 
 	// 探针相关默认值
 	DefaultCollectInterval int `json:"default_collect_interval"` // 默认采集频率（秒，1）
-	DefaultPingInterval    int `json:"default_ping_interval"`    // 默认 Ping 频率（秒，60）
+	DefaultPingInterval    int `json:"default_ping_interval"`    // 默认 Ping 频率（秒，1）
 	HeartbeatTimeout       int `json:"heartbeat_timeout"`        // 心跳超时判定离线（秒，30）
 
 	// 告警
@@ -99,11 +99,11 @@ func DefaultServerConfig() *ServerConfig {
 		DBPath:                 DefaultDBPath,
 		AdminUsername:          "admin",
 		JWTSecret:              randomHex(32),
-		JWTAccessExpiry:        "15m",
-		JWTRefreshExpiry:       "168h",
+		JWTAccessExpiry:        "2h",
+		JWTRefreshExpiry:       "720h",
 		DBMaxConnections:       1,
 		DefaultCollectInterval: 1,
-		DefaultPingInterval:    60,
+		DefaultPingInterval:    1,
 		HeartbeatTimeout:       30,
 		AlertSuppressMinutes:   30,
 		LogLevel:               "info",
@@ -115,7 +115,7 @@ func DefaultAgentConfig() *AgentConfig {
 		ServerAddr:      "",
 		DataDir:         filepath.Join(DefaultDir, "agent", "data"),
 		CollectInterval: 1,
-		PingInterval:    60,
+		PingInterval:    1,
 		BufferMinutes:   10,
 		LogLevel:        "info",
 	}
@@ -278,12 +278,12 @@ func ParseDuration(s string, defaultVal time.Duration) time.Duration {
 
 // GetAccessExpiry 解析 JWT access token 有效期
 func (c *ServerConfig) GetAccessExpiry() time.Duration {
-	return ParseDuration(c.JWTAccessExpiry, 15*time.Minute)
+	return ParseDuration(c.JWTAccessExpiry, 2*time.Hour)
 }
 
 // GetRefreshExpiry 解析 JWT refresh token 有效期
 func (c *ServerConfig) GetRefreshExpiry() time.Duration {
-	return ParseDuration(c.JWTRefreshExpiry, 7*24*time.Hour)
+	return ParseDuration(c.JWTRefreshExpiry, 30*24*time.Hour)
 }
 
 // randomHex 生成随机十六进制字符串（用于默认密钥和密码生成）

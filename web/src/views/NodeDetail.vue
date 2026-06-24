@@ -29,7 +29,7 @@
           <el-input-number v-model="configForm.collect_intv" :min="1" :max="3600" :step="1" />
         </el-form-item>
         <el-form-item label="Ping 频率（秒）">
-          <el-input-number v-model="configForm.ping_intv" :min="5" :max="3600" :step="5" />
+          <el-input-number v-model="configForm.ping_intv" :min="1" :max="3600" :step="1" />
         </el-form-item>
         <el-form-item>
           <el-button type="primary" :loading="savingConfig" @click="saveConfig">保存配置</el-button>
@@ -70,7 +70,7 @@ const savingConfig = ref(false)
 const configForm = reactive({
   name: '',
   collect_intv: 1,
-  ping_intv: 60,
+  ping_intv: 1,
 })
 let chart: echarts.ECharts | null = null
 let pingTimer: number | null = null
@@ -82,7 +82,7 @@ async function fetchNode() {
     nodeName.value = res.data.name || res.data.hostname || `节点 ${agentId.slice(0, 8)}`
     configForm.name = nodeName.value
     configForm.collect_intv = res.data.collect_intv || 1
-    configForm.ping_intv = res.data.ping_intv || 60
+    configForm.ping_intv = res.data.ping_intv || 1
   } catch (e) {
     console.error('获取节点详情失败', e)
   }
@@ -168,9 +168,23 @@ function renderChart() {
     Object.values(pingSeries.value).flatMap(points => points.map(point => point.bucket_min))
   )).sort()
   const labels = allBuckets.map(point => formatTime(point))
+
+  // 计算每个 ISP 的最新丢包率，用于图例名称显示（如"上海电信 2%loss"）
   const series = Object.entries(pingSeries.value).map(([isp, points], index) => {
     const byTime = new Map(points.map(point => [point.bucket_min, Number(point.avg_lat || 0).toFixed(2)]))
-    return { name: isp, type: 'line', data: allBuckets.map(bucket => byTime.get(bucket) ?? null), smooth: false, sampling: 'lttb', symbol: 'none', lineStyle: { color: colorList[index % colorList.length], width: 1.8 } }
+    // 取最近一个数据点的丢包率
+    const lastPoint = points.length > 0 ? points[points.length - 1] : null
+    const lossPercent = lastPoint ? (Number(lastPoint.loss_rate || 0) * 100).toFixed(1) : '0.0'
+    const displayName = `${isp} ${lossPercent}%loss`
+    return {
+      name: displayName,
+      type: 'line',
+      data: allBuckets.map(bucket => byTime.get(bucket) ?? null),
+      smooth: false,
+      sampling: 'lttb',
+      symbol: 'none',
+      lineStyle: { color: colorList[index % colorList.length], width: 1.8 },
+    }
   })
 
   chart.setOption({
@@ -181,6 +195,26 @@ function renderChart() {
       transitionDuration: 0,
       backgroundColor: 'rgba(15, 23, 42, 0.9)',
       borderColor: 'rgba(56, 189, 248, 0.3)',
+      // 自定义 tooltip 显示延时和丢包率
+      formatter: (params: any) => {
+        if (!Array.isArray(params)) return ''
+        let html = `<div style="font-size:12px;color:#94a3b8;margin-bottom:4px">${params[0].axisValue}</div>`
+        params.forEach((p: any) => {
+          const color = p.color || '#38bdf8'
+          // 从 series name 中提取 ISP 名称和丢包率
+          const match = p.seriesName.match(/^(.+?)\s+([\d.]+)%loss$/)
+          const ispName = match ? match[1] : p.seriesName
+          const lossPct = match ? match[2] : '0.0'
+          const lat = p.value !== null && p.value !== undefined ? `${p.value} ms` : '-'
+          html += `<div style="display:flex;align-items:center;gap:6px;font-size:12px">
+            <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${color}"></span>
+            <span style="color:#e2e8f0">${ispName}</span>
+            <span style="color:#94a3b8;margin-left:auto">${lat}</span>
+            <span style="color:#f59e0b;font-size:11px">${lossPct}%loss</span>
+          </div>`
+        })
+        return html
+      },
     },
     legend: { type: 'scroll', textStyle: { color: 'var(--wk-text-muted)' } },
     grid: { left: '3%', right: '4%', bottom: '8%', containLabel: true },

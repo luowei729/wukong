@@ -1,51 +1,41 @@
 <template>
-  <!-- 主布局：侧边栏 + 顶部栏 + 内容区 -->
+  <!-- 主布局：顶部导航 + 全屏内容区 -->
   <div class="wk-layout">
-    <!-- 侧边栏 -->
-    <aside class="wk-sidebar">
-      <div class="wk-sidebar-logo">
+    <!-- 顶部导航栏 -->
+    <header class="wk-topbar">
+      <div class="wk-topbar-left">
         <span class="logo-text">🐒 wukong</span>
+        <nav class="wk-nav">
+          <div
+            v-for="item in menuItems"
+            :key="item.path"
+            :class="['wk-nav-item', { active: currentPath === item.path }]"
+            @click="navigate(item.path)"
+          >
+            <el-icon>
+              <component :is="item.icon" />
+            </el-icon>
+            <span>{{ item.label }}</span>
+          </div>
+        </nav>
       </div>
-      <ul class="wk-sidebar-menu">
-        <li
-          v-for="item in menuItems"
-          :key="item.path"
-          :class="{ active: currentPath === item.path }"
-          @click="navigate(item.path)"
-        >
-          <el-icon>
-            <component :is="item.icon" />
-          </el-icon>
-          <span>{{ item.label }}</span>
-        </li>
-      </ul>
-    </aside>
+      <div class="wk-topbar-right">
+        <el-button
+          :icon="themeIcon"
+          circle
+          size="small"
+          @click="toggleTheme"
+        />
+        <el-button text>
+          <el-icon><User /></el-icon>
+        </el-button>
+      </div>
+    </header>
 
-    <!-- 主内容 -->
-    <div class="wk-main">
-      <!-- 顶部栏 -->
-      <header class="wk-header">
-        <div class="wk-header-left">
-          <span class="wk-header-title">{{ currentTitle }}</span>
-        </div>
-        <div class="wk-header-right">
-          <el-button
-            :icon="themeIcon"
-            circle
-            size="small"
-            @click="toggleTheme"
-          />
-          <el-button text>
-            <el-icon><User /></el-icon>
-          </el-button>
-        </div>
-      </header>
-
-      <!-- 内容区 -->
-      <main class="wk-content">
-        <router-view />
-      </main>
-    </div>
+    <!-- 全屏内容区 -->
+    <main class="wk-content">
+      <router-view />
+    </main>
   </div>
 </template>
 
@@ -94,23 +84,56 @@ function navigate(path: string) {
 <style scoped>
 .wk-layout {
   display: flex;
+  flex-direction: column;
   min-height: 100vh;
 }
 
-.wk-header-left {
+.wk-topbar {
+  height: 56px;
+  border-bottom: 1px solid var(--wk-border);
+  background: var(--wk-bg-soft);
   display: flex;
   align-items: center;
-  gap: 12px;
+  justify-content: space-between;
+  padding: 0 24px;
+  position: sticky;
+  top: 0;
+  z-index: 100;
 }
 
-.wk-header-title {
-  font-size: 16px;
-  font-weight: 600;
+.wk-topbar-left {
+  display: flex;
+  align-items: center;
+  gap: 32px;
 }
 
-.wk-header-right {
+.wk-topbar-right {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+.wk-nav {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.wk-nav-item {
+  padding: 8px 16px;
+  cursor: pointer;
+  color: var(--wk-text-muted);
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+  border-radius: 6px;
+}
+
+.wk-nav-item:hover,
+.wk-nav-item.active {
+  color: var(--wk-primary);
+  background: rgba(56, 189, 248, 0.08);
 }
 </style>

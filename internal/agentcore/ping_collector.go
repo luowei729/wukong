@@ -27,7 +27,7 @@ type PingCollector struct {
 
 func NewPingCollector(intervalSec int, targets []config.PingTargetConfig) *PingCollector {
 	if intervalSec <= 0 {
-		intervalSec = 60
+		intervalSec = 1
 	}
 	return &PingCollector{interval: time.Duration(intervalSec) * time.Second, targets: targets}
 }
@@ -100,7 +100,19 @@ func probeTCP(host string, port int) (float64, error) {
 
 func probeICMP(host string) (latency, jitter, loss float64, err error) {
 	// 第一阶段使用系统 ping 命令，避免引入 raw socket 权限要求；auto 模式失败后会回退 TCP。
-	cmd := exec.Command("ping", "-c", "3", "-W", "1", host)
+	// IPv6 目标需要使用 ping6 或 ping -6，否则系统 ping 无法正确处理 IPv6 地址。
+	pingCmd := "ping"
+	pingArgs := []string{"-c", "3", "-W", "1"}
+	if isIPv6(host) {
+		// 优先尝试 ping -6（Linux iputils），回退到 ping6（BSD/旧 Linux）
+		if _, lookupErr := exec.LookPath("ping6"); lookupErr == nil {
+			pingCmd = "ping6"
+		} else {
+			pingArgs = append([]string{"-6"}, pingArgs...)
+		}
+	}
+	pingArgs = append(pingArgs, host)
+	cmd := exec.Command(pingCmd, pingArgs...)
 	out, runErr := cmd.CombinedOutput()
 	text := string(out)
 	loss = parsePacketLoss(text)
@@ -114,6 +126,26 @@ func probeICMP(host string) (latency, jitter, loss float64, err error) {
 		return 0, 0, 1, runErr
 	}
 	return 0, 0, loss, fmt.Errorf("无法解析 ping 输出")
+}
+
+// isIPv6 判断目标地址是否为 IPv6（包含冒号且不是 IPv4 映射地址）
+func isIPv6(host string) bool {
+	// 先尝试直接解析为 IP
+	ip := net.ParseIP(host)
+	if ip != nil {
+		return ip.To4() == nil
+	}
+	// 可能是域名，尝试 DNS 解析查看是否有 AAAA 记录
+	addrs, err := net.LookupHost(host)
+	if err != nil {
+		return false
+	}
+	for _, addr := range addrs {
+		if ip := net.ParseIP(addr); ip != nil && ip.To4() == nil {
+			return true
+		}
+	}
+	return false
 }
 
 func parsePacketLoss(text string) float64 {

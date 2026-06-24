@@ -14,6 +14,13 @@ import (
 	"wukong/internal/config"
 )
 
+// 构建时通过 -ldflags 注入的版本信息
+var (
+	version   = "dev"   // 版本号，如 0.2.0
+	commit    = "none"  // Git commit hash
+	buildTime = "none"  // 构建时间
+)
+
 func main() {
 	configPath := flag.String("config", "", "探针配置文件路径（默认 /opt/wukong/agent/agent.conf）")
 	serverAddr := flag.String("server", "", "主控地址（如 xxx.com:443，覆盖配置文件）")
@@ -29,10 +36,10 @@ func main() {
 		cfg.ServerAddr = *serverAddr
 	}
 
-	log.Printf("wukong 探针启动中，主控地址: %s", cfg.ServerAddr)
+	log.Printf("wukong 探针启动中，版本: %s (commit: %s, 构建: %s)，主控地址: %s", version, commit, buildTime, cfg.ServerAddr)
 
-	// 创建探针核心
-	agent, err := agentcore.NewAgent(cfg)
+	// 创建探针核心，传入构建时注入的版本号
+	agent, err := agentcore.NewAgentWithVersion(cfg, version)
 	if err != nil {
 		log.Fatalf("创建探针实例失败: %v", err)
 	}
