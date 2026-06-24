@@ -73,4 +73,11 @@ router.beforeEach((to) => {
   }
 })
 
+// 路由切换后更新浏览器标签页标题；站点标题优先使用后台主题接口写入的 localStorage。
+router.afterEach((to) => {
+  const siteTitle = localStorage.getItem('site_title') || 'wukong 监控'
+  const pageTitle = typeof to.meta.title === 'string' ? to.meta.title : ''
+  document.title = pageTitle ? `${pageTitle} - ${siteTitle}` : siteTitle
+})
+
 export default router

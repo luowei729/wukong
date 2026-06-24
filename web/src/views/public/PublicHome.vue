@@ -129,7 +129,9 @@
 
       <!-- 页脚 -->
       <footer v-if="siteFooter" class="public-footer">
-        {{ siteFooter }}
+        <a href="https://github.com/luowei729/wukong" target="_blank" rel="noopener noreferrer">
+          {{ siteFooter }}
+        </a>
       </footer>
     </main>
   </div>
@@ -172,7 +174,11 @@ let refreshTimer: ReturnType<typeof setInterval> | null = null
 async function loadTheme() {
   try {
     const res = await http.get(`/api/public/theme?_=${Date.now()}`)
-    if (res.data.title) siteTitle.value = res.data.title
+    if (res.data.title) {
+      siteTitle.value = res.data.title
+      localStorage.setItem('site_title', res.data.title)
+      document.title = res.data.title
+    }
     if (res.data.footer_text) siteFooter.value = res.data.footer_text
     if (res.data.preset) {
       document.documentElement.dataset.theme = res.data.preset
@@ -561,5 +567,14 @@ onUnmounted(() => {
   color: var(--wk-text-muted);
   font-size: 12px;
   opacity: 0.6;
+}
+
+.public-footer a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.public-footer a:hover {
+  color: var(--wk-primary);
 }
 </style>

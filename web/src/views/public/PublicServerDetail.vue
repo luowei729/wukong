@@ -175,6 +175,16 @@ const currentMetrics = computed(() => [
   { label: '下行', value: `${formatBytes(server.value?.net_down)}/s`, hint: '实时速率' },
 ])
 
+async function loadTheme() {
+  try {
+    const res = await http.get(`/api/public/theme?_=${Date.now()}`)
+    if (res.data.title) {
+      localStorage.setItem('site_title', res.data.title)
+      document.title = `服务器详情 - ${res.data.title}`
+    }
+  } catch {}
+}
+
 async function loadServer(showLoading = false) {
   // 详情页使用公开接口，不携带管理 token，防止未登录访问被后台鉴权阻断；定时刷新时静默更新，避免页面闪烁。
   if (showLoading) loading.value = true
@@ -372,6 +382,7 @@ function handleResize() {
 }
 
 onMounted(() => {
+  loadTheme()
   loadServer(true)
   loadMetrics()
   // 详情页当前指标每秒刷新；趋势图低频刷新且不销毁重建，避免图表无限闪烁。
