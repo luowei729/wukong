@@ -299,8 +299,10 @@ func (a *Agent) connect(ctx context.Context) (*grpc.ClientConn, error) {
 func (a *Agent) collectAndReport() *pb.MetricsReport {
 	now := time.Now()
 	report := &pb.MetricsReport{
-		AgentId:   a.cfg.AgentID,
-		ReportSeq: now.UnixNano(),
+		AgentId:      a.cfg.AgentID,
+		ReportSeq:    now.UnixNano(),
+		AgentVersion: a.version,
+		Arch:         getArch(),
 	}
 
 	for _, c := range a.collectors {

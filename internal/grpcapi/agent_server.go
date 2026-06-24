@@ -212,6 +212,26 @@ func (s *AgentServer) buildUpgradeFrame(agentID string) *pb.ServerFrame {
 
 // handleMetricsReport 处理探针上报的指标数据
 func (s *AgentServer) handleMetricsReport(agentID string, r *pb.MetricsReport) {
+	// 每次上报都同步探针版本和架构，避免旧注册值导致 arm64 被当作 amd64 下发错误升级包。
+	if r.AgentVersion != "" || r.Arch != "" {
+		if agent, err := s.store.GetAgent(agentID); err == nil {
+			changed := false
+			if r.AgentVersion != "" && agent.AgentVer != r.AgentVersion {
+				agent.AgentVer = r.AgentVersion
+				changed = true
+			}
+			if r.Arch != "" && agent.Arch != r.Arch {
+				agent.Arch = r.Arch
+				changed = true
+			}
+			if changed {
+				if err := s.store.UpdateAgent(agent); err != nil {
+					log.Printf("同步探针版本/架构失败: agent=%s err=%v", agentID, err)
+				}
+			}
+		}
+	}
+
 	// 写入系统指标。使用结构体映射，后续继续扩展公开详情字段时不再膨胀存储接口参数。
 	sys := r.System
 	if sys != nil {

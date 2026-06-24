@@ -675,26 +675,37 @@ func (s *SQLiteStore) WritePingMetric(agentID string, ts time.Time, isp, targetI
 	return err
 }
 
-// AggregatePingMin 聚合上一分钟的 Ping 数据到预聚合表
+// AggregatePingMin 滚动聚合最近 10 分钟的 Ping 数据到预聚合表。
+// 原因：部分节点 Ping 周期为 60 秒，且探针重启/网络抖动会让数据晚到；只聚合上一分钟会漏掉 ff1 这类节点。
 func (s *SQLiteStore) AggregatePingMin() error {
 	now := time.Now().Truncate(time.Minute)
-	bucket := now.Unix() - 60 // 上一分钟
-	table := tableNameForTime("metrics_ping", now.Add(-time.Minute))
+	seenTables := map[string]struct{}{}
 
-	// 从原始表聚合，写入预聚合表
-	sql := fmt.Sprintf(`
-		INSERT OR REPLACE INTO ping_agg_1min (bucket_min, agent_id, isp, cnt, avg_lat, min_lat, max_lat, sum_lat, loss_cnt)
-		SELECT ?, agent_id, isp, COUNT(*), AVG(latency), MIN(latency), MAX(latency), SUM(latency),
-		       SUM(CASE WHEN loss > 0 THEN 1 ELSE 0 END)
-		FROM %s
-		WHERE ts >= ? AND ts < ?
-		GROUP BY agent_id, isp`, table)
+	for offset := 1; offset <= 10; offset++ {
+		bucketTime := now.Add(-time.Duration(offset) * time.Minute)
+		bucket := bucketTime.Unix()
+		table := tableNameForTime("metrics_ping", bucketTime)
 
-	_, err := s.db.Exec(sql, bucket, bucket, bucket+60)
-	// 即使原始表不存在也可忽略
-	if err != nil && !strings.Contains(err.Error(), "no such table") {
-		return err
+		// 记录涉及的小时表，便于跨小时边界也能正确聚合。
+		seenTables[table] = struct{}{}
+
+		// 从原始表聚合，写入预聚合表；bucket_min 直接按 ts 的分钟桶计算，避免边界时间漏聚合。
+		sql := fmt.Sprintf(`
+			INSERT OR REPLACE INTO ping_agg_1min (bucket_min, agent_id, isp, cnt, avg_lat, min_lat, max_lat, sum_lat, loss_cnt)
+			SELECT (ts / 60) * 60, agent_id, isp, COUNT(*), AVG(latency), MIN(latency), MAX(latency), SUM(latency),
+			       SUM(CASE WHEN loss > 0 THEN 1 ELSE 0 END)
+			FROM %s
+			WHERE ts >= ? AND ts < ?
+			GROUP BY (ts / 60) * 60, agent_id, isp`, table)
+
+		_, err := s.db.Exec(sql, bucket, bucket+60)
+		// 即使原始表不存在也可忽略
+		if err != nil && !strings.Contains(err.Error(), "no such table") {
+			return err
+		}
 	}
+
+	_ = seenTables
 	return nil
 }
 

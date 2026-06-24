@@ -81,6 +81,8 @@ message MetricsReport {
   SystemMetric system     = 3;          // 系统指标
   repeated PingMetric pings = 4;        // 多运营商 Ping 结果
   int64  buffered_count   = 5;          // 本地缓冲中积压的旧数据条数（主控宕机恢复后补传）
+  string agent_version    = 6;          // 当前探针版本（每次上报同步，支持自动升级判断）
+  string arch             = 7;          // 当前探针架构（amd64/arm64，每次上报同步，避免旧注册值误导升级）
 }
 
 // ========== 指令下发 ==========

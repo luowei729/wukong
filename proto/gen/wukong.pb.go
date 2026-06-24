@@ -630,6 +630,8 @@ type MetricsReport struct {
 	System        *SystemMetric          `protobuf:"bytes,3,opt,name=system,proto3" json:"system,omitempty"`                                     // 系统指标
 	Pings         []*PingMetric          `protobuf:"bytes,4,rep,name=pings,proto3" json:"pings,omitempty"`                                       // 多运营商 Ping 结果
 	BufferedCount int64                  `protobuf:"varint,5,opt,name=buffered_count,json=bufferedCount,proto3" json:"buffered_count,omitempty"` // 本地缓冲中积压的旧数据条数（主控宕机恢复后补传）
+	AgentVersion  string                 `protobuf:"bytes,6,opt,name=agent_version,json=agentVersion,proto3" json:"agent_version,omitempty"`     // 当前探针版本（每次上报同步，支持自动升级判断）
+	Arch          string                 `protobuf:"bytes,7,opt,name=arch,proto3" json:"arch,omitempty"`                                         // 当前探针架构（amd64/arm64，每次上报同步，避免旧注册值误导升级）
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -697,6 +699,20 @@ func (x *MetricsReport) GetBufferedCount() int64 {
 		return x.BufferedCount
 	}
 	return 0
+}
+
+func (x *MetricsReport) GetAgentVersion() string {
+	if x != nil {
+		return x.AgentVersion
+	}
+	return ""
+}
+
+func (x *MetricsReport) GetArch() string {
+	if x != nil {
+		return x.Arch
+	}
+	return ""
 }
 
 // 一条签名指令（窄档白名单，仅限安全允许的操作）
@@ -1214,14 +1230,16 @@ const file_wukong_proto_rawDesc = "" +
 	"\n" +
 	"latency_ms\x18\x04 \x01(\x01R\tlatencyMs\x12\x1b\n" +
 	"\tloss_rate\x18\x05 \x01(\x01R\blossRate\x12\x1b\n" +
-	"\tjitter_ms\x18\x06 \x01(\x01R\bjitterMs\"\xc8\x01\n" +
+	"\tjitter_ms\x18\x06 \x01(\x01R\bjitterMs\"\x81\x02\n" +
 	"\rMetricsReport\x12\x19\n" +
 	"\bagent_id\x18\x01 \x01(\tR\aagentId\x12\x1d\n" +
 	"\n" +
 	"report_seq\x18\x02 \x01(\x03R\treportSeq\x12,\n" +
 	"\x06system\x18\x03 \x01(\v2\x14.wukong.SystemMetricR\x06system\x12(\n" +
 	"\x05pings\x18\x04 \x03(\v2\x12.wukong.PingMetricR\x05pings\x12%\n" +
-	"\x0ebuffered_count\x18\x05 \x01(\x03R\rbufferedCount\"\xda\x01\n" +
+	"\x0ebuffered_count\x18\x05 \x01(\x03R\rbufferedCount\x12#\n" +
+	"\ragent_version\x18\x06 \x01(\tR\fagentVersion\x12\x12\n" +
+	"\x04arch\x18\a \x01(\tR\x04arch\"\xda\x01\n" +
 	"\rSignedCommand\x12\x1d\n" +
 	"\n" +
 	"command_id\x18\x01 \x01(\tR\tcommandId\x126\n" +
