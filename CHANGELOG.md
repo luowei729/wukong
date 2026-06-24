@@ -2,6 +2,20 @@
 
 所有变更记录使用北京时间（UTC+8）。
 
+## [2026-06-25 08:05] - 并发单包 Ping 与 live2 出口 IP 兜底修复
+
+### 改动前总结
+1. 虽然 `ping_interval=1`，但 PingCollector 串行探测 4 个运营商目标，且 ICMP 使用 `ping -c 3`，导致单线路实际无法稳定每秒产生点。
+2. live2 公网 IP 查询失败时会回退到云内网地址，出现 `172.31.*` / `fe80::*` 异常显示。
+
+### 改动后总结
+1. PingCollector 对所有运营商目标并发探测，ICMP 改为 `ping -c 1 -W 1`，配合 1 秒配置尽量保证每条线路每秒一个原始点。
+2. 公网 IP 查询使用多服务商兜底：api4/api6.ipify、icanhazip、ifconfig.me；仍严格过滤非公网地址，获取不到公网就留空。
+
+### 涉及文件
+- `internal/agentcore/ping_collector.go` — 并发探测 + 单包 ICMP
+- `internal/agentcore/agent.go` — 多服务商公网 IP 查询与过滤
+
 ## [2026-06-25 07:55] - 过滤非公网出口 IP，Ping K 线改为秒级颗粒度
 
 ### 改动前总结

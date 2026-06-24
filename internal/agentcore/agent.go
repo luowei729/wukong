@@ -604,73 +604,70 @@ func (a *Agent) checkAndUpgrade() {
 // 方法：并发请求外部 API 获取，失败则回退到本机网卡地址，超时不阻塞注册流程。
 func getPublicIPs() (string, string) {
 	type ipResult struct {
-		v4  string
-		v6  string
-		err error
+		v4 string
+		v6 string
 	}
 	ch := make(chan ipResult, 1)
 
 	go func() {
-		var ipV4, ipV6 string
-		var errV4, errV6 error
-
-		// 并发获取 IPv4 和 IPv6
 		v4Ch := make(chan string, 1)
 		v6Ch := make(chan string, 1)
-
 		go func() {
-			// 通过外部 API 获取公网 IPv4
-			client := &http.Client{Timeout: 5 * time.Second}
-			resp, err := client.Get("https://api4.ipify.org")
-			if err != nil {
-				v4Ch <- ""
-				return
-			}
-			defer resp.Body.Close()
-			buf := make([]byte, 64)
-			n, _ := resp.Body.Read(buf)
-			v4Ch <- strings.TrimSpace(string(buf[:n]))
+			v4Ch <- fetchPublicIP([]string{
+				"https://api4.ipify.org",
+				"https://ipv4.icanhazip.com",
+				"https://ifconfig.me/ip",
+			}, false)
+		}()
+		go func() {
+			v6Ch <- fetchPublicIP([]string{
+				"https://api6.ipify.org",
+				"https://ipv6.icanhazip.com",
+			}, true)
 		}()
 
-		go func() {
-			// 通过外部 API 获取公网 IPv6
-			client := &http.Client{Timeout: 5 * time.Second}
-			resp, err := client.Get("https://api6.ipify.org")
-			if err != nil {
-				v6Ch <- ""
-				return
-			}
-			defer resp.Body.Close()
-			buf := make([]byte, 64)
-			n, _ := resp.Body.Read(buf)
-			v6Ch <- strings.TrimSpace(string(buf[:n]))
-		}()
-
-		ipV4 = <-v4Ch
-		ipV6 = <-v6Ch
-		if !isPublicIP(ipV4) {
-			ipV4 = ""
-		}
-		if !isPublicIP(ipV6) {
-			ipV6 = ""
-		}
-
-		// 如果外部 API 都失败，回退到本机网卡地址（仅接受公网地址）
+		ipV4 := <-v4Ch
+		ipV6 := <-v6Ch
 		if ipV4 == "" && ipV6 == "" {
 			ipV4, ipV6 = getLocalIPs()
 		}
-
-		ch <- ipResult{v4: ipV4, v6: ipV6, err: fmt.Errorf("ipv4 err=%v ipv6 err=%v", errV4, errV6)}
+		ch <- ipResult{v4: ipV4, v6: ipV6}
 	}()
 
-	// 最多等待 6 秒，超时则回退到本机地址
 	select {
 	case result := <-ch:
 		return result.v4, result.v6
-	case <-time.After(6 * time.Second):
-		log.Println("获取公网 IP 超时，回退到本机地址")
+	case <-time.After(8 * time.Second):
+		log.Println("获取公网 IP 超时，回退到本机公网地址")
 		return getLocalIPs()
 	}
+}
+
+func fetchPublicIP(urls []string, wantV6 bool) string {
+	client := &http.Client{Timeout: 3 * time.Second}
+	for _, url := range urls {
+		resp, err := client.Get(url)
+		if err != nil {
+			continue
+		}
+		body, readErr := io.ReadAll(io.LimitReader(resp.Body, 128))
+		_ = resp.Body.Close()
+		if readErr != nil || resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			continue
+		}
+		value := strings.TrimSpace(string(body))
+		ip := net.ParseIP(value)
+		if ip == nil || !isPublicIP(value) {
+			continue
+		}
+		if wantV6 && ip.To4() == nil {
+			return value
+		}
+		if !wantV6 && ip.To4() != nil {
+			return value
+		}
+	}
+	return ""
 }
 
 // getLocalIPs 从本机网卡获取 IPv4/IPv6 地址（回退方案）
