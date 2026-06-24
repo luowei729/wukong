@@ -55,7 +55,7 @@
             </div>
             <el-button text @click="loadMetrics">刷新</el-button>
           </div>
-          <el-empty v-if="metricPoints.length === 0" description="点击右上角刷新加载最近 24 小时趋势数据" />
+          <el-empty v-if="metricPoints.length === 0" description="趋势数据加载中或暂无数据" />
           <div v-else ref="chartRef" class="chart" />
         </section>
 
@@ -145,6 +145,7 @@ const pingChartRef = ref<HTMLDivElement>()
 let chart: echarts.ECharts | null = null
 let pingChart: echarts.ECharts | null = null
 let refreshTimer: ReturnType<typeof setInterval> | null = null
+let metricsTimer: ReturnType<typeof setInterval> | null = null
 let pingTimer: ReturnType<typeof setInterval> | null = null
 
 const hasToken = computed(() => Boolean(localStorage.getItem('access_token')))
@@ -382,14 +383,17 @@ function handleResize() {
 onMounted(() => {
   loadTheme()
   loadServer(true).then(() => loadPingAgg())
-  // 详情页当前指标每秒刷新；资源趋势数据量较大，改为用户点击“刷新”时手动加载。
+  loadMetrics()
+  // 详情页当前指标每秒刷新；趋势图使用后端降采样，保留自动加载和低频刷新。
   refreshTimer = setInterval(() => loadServer(false), 1000)
+  metricsTimer = setInterval(() => loadMetrics(), 60000)
   pingTimer = setInterval(() => loadPingAgg(), 60000)
   window.addEventListener('resize', handleResize)
 })
 
 onUnmounted(() => {
   if (refreshTimer) clearInterval(refreshTimer)
+  if (metricsTimer) clearInterval(metricsTimer)
   if (pingTimer) clearInterval(pingTimer)
   chart?.dispose()
   pingChart?.dispose()

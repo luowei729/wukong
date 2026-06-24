@@ -3,12 +3,16 @@
 package alert
 
 import (
+	"database/sql"
+	"fmt"
 	"log"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
 	"wukong/internal/config"
+	"wukong/internal/notify"
 	"wukong/internal/store"
 )
 
@@ -100,6 +104,9 @@ func (e *Engine) checkAlerts() {
 			continue
 		}
 
+		// 节点恢复在线时，必须恢复 offline 告警并发送恢复通知。
+		e.resolveAlert(agent, "offline", 0)
+
 		// 获取最新指标
 		metrics, err := e.store.GetLatestMetrics(agent.ID)
 		if err != nil {
@@ -167,9 +174,7 @@ func (e *Engine) checkMetric(agent *store.Agent, metric string, value, threshold
 	} else if value <= recovery {
 		// 恢复
 		delete(e.exceedDuration, key)
-		if err := e.store.ResolveAlert(agent.ID, metric); err != nil {
-			log.Printf("告警引擎: 恢复告警失败: agent=%s metric=%s err=%v", agent.ID, metric, err)
-		}
+		e.resolveAlert(agent, metric, value)
 	}
 }
 
@@ -189,6 +194,79 @@ func (e *Engine) fireAlert(agent *store.Agent, metric string, threshold, value f
 	}
 	log.Printf("告警引擎: 触发告警 id=%d agent=%s metric=%s value=%.1f threshold=%.1f",
 		id, agent.Name, metric, value, threshold)
+	e.sendTelegramNotification(&notify.Message{
+		Title:   fmt.Sprintf("%s 触发%s告警", agent.Name, metricName(metric)),
+		Body:    fmt.Sprintf("当前值 %.1f，阈值 %.1f", value, threshold),
+		Level:   alertLevel(metric),
+		AgentID: agent.ID,
+		Metric:  metric,
+	})
+}
+
+func (e *Engine) resolveAlert(agent *store.Agent, metric string, value float64) {
+	active, err := e.store.GetActiveAlert(agent.ID, metric)
+	if err != nil {
+		if err != sql.ErrNoRows {
+			log.Printf("告警引擎: 查询活跃告警失败: agent=%s metric=%s err=%v", agent.ID, metric, err)
+		}
+		return
+	}
+	if err := e.store.ResolveAlert(agent.ID, metric); err != nil {
+		log.Printf("告警引擎: 恢复告警失败: agent=%s metric=%s err=%v", agent.ID, metric, err)
+		return
+	}
+	log.Printf("告警引擎: 恢复告警 id=%d agent=%s metric=%s", active.ID, agent.Name, metric)
+	e.mu.Lock()
+	delete(e.suppressed, agent.ID+":"+metric)
+	delete(e.exceedDuration, agent.ID+":"+metric)
+	e.mu.Unlock()
+	e.sendTelegramNotification(&notify.Message{
+		Title:   fmt.Sprintf("%s %s已恢复", agent.Name, metricName(metric)),
+		Body:    fmt.Sprintf("当前值 %.1f，告警已恢复", value),
+		Level:   "info",
+		AgentID: agent.ID,
+		Metric:  metric,
+	})
+}
+
+func (e *Engine) sendTelegramNotification(msg *notify.Message) {
+	botToken, _ := e.store.GetSetting("telegram_bot_token")
+	chatIDRaw, _ := e.store.GetSetting("telegram_chat_id")
+	botToken = strings.TrimSpace(botToken)
+	chatIDRaw = strings.TrimSpace(chatIDRaw)
+	if botToken == "" || chatIDRaw == "" {
+		return
+	}
+	chatID, err := strconv.ParseInt(chatIDRaw, 10, 64)
+	if err != nil {
+		log.Printf("告警引擎: Telegram Chat ID 无效: %s", chatIDRaw)
+		return
+	}
+	if err := notify.NewTelegramNotifier(botToken, chatID).Send(msg); err != nil {
+		log.Printf("告警引擎: Telegram 通知发送失败: %v", err)
+	}
+}
+
+func metricName(metric string) string {
+	switch metric {
+	case "offline":
+		return "离线"
+	case "cpu":
+		return "CPU"
+	case "mem":
+		return "内存"
+	case "disk":
+		return "磁盘"
+	default:
+		return metric
+	}
+}
+
+func alertLevel(metric string) string {
+	if metric == "offline" {
+		return "critical"
+	}
+	return "warning"
 }
 
 // GetActiveAlerts 获取活跃告警列表
