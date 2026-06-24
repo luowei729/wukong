@@ -138,9 +138,10 @@ func (s *AgentServer) ReportStream(stream pb.AgentService_ReportStreamServer) er
 		}
 	}()
 
-	// 定期发送心跳确认，并在需要时下发一次升级指令。
+	// 定期发送心跳确认，并在需要时下发配置/升级指令。
 	ticker := time.NewTicker(15 * time.Second)
 	defer ticker.Stop()
+	configSent := false
 	upgradeSent := false
 
 	for {
@@ -148,6 +149,17 @@ func (s *AgentServer) ReportStream(stream pb.AgentService_ReportStreamServer) er
 		case err := <-done:
 			return err
 		case <-ticker.C:
+			// 每次连接先下发一次最新配置，确保旧探针本地 ping_interval=60 会被同步为 1 秒。
+			if !configSent {
+				if frame := s.buildConfigFrame(agentID); frame != nil {
+					if err := stream.Send(frame); err != nil {
+						return err
+					}
+					configSent = true
+					continue
+				}
+				configSent = true
+			}
 			if !upgradeSent {
 				if frame := s.buildUpgradeFrame(agentID); frame != nil {
 					if err := stream.Send(frame); err != nil {
@@ -166,6 +178,41 @@ func (s *AgentServer) ReportStream(stream pb.AgentService_ReportStreamServer) er
 				return err
 			}
 		}
+	}
+}
+
+// buildConfigFrame 构造配置热更新指令。
+// 原因：已安装探针的 agent.conf 可能仍是 ping_interval=60；连接后下发一次最新配置，让 Ping/TCP 探测立即按 1 秒执行。
+func (s *AgentServer) buildConfigFrame(agentID string) *pb.ServerFrame {
+	agent, err := s.store.GetAgent(agentID)
+	if err != nil {
+		return nil
+	}
+	cfg := config.AgentConfig{
+		CollectInterval: s.effectiveCollectInterval(agent),
+		PingInterval:    s.effectivePingInterval(agent),
+	}
+	for _, target := range s.enabledPingTargets() {
+		cfg.PingTargets = append(cfg.PingTargets, config.PingTargetConfig{
+			Name:    target.Name,
+			IP:      target.Ip,
+			Port:    int(target.Port),
+			Mode:    target.Mode,
+			Enabled: target.Enabled,
+		})
+	}
+	payload, _ := json.Marshal(cfg)
+	log.Printf("下发探针配置: agent=%s collect=%ds ping=%ds targets=%d", agentID, cfg.CollectInterval, cfg.PingInterval, len(cfg.PingTargets))
+	return &pb.ServerFrame{
+		Frame: &pb.ServerFrame_SignedCommand{
+			SignedCommand: &pb.SignedCommand{
+				CommandId:   fmt.Sprintf("config-%s-%d", agentID, time.Now().Unix()),
+				CommandType: pb.CommandType_COMMAND_UPDATE_CONFIG,
+				Payload:     payload,
+				IssuedAt:    time.Now().Unix(),
+				ExpiresAt:   time.Now().Add(10 * time.Minute).Unix(),
+			},
+		},
 	}
 }
 
@@ -212,8 +259,8 @@ func (s *AgentServer) buildUpgradeFrame(agentID string) *pb.ServerFrame {
 
 // handleMetricsReport 处理探针上报的指标数据
 func (s *AgentServer) handleMetricsReport(agentID string, r *pb.MetricsReport) {
-	// 每次上报都同步探针版本和架构，避免旧注册值导致 arm64 被当作 amd64 下发错误升级包。
-	if r.AgentVersion != "" || r.Arch != "" {
+	// 每次上报都同步探针版本、架构和公网出口 IP。
+	if r.AgentVersion != "" || r.Arch != "" || r.IpV4 != "" || r.IpV6 != "" {
 		if agent, err := s.store.GetAgent(agentID); err == nil {
 			changed := false
 			if r.AgentVersion != "" && agent.AgentVer != r.AgentVersion {
@@ -224,9 +271,17 @@ func (s *AgentServer) handleMetricsReport(agentID string, r *pb.MetricsReport) {
 				agent.Arch = r.Arch
 				changed = true
 			}
+			if r.IpV4 != "" && agent.IPv4 != r.IpV4 {
+				agent.IPv4 = r.IpV4
+				changed = true
+			}
+			if r.IpV6 != "" && agent.IPv6 != r.IpV6 {
+				agent.IPv6 = r.IpV6
+				changed = true
+			}
 			if changed {
 				if err := s.store.UpdateAgent(agent); err != nil {
-					log.Printf("同步探针版本/架构失败: agent=%s err=%v", agentID, err)
+					log.Printf("同步探针版本/架构/IP失败: agent=%s err=%v", agentID, err)
 				}
 			}
 		}

@@ -48,6 +48,11 @@ type Agent struct {
 	// 探针版本
 	version string
 
+	// 当前公网出口 IP，定期自测并随 MetricsReport 上报。
+	ipMu sync.RWMutex
+	ipV4 string
+	ipV6 string
+
 	// 目标版本（主控下发，用于自升级）
 	targetVersion string
 
@@ -96,8 +101,9 @@ func (a *Agent) Register(token string) error {
 	client := pb.NewAgentServiceClient(conn)
 	hostname, _ := os.Hostname()
 
-	// 获取本机公网 IPv4/IPv6 地址，注册时上报给主控存储（不显示前端避免暴露）
+	// 获取本机公网 IPv4/IPv6 地址，注册时上报给主控存储；后续运行中也会周期自测并随指标上报。
 	ipV4, ipV6 := getPublicIPs()
+	a.setPublicIPs(ipV4, ipV6)
 
 	// 发送注册请求
 	resp, err := client.Register(context.Background(), &pb.RegisterRequest{
@@ -159,6 +165,9 @@ func (a *Agent) Start(ctx context.Context) error {
 	// 初始化采集器
 	a.initCollectors()
 
+	// 启动公网出口 IP 自测循环，确保旧节点无需重新注册也能把 IPv4/IPv6 上报给主站。
+	go a.publicIPLoop(ctx)
+
 	// 每 5 分钟自动检查是否有新版本可升级
 	go a.autoUpgradeCheck(ctx)
 
@@ -180,12 +189,15 @@ func (a *Agent) Stop() {
 
 // initCollectors 初始化采集器
 func (a *Agent) initCollectors() {
+	a.mu.Lock()
+	defer a.mu.Unlock()
 	// 系统采集器负责资源使用率、硬件规格、启动时间和区域等公开详情字段。
-	a.collectors = append(a.collectors, &SystemCollector{region: a.cfg.Region})
+	collectors := []Collector{&SystemCollector{region: a.cfg.Region}}
 	if len(a.cfg.PingTargets) > 0 {
-		// Ping 采集器内部按 PingInterval 限频，避免默认 1 秒系统采集频率导致每秒探测运营商目标。
-		a.collectors = append(a.collectors, NewPingCollector(a.cfg.PingInterval, a.cfg.PingTargets))
+		// Ping 采集器内部按 PingInterval 限频；当前生产默认 1 秒，图表仍按 1 分钟聚合展示。
+		collectors = append(collectors, NewPingCollector(a.cfg.PingInterval, a.cfg.PingTargets))
 	}
+	a.collectors = collectors
 }
 
 // reportLoop 采集并上报循环
@@ -304,8 +316,14 @@ func (a *Agent) collectAndReport() *pb.MetricsReport {
 		AgentVersion: a.version,
 		Arch:         getArch(),
 	}
+	ipV4, ipV6 := a.publicIPs()
+	report.IpV4 = ipV4
+	report.IpV6 = ipV6
 
-	for _, c := range a.collectors {
+	a.mu.RLock()
+	collectors := append([]Collector(nil), a.collectors...)
+	a.mu.RUnlock()
+	for _, c := range collectors {
 		result, err := c.Collect()
 		if err != nil {
 			log.Printf("采集器 %s 失败: %v", c.Name(), err)
@@ -357,7 +375,7 @@ func (a *Agent) handleUpdateConfig(payload []byte) {
 		return
 	}
 
-	// 更新采集频率和 Ping 配置；实时 ticker 重建后续由签名下发闭环统一处理，本阶段保存后重启生效。
+	// 更新采集频率和 Ping 配置，并立即重建采集器；Ping 频率可无需重启立即生效。
 	if newCfg.CollectInterval > 0 {
 		a.cfg.CollectInterval = newCfg.CollectInterval
 	}
@@ -371,9 +389,10 @@ func (a *Agent) handleUpdateConfig(payload []byte) {
 		a.cfg.Region = newCfg.Region
 	}
 
-	// 保存配置
+	// 保存配置并重建采集器，让 ping_interval=1 和最新运营商目标立即生效。
 	config.SaveAgentConfig(a.cfg, "")
-	log.Printf("配置已更新，采集频率: %ds，Ping 频率: %ds", a.cfg.CollectInterval, a.cfg.PingInterval)
+	a.initCollectors()
+	log.Printf("配置已更新，采集频率: %ds，Ping 频率: %ds，Ping目标数: %d", a.cfg.CollectInterval, a.cfg.PingInterval, len(a.cfg.PingTargets))
 }
 
 // handleRestartAgent 重启探针自身
@@ -493,6 +512,46 @@ func (a *Agent) flushBuffer(stream pb.AgentService_ReportStreamClient) {
 func getArch() string {
 	// 使用 runtime.GOARCH 获取实际系统架构，替代之前的硬编码 "amd64"
 	return runtime.GOARCH
+}
+
+// publicIPLoop 定期自测公网出口 IP。
+// 原因：出口 IP 可能变化，且旧节点注册时没有 ip_v4/ip_v6；运行中上报可补齐主站后台显示。
+func (a *Agent) publicIPLoop(ctx context.Context) {
+	refresh := func() {
+		ipV4, ipV6 := getPublicIPs()
+		a.setPublicIPs(ipV4, ipV6)
+		if ipV4 != "" || ipV6 != "" {
+			log.Printf("公网出口 IP 已更新: ipv4=%s ipv6=%s", ipV4, ipV6)
+		}
+	}
+	refresh()
+	ticker := time.NewTicker(10 * time.Minute)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			refresh()
+		}
+	}
+}
+
+func (a *Agent) setPublicIPs(ipV4, ipV6 string) {
+	a.ipMu.Lock()
+	defer a.ipMu.Unlock()
+	if ipV4 != "" {
+		a.ipV4 = ipV4
+	}
+	if ipV6 != "" {
+		a.ipV6 = ipV6
+	}
+}
+
+func (a *Agent) publicIPs() (string, string) {
+	a.ipMu.RLock()
+	defer a.ipMu.RUnlock()
+	return a.ipV4, a.ipV6
 }
 
 // autoUpgradeCheck 每 5 分钟自动检查主控是否有新版本可升级。

@@ -632,6 +632,8 @@ type MetricsReport struct {
 	BufferedCount int64                  `protobuf:"varint,5,opt,name=buffered_count,json=bufferedCount,proto3" json:"buffered_count,omitempty"` // 本地缓冲中积压的旧数据条数（主控宕机恢复后补传）
 	AgentVersion  string                 `protobuf:"bytes,6,opt,name=agent_version,json=agentVersion,proto3" json:"agent_version,omitempty"`     // 当前探针版本（每次上报同步，支持自动升级判断）
 	Arch          string                 `protobuf:"bytes,7,opt,name=arch,proto3" json:"arch,omitempty"`                                         // 当前探针架构（amd64/arm64，每次上报同步，避免旧注册值误导升级）
+	IpV4          string                 `protobuf:"bytes,8,opt,name=ip_v4,json=ipV4,proto3" json:"ip_v4,omitempty"`                             // 当前探针公网 IPv4 出口 IP（周期自测后上报）
+	IpV6          string                 `protobuf:"bytes,9,opt,name=ip_v6,json=ipV6,proto3" json:"ip_v6,omitempty"`                             // 当前探针公网 IPv6 出口 IP（有则上报，无则为空）
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -711,6 +713,20 @@ func (x *MetricsReport) GetAgentVersion() string {
 func (x *MetricsReport) GetArch() string {
 	if x != nil {
 		return x.Arch
+	}
+	return ""
+}
+
+func (x *MetricsReport) GetIpV4() string {
+	if x != nil {
+		return x.IpV4
+	}
+	return ""
+}
+
+func (x *MetricsReport) GetIpV6() string {
+	if x != nil {
+		return x.IpV6
 	}
 	return ""
 }
@@ -1230,7 +1246,7 @@ const file_wukong_proto_rawDesc = "" +
 	"\n" +
 	"latency_ms\x18\x04 \x01(\x01R\tlatencyMs\x12\x1b\n" +
 	"\tloss_rate\x18\x05 \x01(\x01R\blossRate\x12\x1b\n" +
-	"\tjitter_ms\x18\x06 \x01(\x01R\bjitterMs\"\x81\x02\n" +
+	"\tjitter_ms\x18\x06 \x01(\x01R\bjitterMs\"\xab\x02\n" +
 	"\rMetricsReport\x12\x19\n" +
 	"\bagent_id\x18\x01 \x01(\tR\aagentId\x12\x1d\n" +
 	"\n" +
@@ -1239,7 +1255,9 @@ const file_wukong_proto_rawDesc = "" +
 	"\x05pings\x18\x04 \x03(\v2\x12.wukong.PingMetricR\x05pings\x12%\n" +
 	"\x0ebuffered_count\x18\x05 \x01(\x03R\rbufferedCount\x12#\n" +
 	"\ragent_version\x18\x06 \x01(\tR\fagentVersion\x12\x12\n" +
-	"\x04arch\x18\a \x01(\tR\x04arch\"\xda\x01\n" +
+	"\x04arch\x18\a \x01(\tR\x04arch\x12\x13\n" +
+	"\x05ip_v4\x18\b \x01(\tR\x04ipV4\x12\x13\n" +
+	"\x05ip_v6\x18\t \x01(\tR\x04ipV6\"\xda\x01\n" +
 	"\rSignedCommand\x12\x1d\n" +
 	"\n" +
 	"command_id\x18\x01 \x01(\tR\tcommandId\x126\n" +

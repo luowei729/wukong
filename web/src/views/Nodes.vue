@@ -24,6 +24,15 @@
       <el-table-column label="磁盘" width="100">
         <template #default="{ row }">{{ formatPercent(row.disk) }}</template>
       </el-table-column>
+      <el-table-column label="出口 IP" min-width="220">
+        <template #default="{ row }">
+          <div class="ip-cell">
+            <div v-if="row.ip_v4">IPv4: {{ row.ip_v4 }}</div>
+            <div v-if="row.ip_v6">IPv6: {{ row.ip_v6 }}</div>
+            <span v-if="!row.ip_v4 && !row.ip_v6">-</span>
+          </div>
+        </template>
+      </el-table-column>
       <el-table-column label="系统版本" min-width="150">
         <template #default="{ row }">{{ row.os_version || '-' }}</template>
       </el-table-column>
@@ -131,3 +140,13 @@ onUnmounted(() => {
   if (refreshTimer) clearInterval(refreshTimer)
 })
 </script>
+
+<style scoped>
+.ip-cell {
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--wk-text-muted);
+  word-break: break-all;
+}
+</style>

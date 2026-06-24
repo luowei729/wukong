@@ -2,6 +2,25 @@
 
 所有变更记录使用北京时间（UTC+8）。
 
+## [2026-06-25 07:40] - Ping 1 秒配置热更新与出口 IPv4/IPv6 上报显示闭环
+
+### 改动前总结
+1. 图表是 1 分钟 K 线聚合点，容易误以为 Ping/TCP 探测也是 1 分钟。
+2. 已安装探针本地 `agent.conf` 仍可能保留 `ping_interval=60`，默认值改为 1 秒不会自动覆盖旧配置。
+3. 节点出口 IPv4/IPv6 只在注册时上报，旧节点不会自动补齐，后台节点列表也未显示。
+
+### 改动后总结
+1. 主控连接后先下发 `COMMAND_UPDATE_CONFIG`，同步 `collect_interval`、`ping_interval=1` 和启用运营商目标；探针收到后立即保存配置并重建采集器，Ping/TCP 原始探测按 1 秒执行。
+2. `MetricsReport` 新增 `ip_v4` / `ip_v6`；探针启动后立即并每 10 分钟自测公网出口 IPv4/IPv6，随指标上报主控，主控写回 agents 表。
+3. 后台节点列表新增“出口 IP”列，显示 IPv4 和 IPv6；有 IPv6 才显示 IPv6，没有则不显示。
+4. 说明：网络延时 K 线图继续读取 `ping_agg_1min`，展示粒度仍是 1 分钟聚合，不等于原始探测间隔。
+
+### 涉及文件
+- `proto/wukong.proto`、`proto/gen/wukong.pb.go` — MetricsReport 新增 ip_v4/ip_v6
+- `internal/agentcore/agent.go` — 出口 IP 周期自测、配置热更新立即重建采集器、上报 IP
+- `internal/grpcapi/agent_server.go` — 下发配置更新指令、写回上报 IP
+- `web/src/views/Nodes.vue` — 后台节点列表显示出口 IP
+
 ## [2026-06-25 07:15] - 修复自动升级架构误判、并发崩溃和 ff1 Ping 聚合漏数
 
 ### 改动前总结
