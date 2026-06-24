@@ -53,8 +53,9 @@ func main() {
 	defer maintenanceCancel()
 	go runMaintenanceLoop(maintenanceCtx, s)
 
-	// === 初始化告警引擎 ===
+	// === 初始化并启动告警引擎 ===
 	alertEngine := alert.NewEngine(s, cfg)
+	go alertEngine.Run()
 
 	// === 初始化通知渠道 ===
 	notifier := notify.NewManager()

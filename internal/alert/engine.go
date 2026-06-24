@@ -150,14 +150,15 @@ func (e *Engine) handleOffline(agent *store.Agent) {
 
 func (e *Engine) checkMetric(agent *store.Agent, metric string, value, threshold, recovery float64, durationSec int) {
 	key := agent.ID + ":" + metric
+	shouldFire := false
+	shouldResolve := false
 
 	e.mu.Lock()
-	defer e.mu.Unlock()
-
 	// 抑制期检查
 	if firedAt, ok := e.suppressed[key]; ok {
 		if time.Since(firedAt) < time.Duration(e.cfg.AlertSuppressMinutes)*time.Minute {
-			return // 仍在抑制期
+			e.mu.Unlock()
+			return
 		}
 		delete(e.suppressed, key)
 	}
@@ -166,19 +167,31 @@ func (e *Engine) checkMetric(agent *store.Agent, metric string, value, threshold
 	if value > threshold {
 		e.exceedDuration[key] += alertCheckInterval
 		if e.exceedDuration[key] >= time.Duration(durationSec)*time.Second {
-			// 持续超阈值达到条件，触发告警
-			e.fireAlert(agent, metric, threshold, value)
+			shouldFire = true
 			e.suppressed[key] = time.Now()
 			delete(e.exceedDuration, key)
 		}
 	} else if value <= recovery {
-		// 恢复
 		delete(e.exceedDuration, key)
+		shouldResolve = true
+	}
+	e.mu.Unlock()
+
+	if shouldFire {
+		e.fireAlert(agent, metric, threshold, value)
+	}
+	if shouldResolve {
 		e.resolveAlert(agent, metric, value)
 	}
 }
 
 func (e *Engine) fireAlert(agent *store.Agent, metric string, threshold, value float64) {
+	if _, err := e.store.GetActiveAlert(agent.ID, metric); err == nil {
+		return
+	} else if err != sql.ErrNoRows {
+		log.Printf("告警引擎: 查询活跃告警失败: agent=%s metric=%s err=%v", agent.ID, metric, err)
+		return
+	}
 	alert := &store.Alert{
 		AgentID:   agent.ID,
 		Metric:    metric,
