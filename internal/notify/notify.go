@@ -5,6 +5,7 @@ package notify
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"net/url"
@@ -91,7 +92,8 @@ func (t *TelegramNotifier) Send(msg *Message) error {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("Telegram API 返回非 200: %d", resp.StatusCode)
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return fmt.Errorf("Telegram API 返回非 200: %d, body=%s", resp.StatusCode, strings.TrimSpace(string(body)))
 	}
 	return nil
 }
