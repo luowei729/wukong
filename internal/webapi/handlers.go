@@ -924,7 +924,39 @@ func (h *Handler) handleGetAgentMetrics(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("查询指标失败: %v", err))
 		return
 	}
-	writeJSON(w, http.StatusOK, metrics)
+	writeJSON(w, http.StatusOK, downsampleSystemMetrics(metrics, 1440))
+}
+
+func downsampleSystemMetrics(metrics []*store.RawSystemMetric, maxPoints int) []*store.RawSystemMetric {
+	if maxPoints <= 0 || len(metrics) <= maxPoints {
+		return metrics
+	}
+	step := (len(metrics) + maxPoints - 1) / maxPoints
+	result := make([]*store.RawSystemMetric, 0, (len(metrics)+step-1)/step)
+	for i := 0; i < len(metrics); i += step {
+		end := i + step
+		if end > len(metrics) {
+			end = len(metrics)
+		}
+		bucket := metrics[i:end]
+		point := &store.RawSystemMetric{Timestamp: bucket[len(bucket)-1].Timestamp}
+		var netUp, netDown int64
+		for _, item := range bucket {
+			point.CPU += item.CPU
+			point.Mem += item.Mem
+			point.Disk += item.Disk
+			netUp += item.NetUp
+			netDown += item.NetDown
+		}
+		count := float64(len(bucket))
+		point.CPU /= count
+		point.Mem /= count
+		point.Disk /= count
+		point.NetUp = netUp / int64(len(bucket))
+		point.NetDown = netDown / int64(len(bucket))
+		result = append(result, point)
+	}
+	return result
 }
 
 func (h *Handler) handleGetPingAgg(w http.ResponseWriter, r *http.Request) {

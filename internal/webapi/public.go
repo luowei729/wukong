@@ -165,6 +165,7 @@ func (h *Handler) handlePublicGetServerMetrics(w http.ResponseWriter, r *http.Re
 		writeError(w, http.StatusInternalServerError, "服务暂时不可用")
 		return
 	}
+	metrics = downsampleSystemMetrics(metrics, 1440)
 	points := make([]publicMetricPoint, 0, len(metrics))
 	for _, metric := range metrics {
 		points = append(points, publicMetricPoint{
@@ -333,7 +334,7 @@ func parsePublicTimeRange(r *http.Request) (time.Time, time.Time, error) {
 // handlePublicGetTheme 公开主题接口，让未登录首页也能读取站点标题和页脚。
 // 只返回前端展示所需的安全字段，不暴露 JWT 密钥、管理员配置等敏感信息。
 func (h *Handler) handlePublicGetTheme(w http.ResponseWriter, r *http.Request) {
-	title, _ := h.store.GetSetting("theme_title")
+	title, _ := h.store.GetSetting("theme_site_title")
 	footer, _ := h.store.GetSetting("theme_footer_text")
 	preset, _ := h.store.GetSetting("theme_preset")
 

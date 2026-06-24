@@ -200,7 +200,7 @@ async function loadServer(showLoading = false) {
 
 async function loadMetrics() {
   try {
-    const res = await http.get(`/api/public/servers/${serverID.value}/metrics?range=24h&_=${Date.now()}`)
+    const res = await http.get(`/api/public/servers/${serverID.value}/metrics?range=24h&step=60&_=${Date.now()}`)
     metricPoints.value = res.data.points || []
     await nextTick()
     renderChart()
@@ -228,18 +228,19 @@ function renderChart() {
   if (!chart) chart = echarts.init(chartRef.value, 'dark')
   const labels = metricPoints.value.map((item) => formatTime(item.timestamp))
   chart.setOption({
-    tooltip: { trigger: 'axis', backgroundColor: 'rgba(15, 23, 42, 0.92)', borderColor: 'rgba(56, 189, 248, 0.3)' },
+    animation: false,
+    tooltip: { trigger: 'axis', confine: true, transitionDuration: 0, backgroundColor: 'rgba(15, 23, 42, 0.92)', borderColor: 'rgba(56, 189, 248, 0.3)' },
     legend: { textStyle: { color: 'var(--wk-text-muted)' } },
     grid: { left: '3%', right: '4%', bottom: '8%', containLabel: true },
     xAxis: { type: 'category', data: labels, axisLabel: { color: 'var(--wk-text-muted)' }, axisLine: { lineStyle: { color: 'var(--wk-chart-grid)' } } },
     yAxis: { type: 'value', max: 100, axisLabel: { color: 'var(--wk-text-muted)' }, splitLine: { lineStyle: { color: 'var(--wk-chart-grid)' } } },
-    dataZoom: [{ type: 'inside' }, { type: 'slider', height: 18, bottom: 4 }],
+    dataZoom: [{ type: 'inside', throttle: 80 }, { type: 'slider', height: 18, bottom: 4 }],
     series: [
       lineSeries('CPU', metricPoints.value.map((item) => item.cpu), '#38bdf8'),
       lineSeries('内存', metricPoints.value.map((item) => item.mem), '#22c55e'),
       lineSeries('磁盘', metricPoints.value.map((item) => item.disk), '#f59e0b'),
     ],
-  })
+  }, { notMerge: true, lazyUpdate: true })
 }
 
 function renderPingChart() {
@@ -247,7 +248,8 @@ function renderPingChart() {
   if (!pingChart) pingChart = echarts.init(pingChartRef.value, 'dark')
   const labels = pingPoints.value.map((item) => formatTime(item.timestamp))
   pingChart.setOption({
-    tooltip: { trigger: 'axis', backgroundColor: 'rgba(15, 23, 42, 0.92)', borderColor: 'rgba(56, 189, 248, 0.3)' },
+    animation: false,
+    tooltip: { trigger: 'axis', confine: true, transitionDuration: 0, backgroundColor: 'rgba(15, 23, 42, 0.92)', borderColor: 'rgba(56, 189, 248, 0.3)' },
     legend: { textStyle: { color: 'var(--wk-text-muted)' } },
     grid: { left: '3%', right: '4%', bottom: '8%', containLabel: true },
     xAxis: { type: 'category', data: labels, axisLabel: { color: 'var(--wk-text-muted)' }, axisLine: { lineStyle: { color: 'var(--wk-chart-grid)' } } },
@@ -255,14 +257,14 @@ function renderPingChart() {
       { type: 'value', name: 'ms', axisLabel: { color: 'var(--wk-text-muted)' }, splitLine: { lineStyle: { color: 'var(--wk-chart-grid)' } } },
       { type: 'value', name: '丢包%', min: 0, max: 100, axisLabel: { color: 'var(--wk-text-muted)' }, splitLine: { show: false } },
     ],
-    dataZoom: [{ type: 'inside' }, { type: 'slider', height: 18, bottom: 4 }],
+    dataZoom: [{ type: 'inside', throttle: 80 }, { type: 'slider', height: 18, bottom: 4 }],
     series: [
       lineSeries('平均延迟', pingPoints.value.map((item) => item.avg_lat), '#38bdf8'),
       lineSeries('最小延迟', pingPoints.value.map((item) => item.min_lat), '#22c55e'),
       lineSeries('最大延迟', pingPoints.value.map((item) => item.max_lat), '#f59e0b'),
       { ...lineSeries('丢包率', pingPoints.value.map((item) => Number((item.loss_rate * 100).toFixed(2))), '#ef4444'), yAxisIndex: 1 },
     ],
-  })
+  }, { notMerge: true, lazyUpdate: true })
 }
 
 function lineSeries(name: string, data: number[], color: string) {
@@ -270,7 +272,9 @@ function lineSeries(name: string, data: number[], color: string) {
     name,
     type: 'line',
     data,
-    smooth: true,
+    smooth: false,
+    sampling: 'lttb',
+    large: true,
     symbol: 'none',
     lineStyle: { color, width: 1.8 },
     areaStyle: { color: `${color}22` },
