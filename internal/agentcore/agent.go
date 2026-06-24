@@ -6,9 +6,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net"
+	"net/http"
 	"os"
+	"path/filepath"
+	"runtime"
 	"sync"
 	"time"
 
@@ -112,6 +116,10 @@ func (a *Agent) Register(token string) error {
 			Mode:    target.Mode,
 			Enabled: target.Enabled,
 		})
+	}
+
+	if resp.TargetVersion != "" {
+		a.targetVersion = resp.TargetVersion
 	}
 
 	// 保存配置到文件
@@ -316,6 +324,8 @@ func (a *Agent) handleSignedCommand(cmd *pb.SignedCommand) {
 		a.handleUpdateConfig(cmd.Payload)
 	case pb.CommandType_COMMAND_RESTART_AGENT:
 		a.handleRestartAgent()
+	case pb.CommandType_COMMAND_UPGRADE_AGENT:
+		a.handleUpgradeAgent(cmd.Payload)
 	}
 }
 
@@ -348,8 +358,98 @@ func (a *Agent) handleUpdateConfig(payload []byte) {
 
 // handleRestartAgent 重启探针自身
 func (a *Agent) handleRestartAgent() {
-	log.Println("收到重启指令，探针将退出（由 systemd 自动重启）")
-	os.Exit(0)
+	log.Println("收到重启指令，探针 3 秒后退出（由 systemd 自动重启）")
+	time.AfterFunc(3*time.Second, func() {
+		os.Exit(0)
+	})
+}
+
+// handleUpgradeAgent 处理探针自升级指令。
+// payload 为 JSON 格式: {"target_version":"0.2.0","download_url":"https://..."}
+// 流程：下载新二进制 → 备份当前二进制 → 原子替换 → 退出并交给 systemd 拉起新版本。
+func (a *Agent) handleUpgradeAgent(payload []byte) {
+	var req struct {
+		TargetVersion string `json:"target_version"`
+		DownloadURL   string `json:"download_url"`
+	}
+	if err := json.Unmarshal(payload, &req); err != nil {
+		log.Printf("[升级] 指令 payload 解析失败: %v", err)
+		return
+	}
+	if req.TargetVersion == "" {
+		log.Println("[升级] target_version 为空，忽略升级指令")
+		return
+	}
+	if a.version == req.TargetVersion {
+		log.Printf("[升级] 当前版本 %s 已是目标版本，无需升级", a.version)
+		return
+	}
+
+	exePath, err := os.Executable()
+	if err != nil {
+		log.Printf("[升级] 获取当前可执行文件路径失败: %v", err)
+		return
+	}
+	exePath, err = filepath.EvalSymlinks(exePath)
+	if err != nil {
+		log.Printf("[升级] 解析当前可执行文件路径失败: %v", err)
+		return
+	}
+
+	downloadURL := req.DownloadURL
+	if downloadURL == "" {
+		downloadURL = fmt.Sprintf("https://github.com/luowei729/wukong/releases/download/v%s/wukong-agent-%s-%s", req.TargetVersion, runtime.GOOS, runtime.GOARCH)
+	}
+	log.Printf("[升级] 开始升级 %s -> %s，下载地址: %s", a.version, req.TargetVersion, downloadURL)
+
+	resp, err := http.Get(downloadURL)
+	if err != nil {
+		log.Printf("[升级] 下载新版本失败: %v", err)
+		return
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		log.Printf("[升级] 下载新版本失败，HTTP 状态码: %d", resp.StatusCode)
+		return
+	}
+
+	tmpPath := exePath + ".new"
+	tmpFile, err := os.OpenFile(tmpPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0755)
+	if err != nil {
+		log.Printf("[升级] 创建临时文件失败: %v", err)
+		return
+	}
+	written, err := io.Copy(tmpFile, resp.Body)
+	closeErr := tmpFile.Close()
+	if err != nil || closeErr != nil {
+		log.Printf("[升级] 写入临时文件失败: copy=%v close=%v", err, closeErr)
+		os.Remove(tmpPath)
+		return
+	}
+	if written <= 0 {
+		log.Printf("[升级] 新版本二进制为空，取消升级")
+		os.Remove(tmpPath)
+		return
+	}
+
+	backupPath := exePath + ".bak"
+	_ = os.Remove(backupPath)
+	if err := os.Rename(exePath, backupPath); err != nil {
+		log.Printf("[升级] 备份当前二进制失败: %v", err)
+		os.Remove(tmpPath)
+		return
+	}
+	if err := os.Rename(tmpPath, exePath); err != nil {
+		log.Printf("[升级] 替换二进制失败，开始回滚: %v", err)
+		_ = os.Rename(backupPath, exePath)
+		_ = os.Remove(tmpPath)
+		return
+	}
+	_ = os.Chmod(exePath, 0755)
+	log.Printf("[升级] 升级完成，写入 %d bytes，3 秒后重启", written)
+	time.AfterFunc(3*time.Second, func() {
+		os.Exit(0)
+	})
 }
 
 // flushBuffer 发送缓冲数据

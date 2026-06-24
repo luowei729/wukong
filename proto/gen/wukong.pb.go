@@ -31,6 +31,7 @@ const (
 	CommandType_COMMAND_UNSPECIFIED   CommandType = 0
 	CommandType_COMMAND_UPDATE_CONFIG CommandType = 1 // 更新配置（窄档白名单第①类）
 	CommandType_COMMAND_RESTART_AGENT CommandType = 2 // 重启探针进程（窄档白名单第②类）
+	CommandType_COMMAND_UPGRADE_AGENT CommandType = 3 // 探针自升级到目标版本
 )
 
 // Enum value maps for CommandType.
@@ -39,11 +40,13 @@ var (
 		0: "COMMAND_UNSPECIFIED",
 		1: "COMMAND_UPDATE_CONFIG",
 		2: "COMMAND_RESTART_AGENT",
+		3: "COMMAND_UPGRADE_AGENT",
 	}
 	CommandType_value = map[string]int32{
 		"COMMAND_UNSPECIFIED":   0,
 		"COMMAND_UPDATE_CONFIG": 1,
 		"COMMAND_RESTART_AGENT": 2,
+		"COMMAND_UPGRADE_AGENT": 3,
 	}
 )
 
@@ -153,6 +156,7 @@ type RegisterResponse struct {
 	ExpiresAt       int64                  `protobuf:"varint,5,opt,name=expires_at,json=expiresAt,proto3" json:"expires_at,omitempty"`                   // 个体凭证过期时间戳
 	PingInterval    int32                  `protobuf:"varint,6,opt,name=ping_interval,json=pingInterval,proto3" json:"ping_interval,omitempty"`          // Ping 频率（秒）
 	PingTargets     []*PingTarget          `protobuf:"bytes,7,rep,name=ping_targets,json=pingTargets,proto3" json:"ping_targets,omitempty"`              // 启用的运营商 Ping 目标
+	TargetVersion   string                 `protobuf:"bytes,8,opt,name=target_version,json=targetVersion,proto3" json:"target_version,omitempty"`        // 主控期望探针升级到的目标版本（空=无升级要求）
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache
 }
@@ -234,6 +238,13 @@ func (x *RegisterResponse) GetPingTargets() []*PingTarget {
 		return x.PingTargets
 	}
 	return nil
+}
+
+func (x *RegisterResponse) GetTargetVersion() string {
+	if x != nil {
+		return x.TargetVersion
+	}
+	return ""
 }
 
 // 运营商 Ping 目标配置
@@ -1131,7 +1142,7 @@ const file_wukong_proto_rawDesc = "" +
 	"\x05token\x18\x01 \x01(\tR\x05token\x12\x1a\n" +
 	"\bhostname\x18\x02 \x01(\tR\bhostname\x12#\n" +
 	"\ragent_version\x18\x03 \x01(\tR\fagentVersion\x12\x12\n" +
-	"\x04arch\x18\x04 \x01(\tR\x04arch\"\x97\x02\n" +
+	"\x04arch\x18\x04 \x01(\tR\x04arch\"\xbe\x02\n" +
 	"\x10RegisterResponse\x12\x19\n" +
 	"\bagent_id\x18\x01 \x01(\tR\aagentId\x12!\n" +
 	"\fagent_secret\x18\x02 \x01(\tR\vagentSecret\x12)\n" +
@@ -1141,7 +1152,8 @@ const file_wukong_proto_rawDesc = "" +
 	"\n" +
 	"expires_at\x18\x05 \x01(\x03R\texpiresAt\x12#\n" +
 	"\rping_interval\x18\x06 \x01(\x05R\fpingInterval\x125\n" +
-	"\fping_targets\x18\a \x03(\v2\x12.wukong.PingTargetR\vpingTargets\"r\n" +
+	"\fping_targets\x18\a \x03(\v2\x12.wukong.PingTargetR\vpingTargets\x12%\n" +
+	"\x0etarget_version\x18\b \x01(\tR\rtargetVersion\"r\n" +
 	"\n" +
 	"PingTarget\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x0e\n" +
@@ -1227,11 +1239,12 @@ const file_wukong_proto_rawDesc = "" +
 	"\n" +
 	"expires_at\x18\x04 \x01(\x03R\texpiresAt\x12\x1d\n" +
 	"\n" +
-	"public_key\x18\x05 \x01(\fR\tpublicKey*\\\n" +
+	"public_key\x18\x05 \x01(\fR\tpublicKey*w\n" +
 	"\vCommandType\x12\x17\n" +
 	"\x13COMMAND_UNSPECIFIED\x10\x00\x12\x19\n" +
 	"\x15COMMAND_UPDATE_CONFIG\x10\x01\x12\x19\n" +
-	"\x15COMMAND_RESTART_AGENT\x10\x022\x8a\x01\n" +
+	"\x15COMMAND_RESTART_AGENT\x10\x02\x12\x19\n" +
+	"\x15COMMAND_UPGRADE_AGENT\x10\x032\x8a\x01\n" +
 	"\fAgentService\x12=\n" +
 	"\bRegister\x12\x17.wukong.RegisterRequest\x1a\x18.wukong.RegisterResponse\x12;\n" +
 	"\fReportStream\x12\x12.wukong.AgentFrame\x1a\x13.wukong.ServerFrame(\x010\x012B\n" +

@@ -198,6 +198,30 @@
         </div>
       </el-tab-pane>
 
+      <!-- 探针升级 -->
+      <el-tab-pane label="探针升级" name="upgrade">
+        <div class="wk-card-solid" style="padding: 20px;">
+          <el-alert
+            title="设置目标版本后，在线探针会在心跳时收到升级指令；升级完成后由 systemd 自动重启。下载地址留空时使用站点域名下的 /api/agent/binary/{version}/{arch}。"
+            type="info"
+            :closable="false"
+            style="margin-bottom: 16px;"
+          />
+          <el-form label-position="top">
+            <el-form-item label="目标探针版本">
+              <el-input v-model="upgradeForm.target_version" placeholder="例如 0.1.1；留空表示不自动升级" />
+            </el-form-item>
+            <el-form-item label="自定义下载地址（可选）">
+              <el-input v-model="upgradeForm.upgrade_url" placeholder="https://example.com/wukong-agent-linux-amd64" />
+              <div class="form-tip">通常留空即可。主控会按站点域名、目标版本和探针架构自动拼接下载地址。</div>
+            </el-form-item>
+            <el-form-item>
+              <el-button type="primary" :loading="upgradeSaving" @click="saveUpgradeSettings">保存升级配置</el-button>
+            </el-form-item>
+          </el-form>
+        </div>
+      </el-tab-pane>
+
       <!-- 告警阈值 -->
       <el-tab-pane label="告警阈值" name="thresholds">
         <div class="wk-card-solid" style="padding: 20px;">
@@ -278,6 +302,13 @@ const thresholds = reactive({
   metric_duration_seconds: 60,
 })
 const thresholdSaving = ref(false)
+
+// 探针升级
+const upgradeForm = reactive({
+  target_version: '',
+  upgrade_url: '',
+})
+const upgradeSaving = ref(false)
 
 // Ping 运营商目标
 const ispTargets = ref<any[]>([])
@@ -420,6 +451,32 @@ async function testTelegram() {
   }
 }
 
+async function loadUpgradeSettings() {
+  try {
+    const [targetRes, urlRes] = await Promise.all([
+      http.get(`/api/settings/agent_target_version?_=${Date.now()}`),
+      http.get(`/api/settings/agent_upgrade_url?_=${Date.now()}`),
+    ])
+    upgradeForm.target_version = targetRes.data.value || ''
+    upgradeForm.upgrade_url = urlRes.data.value || ''
+  } catch {}
+}
+
+async function saveUpgradeSettings() {
+  upgradeSaving.value = true
+  try {
+    await Promise.all([
+      http.put('/api/settings/agent_target_version', { value: upgradeForm.target_version.trim() }),
+      http.put('/api/settings/agent_upgrade_url', { value: upgradeForm.upgrade_url.trim() }),
+    ])
+    ElMessage.success('探针升级配置已保存')
+  } catch (e: any) {
+    ElMessage.error(e.response?.data?.error || '保存升级配置失败')
+  } finally {
+    upgradeSaving.value = false
+  }
+}
+
 async function loadThresholds() {
   try {
     const res = await http.get(`/api/alert-settings?_=${Date.now()}`)
@@ -531,7 +588,7 @@ onMounted(async () => {
     themeForm.agent_server_addr = res.data.agent_server_addr || ''
     applyTheme()
   } catch {}
-  await Promise.all([loadTelegram(), loadThresholds(), loadISPTargets()])
+  await Promise.all([loadTelegram(), loadThresholds(), loadISPTargets(), loadUpgradeSettings()])
 })
 </script>
 

@@ -4,6 +4,8 @@ package grpcapi
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"io"
 	"log"
 	"time"
@@ -50,6 +52,7 @@ func (s *AgentServer) Register(ctx context.Context, req *pb.RegisterRequest) (*p
 	collectInterval := s.effectiveCollectInterval(agent)
 	pingInterval := s.effectivePingInterval(agent)
 	pingTargets := s.enabledPingTargets()
+	targetVersion, _ := s.store.GetSetting("agent_target_version")
 
 	return &pb.RegisterResponse{
 		AgentId:         agent.ID,
@@ -59,6 +62,7 @@ func (s *AgentServer) Register(ctx context.Context, req *pb.RegisterRequest) (*p
 		ExpiresAt:       time.Now().Add(365 * 24 * time.Hour).Unix(), // 一年有效
 		PingInterval:    int32(pingInterval),
 		PingTargets:     pingTargets,
+		TargetVersion:   targetVersion,
 	}, nil
 }
 
@@ -122,15 +126,25 @@ func (s *AgentServer) ReportStream(stream pb.AgentService_ReportStreamServer) er
 		}
 	}()
 
-	// 定期发送心跳确认
+	// 定期发送心跳确认，并在需要时下发一次升级指令。
 	ticker := time.NewTicker(15 * time.Second)
 	defer ticker.Stop()
+	upgradeSent := false
 
 	for {
 		select {
 		case err := <-done:
 			return err
 		case <-ticker.C:
+			if !upgradeSent {
+				if frame := s.buildUpgradeFrame(agentID); frame != nil {
+					if err := stream.Send(frame); err != nil {
+						return err
+					}
+					upgradeSent = true
+					continue
+				}
+			}
 			// 发送心跳确认
 			if err := stream.Send(&pb.ServerFrame{
 				Frame: &pb.ServerFrame_HeartbeatAck{
@@ -140,6 +154,47 @@ func (s *AgentServer) ReportStream(stream pb.AgentService_ReportStreamServer) er
 				return err
 			}
 		}
+	}
+}
+
+// buildUpgradeFrame 按数据库设置构造探针升级指令。
+// settings.agent_target_version 为空时不升级；download_url 可选，默认走主控公开二进制接口。
+func (s *AgentServer) buildUpgradeFrame(agentID string) *pb.ServerFrame {
+	targetVersion, _ := s.store.GetSetting("agent_target_version")
+	if targetVersion == "" {
+		return nil
+	}
+	agent, err := s.store.GetAgent(agentID)
+	if err != nil {
+		return nil
+	}
+	if agent.AgentVer == targetVersion {
+		return nil
+	}
+
+	downloadURL, _ := s.store.GetSetting("agent_upgrade_url")
+	if downloadURL == "" {
+		siteDomain, _ := s.store.GetSetting("site_domain")
+		if siteDomain != "" {
+			downloadURL = fmt.Sprintf("%s/api/agent/binary/%s/%s", siteDomain, targetVersion, agent.Arch)
+		}
+	}
+	payload, _ := json.Marshal(map[string]string{
+		"target_version": targetVersion,
+		"download_url":   downloadURL,
+	})
+
+	log.Printf("探针 %s 版本 %s 需要升级到 %s", agentID, agent.AgentVer, targetVersion)
+	return &pb.ServerFrame{
+		Frame: &pb.ServerFrame_SignedCommand{
+			SignedCommand: &pb.SignedCommand{
+				CommandId:   fmt.Sprintf("upgrade-%s-%d", agentID, time.Now().Unix()),
+				CommandType: pb.CommandType_COMMAND_UPGRADE_AGENT,
+				Payload:     payload,
+				IssuedAt:    time.Now().Unix(),
+				ExpiresAt:   time.Now().Add(10 * time.Minute).Unix(),
+			},
+		},
 	}
 }
 

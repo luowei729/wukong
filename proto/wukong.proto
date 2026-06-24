@@ -24,6 +24,7 @@ message RegisterResponse {
   int64  expires_at   = 5;  // 个体凭证过期时间戳
   int32  ping_interval = 6; // Ping 频率（秒）
   repeated PingTarget ping_targets = 7; // 启用的运营商 Ping 目标
+  string target_version = 8; // 主控期望探针升级到的目标版本（空=无升级要求）
 }
 
 // 运营商 Ping 目标配置
@@ -87,6 +88,7 @@ enum CommandType {
   COMMAND_UNSPECIFIED = 0;
   COMMAND_UPDATE_CONFIG = 1;  // 更新配置（窄档白名单第①类）
   COMMAND_RESTART_AGENT = 2;  // 重启探针进程（窄档白名单第②类）
+  COMMAND_UPGRADE_AGENT = 3;  // 探针自升级到目标版本
 }
 
 // 一条签名指令（窄档白名单，仅限安全允许的操作）
