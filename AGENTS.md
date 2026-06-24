@@ -84,6 +84,7 @@ wukong/
 - **2026-06-21 18:23（北京时间）**：Ping 运营商配置已形成第一阶段闭环：后台“Ping 运营商”页写入 SQLite `isp_targets`，注册响应向探针下发启用目标和 `ping_interval`，探针将目标持久化到 `agent.conf` 并按独立频率执行 ICMP(auto 回退 TCP)/TCP 探测，上报后主控写入小时表并每分钟聚合到 `ping_agg_1min`。公开详情页只暴露启用 ISP 名称和聚合延迟，不泄露目标 IP/端口；服务器详情字段扩展为 Uptime/Boot time/Region/CPU 型号/Load/累计流量等 qio.ng 风格展示。
 - **2026-06-21 18:39（北京时间）**：生产已部署 commit `61f033a` 对应的 GHCR 最新镜像，远程 Docker 容器继续保持 `127.0.0.1:64443->64443/tcp`，SQLite `site_domain=https://server.lkz.pub` 与 `agent_server_addr=server.lkz.pub:443` 已确认。生产本机探针已通过在线安装脚本注册并由 systemd 常驻，日志显示连接 `server.lkz.pub:443`；公开详情已拿到 qio.ng 风格系统字段和 Cloudflare Ping 聚合数据，无头 Chrome 验证首页与详情页均不是白屏。
 - **开发后续优先级**：① 签名配置热更新闭环 ② Web API 端点完整实现 ③ 告警引擎集成 gRPC 心跳 ④ 前端接入真实 API 数据 ⑤ 安装脚本与升级流程端到端原型
+- **2026-06-24 15:50（北京时间）**：修复登录问题并完善鉴权流程。新增 `web/src/utils/http.ts` 全局 axios 拦截器，自动在请求头附加 JWT Token、401 时清除 Token 并跳转登录页，所有 Vue 组件不再手动添加 `authHeaders()`。修复 `WUKONG_ADMIN_PASSWORD` 环境变量传入明文密码时直接赋值给 `AdminPasswordHash` 导致 bcrypt 比对失败的严重 bug，现自动检测 `$2a$`/`$2b$` 前缀区分明文和 hash。实现 `POST /api/auth/refresh` 刷新令牌端点，前端 access token 过期后可无感续期。`auth.Service.generateTokens` 改为公开方法 `GenerateTokens`。
 
 ## 部署相关长期提示
 

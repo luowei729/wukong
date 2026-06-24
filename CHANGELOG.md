@@ -2,6 +2,44 @@
 
 所有变更记录使用北京时间（UTC+8）。
 
+## [2026-06-24 15:50] - 修复登录问题并完善鉴权流程
+
+### 改动前总结
+登录后前端各页面需要手动在每个 axios 请求中添加 `authHeaders()`，容易遗漏且无法统一处理 401 过期跳转。`WUKONG_ADMIN_PASSWORD` 环境变量传入明文密码时，直接将明文赋值给 `AdminPasswordHash` 字段，而 `Authenticate` 使用 `bcrypt.CompareHashAndPassword` 比较，导致 Docker 环境变量设置密码后永远无法登录。`POST /api/auth/refresh` 返回 501 未实现，access token 过期后无法续期。
+
+### 改动后总结
+1. 新增 `web/src/utils/http.ts` 全局 axios 拦截器：请求自动附加 JWT Token；响应 401 时清除 Token 并跳转登录页（携带 redirect 参数）；非 401 错误统一 ElMessage 提示。
+2. 所有 Vue 组件（Login/Dashboard/Nodes/NodeDetail/Alerts/Settings/PublicHome/PublicServerDetail）改用全局 http 实例，移除手动 `authHeaders()` 调用。
+3. 修复 `WUKONG_ADMIN_PASSWORD` 明文密码 bug：环境变量值以 `$2a$`/`$2b$` 开头时直接用作 bcrypt hash，否则自动 `bcrypt.GenerateFromPassword` 转换后赋值。
+4. 实现 `POST /api/auth/refresh` 刷新令牌端点：验证 refresh token 有效性后重新签发 access + refresh token。
+5. `auth.Service.generateTokens` 改为公开方法 `GenerateTokens`，供 webapi handler 调用。
+
+### 验证结果
+- `go build ./cmd/server` 编译通过。
+- `npm --prefix web run build` 构建通过。
+- 本地启动主控，`POST /api/auth/login` 返回有效 JWT。
+- 带 Token 访问 `/api/agents` 返回正常数据，无 Token 返回 401。
+- `POST /api/auth/refresh` 使用 refresh token 成功获取新 access token。
+
+### 涉及文件
+- `web/src/utils/http.ts`（新增）
+- `web/src/views/Login.vue`
+- `web/src/views/Dashboard.vue`
+- `web/src/views/Nodes.vue`
+- `web/src/views/NodeDetail.vue`
+- `web/src/views/Alerts.vue`
+- `web/src/views/Settings.vue`
+- `web/src/views/public/PublicHome.vue`
+- `web/src/views/public/PublicServerDetail.vue`
+- `internal/config/config.go`
+- `internal/auth/auth.go`
+- `internal/webapi/handlers.go`
+- `AGENTS.md`
+- `CHANGELOG.md`
+- `PROJECT_PLAN.md`
+
+---
+
 ## [2026-06-21 18:39] - 生产部署并验证 443 探针与公开详情
 
 ### 改动前总结
