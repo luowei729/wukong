@@ -63,14 +63,11 @@
           <div class="chart-head">
             <div>
               <h2>网络延迟</h2>
-              <p>最近 24 小时真实 Ping 延迟 / 丢包率</p>
+              <p>最近 24 小时所有运营商 Ping 延迟（不同颜色区分线路）</p>
             </div>
-            <el-select v-model="selectedISP" placeholder="选择线路" style="width: 180px;" @change="loadPingAgg">
-              <el-option v-for="isp in pingISPs" :key="isp.name" :label="isp.name" :value="isp.name" />
-            </el-select>
           </div>
-          <el-empty v-if="!selectedISP" description="暂无公开 Ping 线路" />
-          <el-empty v-else-if="pingPoints.length === 0" description="暂无公开 Ping 数据" />
+          <el-empty v-if="pingISPs.length === 0" description="暂无公开 Ping 线路" />
+          <el-empty v-else-if="Object.keys(pingSeries).length === 0" description="暂无公开 Ping 数据" />
           <div v-else ref="pingChartRef" class="chart" />
         </section>
       </template>
@@ -140,8 +137,7 @@ const router = useRouter()
 const server = ref<PublicServer | null>(null)
 const metricPoints = ref<MetricPoint[]>([])
 const pingISPs = ref<PingISP[]>([])
-const selectedISP = ref('')
-const pingPoints = ref<PingPoint[]>([])
+const pingSeries = ref<Record<string, PingPoint[]>>({})
 const loading = ref(false)
 const error = ref('')
 const chartRef = ref<HTMLDivElement>()
@@ -187,10 +183,7 @@ async function loadServer(showLoading = false) {
     const res = await http.get(`/api/public/servers/${serverID.value}?_=${Date.now()}`)
     server.value = res.data.server
     pingISPs.value = res.data.ping_isps || []
-    if (!selectedISP.value && pingISPs.value.length > 0) {
-      selectedISP.value = pingISPs.value[0].name
-      await loadPingAgg()
-    }
+    await loadPingAgg()
   } catch (e: any) {
     error.value = e.response?.data?.error || '无法加载服务器详情'
   } finally {
@@ -210,16 +203,22 @@ async function loadMetrics() {
 }
 
 async function loadPingAgg() {
-  if (!selectedISP.value) return
+  if (pingISPs.value.length === 0) {
+    pingSeries.value = {}
+    return
+  }
   try {
-    const res = await http.get(`/api/public/servers/${serverID.value}/ping-agg`, {
-      params: { isp: selectedISP.value, range: '24h', _: Date.now() },
-    })
-    pingPoints.value = res.data.points || []
+    const results = await Promise.all(pingISPs.value.map(async (isp) => {
+      const res = await http.get(`/api/public/servers/${serverID.value}/ping-agg`, {
+        params: { isp: isp.name, range: '24h', _: Date.now() },
+      })
+      return [isp.name, res.data.points || []] as const
+    }))
+    pingSeries.value = Object.fromEntries(results.filter(([, points]) => points.length > 0))
     await nextTick()
     renderPingChart()
   } catch {
-    pingPoints.value = []
+    pingSeries.value = {}
   }
 }
 
@@ -244,30 +243,31 @@ function renderChart() {
 }
 
 function renderPingChart() {
-  if (!pingChartRef.value || pingPoints.value.length === 0) return
+  if (!pingChartRef.value || Object.keys(pingSeries.value).length === 0) return
   if (!pingChart) pingChart = echarts.init(pingChartRef.value, 'dark')
-  const labels = pingPoints.value.map((item) => formatTime(item.timestamp))
+  const colorList = ['#38bdf8', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6', '#14b8a6', '#ec4899']
+  const allTimestamps = Array.from(new Set(
+    Object.values(pingSeries.value).flatMap(points => points.map(item => item.timestamp))
+  )).sort()
+  const labels = allTimestamps.map((item) => formatTime(item))
+  const series = Object.entries(pingSeries.value).map(([isp, points], index) => {
+    const byTime = new Map(points.map(item => [item.timestamp, item.avg_lat]))
+    return lineSeries(isp, allTimestamps.map(ts => byTime.get(ts) ?? null), colorList[index % colorList.length])
+  })
+
   pingChart.setOption({
     animation: false,
     tooltip: { trigger: 'axis', confine: true, transitionDuration: 0, backgroundColor: 'rgba(15, 23, 42, 0.92)', borderColor: 'rgba(56, 189, 248, 0.3)' },
-    legend: { textStyle: { color: 'var(--wk-text-muted)' } },
+    legend: { type: 'scroll', textStyle: { color: 'var(--wk-text-muted)' } },
     grid: { left: '3%', right: '4%', bottom: '8%', containLabel: true },
     xAxis: { type: 'category', data: labels, axisLabel: { color: 'var(--wk-text-muted)' }, axisLine: { lineStyle: { color: 'var(--wk-chart-grid)' } } },
-    yAxis: [
-      { type: 'value', name: 'ms', axisLabel: { color: 'var(--wk-text-muted)' }, splitLine: { lineStyle: { color: 'var(--wk-chart-grid)' } } },
-      { type: 'value', name: '丢包%', min: 0, max: 100, axisLabel: { color: 'var(--wk-text-muted)' }, splitLine: { show: false } },
-    ],
+    yAxis: { type: 'value', name: 'ms', axisLabel: { color: 'var(--wk-text-muted)' }, splitLine: { lineStyle: { color: 'var(--wk-chart-grid)' } } },
     dataZoom: [{ type: 'inside', throttle: 80 }, { type: 'slider', height: 18, bottom: 4 }],
-    series: [
-      lineSeries('平均延迟', pingPoints.value.map((item) => item.avg_lat), '#38bdf8'),
-      lineSeries('最小延迟', pingPoints.value.map((item) => item.min_lat), '#22c55e'),
-      lineSeries('最大延迟', pingPoints.value.map((item) => item.max_lat), '#f59e0b'),
-      { ...lineSeries('丢包率', pingPoints.value.map((item) => Number((item.loss_rate * 100).toFixed(2))), '#ef4444'), yAxisIndex: 1 },
-    ],
+    series,
   }, { notMerge: true, lazyUpdate: true })
 }
 
-function lineSeries(name: string, data: number[], color: string) {
+function lineSeries(name: string, data: Array<number | null>, color: string) {
   return {
     name,
     type: 'line',

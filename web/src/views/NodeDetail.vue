@@ -41,13 +41,11 @@
     <div class="wk-card-solid" style="padding: 20px; margin-bottom: 20px;">
       <div style="display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 16px;">
         <h3 style="font-size: 16px;">网络延时 - 最近 24 小时</h3>
-        <el-select v-model="selectedISP" placeholder="选择运营商" style="width: 180px;" @change="loadPingAgg">
-          <el-option v-for="isp in ispTargets" :key="isp.name" :label="isp.name" :value="isp.name" />
-        </el-select>
+        <span style="color: var(--wk-text-muted); font-size: 12px;">所有启用运营商线路</span>
       </div>
-      <el-empty v-if="!selectedISP" description="请先在设置页配置并启用 Ping 运营商目标" />
-      <el-empty v-else-if="pingPoints.length === 0 && !pingLoading" description="暂无真实 Ping 数据" />
-      <div v-loading="pingLoading" ref="chartRef" :style="{ height: selectedISP ? '360px' : '0' }"></div>
+      <el-empty v-if="ispTargets.length === 0" description="请先在设置页配置并启用 Ping 运营商目标" />
+      <el-empty v-else-if="Object.keys(pingSeries).length === 0 && !pingLoading" description="暂无真实 Ping 数据" />
+      <div v-loading="pingLoading" ref="chartRef" :style="{ height: ispTargets.length ? '360px' : '0' }"></div>
     </div>
   </div>
 </template>
@@ -66,8 +64,7 @@ const node = ref<any | null>(null)
 const nodeName = ref('节点详情')
 const chartRef = ref<HTMLDivElement>()
 const ispTargets = ref<any[]>([])
-const selectedISP = ref('')
-const pingPoints = ref<any[]>([])
+const pingSeries = ref<Record<string, any[]>>({})
 const pingLoading = ref(false)
 const savingConfig = ref(false)
 const configForm = reactive({
@@ -135,22 +132,25 @@ async function loadISPTargets() {
   try {
     const res = await http.get(`/api/isp-targets?_=${Date.now()}`)
     ispTargets.value = (res.data || []).filter((item: any) => item.enabled)
-    if (!selectedISP.value && ispTargets.value.length > 0) {
-      selectedISP.value = ispTargets.value[0].name
-    }
   } catch (e) {
     console.error('加载 ISP 目标失败', e)
   }
 }
 
 async function loadPingAgg() {
-  if (!selectedISP.value) return
+  if (ispTargets.value.length === 0) {
+    pingSeries.value = {}
+    return
+  }
   pingLoading.value = true
   try {
-    const res = await http.get(`/api/agents/${agentId}/ping-agg`, {
-      params: { isp: selectedISP.value, _: Date.now() },
-    })
-    pingPoints.value = res.data || []
+    const results = await Promise.all(ispTargets.value.map(async (isp: any) => {
+      const res = await http.get(`/api/agents/${agentId}/ping-agg`, {
+        params: { isp: isp.name, _: Date.now() },
+      })
+      return [isp.name, res.data || []] as const
+    }))
+    pingSeries.value = Object.fromEntries(results.filter(([, points]) => points.length > 0))
     await nextTick()
     renderChart()
   } catch (e: any) {
@@ -161,21 +161,28 @@ async function loadPingAgg() {
 }
 
 function renderChart() {
-  if (!chartRef.value || !selectedISP.value) return
+  if (!chartRef.value || Object.keys(pingSeries.value).length === 0) return
   if (!chart) chart = echarts.init(chartRef.value, 'dark')
-  const labels = pingPoints.value.map(point => formatTime(point.bucket_min))
-  const avg = pingPoints.value.map(point => Number(point.avg_lat || 0).toFixed(2))
-  const min = pingPoints.value.map(point => Number(point.min_lat || 0).toFixed(2))
-  const max = pingPoints.value.map(point => Number(point.max_lat || 0).toFixed(2))
-  const loss = pingPoints.value.map(point => Number((point.loss_rate || 0) * 100).toFixed(2))
+  const colorList = ['#38bdf8', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6', '#14b8a6', '#ec4899']
+  const allBuckets = Array.from(new Set(
+    Object.values(pingSeries.value).flatMap(points => points.map(point => point.bucket_min))
+  )).sort()
+  const labels = allBuckets.map(point => formatTime(point))
+  const series = Object.entries(pingSeries.value).map(([isp, points], index) => {
+    const byTime = new Map(points.map(point => [point.bucket_min, Number(point.avg_lat || 0).toFixed(2)]))
+    return { name: isp, type: 'line', data: allBuckets.map(bucket => byTime.get(bucket) ?? null), smooth: false, sampling: 'lttb', symbol: 'none', lineStyle: { color: colorList[index % colorList.length], width: 1.8 } }
+  })
 
   chart.setOption({
+    animation: false,
     tooltip: {
       trigger: 'axis',
+      confine: true,
+      transitionDuration: 0,
       backgroundColor: 'rgba(15, 23, 42, 0.9)',
       borderColor: 'rgba(56, 189, 248, 0.3)',
     },
-    legend: { data: ['平均延时', '最小延时', '最大延时', '丢包率'], textStyle: { color: 'var(--wk-text-muted)' } },
+    legend: { type: 'scroll', textStyle: { color: 'var(--wk-text-muted)' } },
     grid: { left: '3%', right: '4%', bottom: '8%', containLabel: true },
     xAxis: {
       type: 'category',
@@ -183,33 +190,18 @@ function renderChart() {
       axisLine: { lineStyle: { color: 'var(--wk-chart-grid)' } },
       axisLabel: { color: 'var(--wk-text-muted)', fontSize: 11 },
     },
-    yAxis: [
-      {
-        type: 'value',
-        name: '延时 (ms)',
-        nameTextStyle: { color: 'var(--wk-text-muted)' },
-        splitLine: { lineStyle: { color: 'var(--wk-chart-grid)' } },
-      },
-      {
-        type: 'value',
-        name: '丢包率 (%)',
-        min: 0,
-        max: 100,
-        nameTextStyle: { color: 'var(--wk-text-muted)' },
-        splitLine: { show: false },
-      },
-    ],
+    yAxis: {
+      type: 'value',
+      name: '延时 (ms)',
+      nameTextStyle: { color: 'var(--wk-text-muted)' },
+      splitLine: { lineStyle: { color: 'var(--wk-chart-grid)' } },
+    },
     dataZoom: [
-      { type: 'inside', start: 0, end: 100 },
+      { type: 'inside', start: 0, end: 100, throttle: 80 },
       { type: 'slider', start: 0, end: 100, height: 20, bottom: 0 },
     ],
-    series: [
-      { name: '平均延时', type: 'line', data: avg, smooth: true, symbol: 'none', lineStyle: { color: '#38bdf8', width: 1.8 } },
-      { name: '最小延时', type: 'line', data: min, smooth: true, symbol: 'none', lineStyle: { color: '#22c55e', width: 1.2 } },
-      { name: '最大延时', type: 'line', data: max, smooth: true, symbol: 'none', lineStyle: { color: '#f97316', width: 1.2 } },
-      { name: '丢包率', type: 'line', yAxisIndex: 1, data: loss, smooth: true, symbol: 'none', lineStyle: { color: '#ef4444', width: 1.2 } },
-    ],
-  })
+    series,
+  }, { notMerge: true, lazyUpdate: true })
 }
 
 function formatTime(value: string) {
