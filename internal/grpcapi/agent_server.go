@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"sync"
 	"time"
 
 	"wukong/internal/config"
@@ -19,6 +20,8 @@ import (
 	"google.golang.org/grpc/status"
 )
 
+// AgentServer 探针 gRPC 服务
+
 type AgentServer struct {
 	pb.UnimplementedAgentServiceServer
 	store       store.MetricsStore
@@ -26,6 +29,7 @@ type AgentServer struct {
 	cfg         *config.ServerConfig
 	// 在线探针映射（agentID -> 最近心跳时间）
 	onlineAgents map[string]time.Time
+	onlineMu     sync.RWMutex // 保护 onlineAgents 并发读写
 }
 
 func RegisterService(grpcServer *grpc.Server, s store.MetricsStore, alert interface{}, cfg *config.ServerConfig) {
@@ -92,10 +96,14 @@ func (s *AgentServer) ReportStream(stream pb.AgentService_ReportStreamServer) er
 	log.Printf("探针 %s 已连接", agentID)
 
 	// 标记在线
+	s.onlineMu.Lock()
 	s.onlineAgents[agentID] = time.Now()
+	s.onlineMu.Unlock()
 	s.store.SetAgentOnline(agentID, true, time.Now())
 	defer func() {
+		s.onlineMu.Lock()
 		delete(s.onlineAgents, agentID)
+		s.onlineMu.Unlock()
 		s.store.SetAgentOnline(agentID, false, time.Now())
 		log.Printf("探针 %s 已断开", agentID)
 	}()
@@ -115,7 +123,9 @@ func (s *AgentServer) ReportStream(stream pb.AgentService_ReportStreamServer) er
 			}
 
 			// 更新在线状态
+			s.onlineMu.Lock()
 			s.onlineAgents[agentID] = time.Now()
+			s.onlineMu.Unlock()
 			s.store.SetAgentOnline(agentID, true, time.Now())
 
 			if r := msg.GetMetricsReport(); r != nil {
@@ -290,7 +300,9 @@ func (s *AgentServer) enabledPingTargets() []*pb.PingTarget {
 
 // CheckAgentOnline 检查探针是否在线（告警引擎用）
 func (s *AgentServer) CheckAgentOnline(agentID string, timeout time.Duration) bool {
+	s.onlineMu.RLock()
 	lastSeen, ok := s.onlineAgents[agentID]
+	s.onlineMu.RUnlock()
 	if !ok {
 		return false
 	}
@@ -300,9 +312,11 @@ func (s *AgentServer) CheckAgentOnline(agentID string, timeout time.Duration) bo
 // GetOnlineAgents 获取所有在线探针（Web API 用）
 func (s *AgentServer) GetOnlineAgents() map[string]time.Time {
 	result := make(map[string]time.Time)
+	s.onlineMu.RLock()
 	for k, v := range s.onlineAgents {
 		result[k] = v
 	}
+	s.onlineMu.RUnlock()
 	return result
 }
 
