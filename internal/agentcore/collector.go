@@ -88,6 +88,7 @@ func (c *SystemCollector) Collect() (*CollectResult, error) {
 	// 原因：cpu.Percent(time.Second) 会阻塞 1 秒，如果同步调用会拖慢整个采集周期，
 	// 导致 Ping 采集器被延迟执行，Ping 数据间隔不均匀。
 	c.cpuMu.RLock()
+	log.Printf("[DEBUG] Collect读取: ready=%v percent=%.1f", c.cpuReady, c.cpuPercent)
 	if c.cpuReady {
 		sys.CpuPercent = c.cpuPercent
 	}
