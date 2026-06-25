@@ -842,7 +842,7 @@ func (h *Handler) handleAgentBinaryDownload(w http.ResponseWriter, r *http.Reque
 // ---- 告警 ----
 
 func (h *Handler) handleListAlerts(w http.ResponseWriter, r *http.Request) {
-	alerts, err := h.store.ListActiveAlerts()
+	alerts, err := h.store.ListAlerts(100)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("查询告警失败: %v", err))
 		return
@@ -1170,10 +1170,15 @@ func (h *Handler) handleGetAlertSettings(w http.ResponseWriter, r *http.Request)
 	offline, _ := h.store.GetSetting("alert_offline_seconds")
 	duration, _ := h.store.GetSetting("alert_metric_duration_seconds")
 
+	pingLatency, _ := h.store.GetSetting("alert_ping_latency_threshold")
+	pingLoss, _ := h.store.GetSetting("alert_ping_loss_threshold")
+
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"cpu":                     floatSettingValue(cpu, 90),
 		"mem":                     floatSettingValue(mem, 90),
 		"disk":                    floatSettingValue(disk, 90),
+		"ping_latency":            floatSettingValue(pingLatency, 200),
+		"ping_loss":               floatSettingValue(pingLoss, 20),
 		"offline_seconds":         intSettingValue(offline, h.cfg.HeartbeatTimeout),
 		"metric_duration_seconds": intSettingValue(duration, 60),
 		"suppress_minutes":        h.cfg.AlertSuppressMinutes,
@@ -1185,6 +1190,8 @@ func (h *Handler) handleUpdateAlertSettings(w http.ResponseWriter, r *http.Reque
 		CPU                   float64 `json:"cpu"`
 		Mem                   float64 `json:"mem"`
 		Disk                  float64 `json:"disk"`
+		PingLatency           float64 `json:"ping_latency"`
+		PingLoss              float64 `json:"ping_loss"`
 		OfflineSeconds        int     `json:"offline_seconds"`
 		MetricDurationSeconds int     `json:"metric_duration_seconds"`
 	}
@@ -1192,8 +1199,18 @@ func (h *Handler) handleUpdateAlertSettings(w http.ResponseWriter, r *http.Reque
 		writeError(w, http.StatusBadRequest, "请求体解析失败")
 		return
 	}
+	if req.PingLatency == 0 {
+		req.PingLatency = 200
+	}
+	if req.PingLoss == 0 {
+		req.PingLoss = 20
+	}
 	if req.CPU <= 0 || req.CPU > 100 || req.Mem <= 0 || req.Mem > 100 || req.Disk <= 0 || req.Disk > 100 {
 		writeError(w, http.StatusBadRequest, "CPU/内存/磁盘阈值必须在 1-100 之间")
+		return
+	}
+	if req.PingLatency <= 0 || req.PingLatency > 10000 || req.PingLoss <= 0 || req.PingLoss > 100 {
+		writeError(w, http.StatusBadRequest, "Ping 延迟阈值必须在 1-10000ms，丢包阈值必须在 1-100% 之间")
 		return
 	}
 	if req.OfflineSeconds < 5 || req.OfflineSeconds > 3600 {
@@ -1209,6 +1226,8 @@ func (h *Handler) handleUpdateAlertSettings(w http.ResponseWriter, r *http.Reque
 		"alert_cpu_threshold":           fmt.Sprintf("%.1f", req.CPU),
 		"alert_mem_threshold":           fmt.Sprintf("%.1f", req.Mem),
 		"alert_disk_threshold":          fmt.Sprintf("%.1f", req.Disk),
+		"alert_ping_latency_threshold":  fmt.Sprintf("%.1f", req.PingLatency),
+		"alert_ping_loss_threshold":     fmt.Sprintf("%.1f", req.PingLoss),
 		"alert_offline_seconds":         strconv.Itoa(req.OfflineSeconds),
 		"alert_metric_duration_seconds": strconv.Itoa(req.MetricDurationSeconds),
 	}

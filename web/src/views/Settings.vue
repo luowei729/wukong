@@ -236,6 +236,14 @@
             <el-form-item label="磁盘告警阈值 (%)">
               <el-slider v-model="thresholds.disk" :min="1" :max="100" show-input />
             </el-form-item>
+            <el-form-item label="Ping 延迟告警阈值 (ms)">
+              <el-input-number v-model="thresholds.ping_latency" :min="1" :max="10000" :step="10" />
+              <div class="form-tip">任一运营商线路最近延迟持续超过该阈值时触发。</div>
+            </el-form-item>
+            <el-form-item label="Ping 丢包告警阈值 (%)">
+              <el-slider v-model="thresholds.ping_loss" :min="1" :max="100" show-input />
+              <div class="form-tip">任一运营商线路最近丢包率持续超过该阈值时触发。</div>
+            </el-form-item>
             <el-form-item>
               <el-button type="primary" :loading="thresholdSaving" @click="saveThresholds">保存阈值</el-button>
             </el-form-item>
@@ -292,6 +300,8 @@ const thresholds = reactive({
   cpu: 90,
   mem: 90,
   disk: 90,
+  ping_latency: 200,
+  ping_loss: 20,
   offline_seconds: 30,
   metric_duration_seconds: 60,
 })
@@ -477,6 +487,8 @@ async function loadThresholds() {
     thresholds.cpu = res.data.cpu ?? thresholds.cpu
     thresholds.mem = res.data.mem ?? thresholds.mem
     thresholds.disk = res.data.disk ?? thresholds.disk
+    thresholds.ping_latency = res.data.ping_latency ?? thresholds.ping_latency
+    thresholds.ping_loss = res.data.ping_loss ?? thresholds.ping_loss
     thresholds.offline_seconds = res.data.offline_seconds ?? thresholds.offline_seconds
     thresholds.metric_duration_seconds = res.data.metric_duration_seconds ?? thresholds.metric_duration_seconds
   } catch {}

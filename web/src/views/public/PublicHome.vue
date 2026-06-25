@@ -121,7 +121,7 @@
               {{ formatBytes(server.net_down) }}/s
             </span>
             <span class="foot-item foot-time">
-              {{ relativeTime(server.updated_at || server.last_seen_at) }}
+              {{ relativeTime(server.last_seen_at || server.updated_at) }}
             </span>
           </div>
         </article>

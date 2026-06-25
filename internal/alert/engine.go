@@ -118,6 +118,7 @@ func (e *Engine) checkAlerts() {
 		e.checkMetric(agent, "cpu", metrics.CPU, e.settingFloat("alert_cpu_threshold", 90), 85, duration)
 		e.checkMetric(agent, "mem", metrics.Mem, e.settingFloat("alert_mem_threshold", 90), 85, duration)
 		e.checkMetric(agent, "disk", metrics.Disk, e.settingFloat("alert_disk_threshold", 90), 85, e.settingInt("alert_disk_duration_seconds", 300))
+		e.checkPingMetrics(agent, duration)
 	}
 }
 
@@ -146,6 +147,39 @@ func (e *Engine) handleOffline(agent *store.Agent) {
 	e.mu.Lock()
 	e.suppressed[key] = time.Now()
 	e.mu.Unlock()
+}
+
+func (e *Engine) checkPingMetrics(agent *store.Agent, durationSec int) {
+	targets, err := e.store.ListISPTargets()
+	if err != nil {
+		log.Printf("告警引擎: 获取 Ping 目标失败: %v", err)
+		return
+	}
+	until := time.Now()
+	since := until.Add(-2 * time.Minute)
+	var worstLatency float64
+	var worstLoss float64
+	for _, target := range targets {
+		if target == nil || !target.Enabled || strings.TrimSpace(target.Name) == "" {
+			continue
+		}
+		points, err := e.store.GetPingAgg(agent.ID, target.Name, since, until)
+		if err != nil || len(points) == 0 {
+			continue
+		}
+		latest := points[len(points)-1]
+		if latest.AvgLat > worstLatency {
+			worstLatency = latest.AvgLat
+		}
+		lossPercent := latest.LossRate * 100
+		if lossPercent > worstLoss {
+			worstLoss = lossPercent
+		}
+	}
+	latencyThreshold := e.settingFloat("alert_ping_latency_threshold", 200)
+	lossThreshold := e.settingFloat("alert_ping_loss_threshold", 20)
+	e.checkMetric(agent, "ping_latency", worstLatency, latencyThreshold, latencyThreshold*0.8, durationSec)
+	e.checkMetric(agent, "ping_loss", worstLoss, lossThreshold, lossThreshold*0.5, durationSec)
 }
 
 func (e *Engine) checkMetric(agent *store.Agent, metric string, value, threshold, recovery float64, durationSec int) {
@@ -270,6 +304,10 @@ func metricName(metric string) string {
 		return "内存"
 	case "disk":
 		return "磁盘"
+	case "ping_latency":
+		return "Ping延迟"
+	case "ping_loss":
+		return "Ping丢包"
 	default:
 		return metric
 	}

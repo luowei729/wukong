@@ -182,6 +182,7 @@ type MetricsStore interface {
 	// ----- 告警 -----
 	CreateAlert(alert *Alert) (int64, error)
 	ResolveAlert(agentID, metric string) error
+	ListAlerts(limit int) ([]*Alert, error)
 	ListActiveAlerts() ([]*Alert, error)
 	GetActiveAlert(agentID, metric string) (*Alert, error)
 

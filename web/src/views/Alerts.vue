@@ -24,6 +24,9 @@
         <el-table-column label="触发时间" width="190">
           <template #default="{ row }">{{ formatTime(row.fired_at) }}</template>
         </el-table-column>
+        <el-table-column label="恢复时间" width="190">
+          <template #default="{ row }">{{ formatTime(row.resolved_at) }}</template>
+        </el-table-column>
         <el-table-column label="探针" prop="agent_id" min-width="220" />
       </el-table>
       <div v-if="!loading && alertList.length === 0" style="text-align: center; padding: 40px; color: var(--wk-text-muted);">
@@ -44,7 +47,7 @@ let refreshTimer: ReturnType<typeof setInterval> | null = null
 async function fetchAlerts(showLoading = false) {
   if (showLoading) loading.value = true
   try {
-    const res = await http.get(`/api/alerts/active?_=${Date.now()}`)
+    const res = await http.get(`/api/alerts?_=${Date.now()}`)
     // 后端无告警时可能返回 null；前端必须兜底成数组，避免表格闪现后因 .length 报错消失。
     alertList.value = Array.isArray(res.data) ? res.data : []
   } catch (e) {

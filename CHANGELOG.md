@@ -2,6 +2,27 @@
 
 所有变更记录使用北京时间（UTC+8）。
 
+## [2026-06-25 08:25] - 告警中心显示历史告警，补齐 Ping 告警，修复首页最近上报时间
+
+### 改动前总结
+1. 告警中心只请求 `/api/alerts/active`，已恢复告警不会显示，看起来像没起作用。
+2. 告警引擎只检查离线、CPU、内存、磁盘，没有检查 Ping 延迟和 Ping 丢包。
+3. 首页卡片优先使用 `updated_at` 显示最近上报时间，个别节点如 ff1 可能显示“3分钟前”但实际 `last_seen_at` 每秒更新。
+
+### 改动后总结
+1. `/api/alerts` 改为返回最近 100 条历史告警，包含 `firing/resolved`；告警中心使用该接口并新增恢复时间列。
+2. store 新增 `ListAlerts(limit)`。
+3. 告警引擎新增 Ping 延迟/丢包检查：默认阈值 200ms / 20%，持续时间复用资源告警持续时间；系统设置页新增 Ping 延迟/Ping 丢包阈值。
+4. 首页最近上报时间优先使用 `last_seen_at`，避免 `updated_at` 偶发滞后造成误显示。
+
+### 涉及文件
+- `internal/store/store.go`、`internal/store/sqlite.go` — 历史告警查询
+- `internal/webapi/handlers.go` — `/api/alerts` 返回历史告警；告警设置新增 Ping 阈值
+- `internal/alert/engine.go` — Ping 延迟/丢包告警检查
+- `web/src/views/Alerts.vue` — 显示历史告警和恢复时间
+- `web/src/views/Settings.vue` — Ping 告警阈值配置
+- `web/src/views/public/PublicHome.vue` — 最近上报时间优先 last_seen_at
+
 ## [2026-06-25 08:05] - 并发单包 Ping 与 live2 出口 IP 兜底修复
 
 ### 改动前总结

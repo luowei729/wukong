@@ -92,6 +92,7 @@ wukong/
 - **2026-06-25 07:40（北京时间）**：补齐 Ping 1 秒与出口 IP 闭环。① 明确图表仍读取 `ping_agg_1min`，K 线展示粒度是 1 分钟聚合点，不代表原始 Ping/TCP 探测间隔。② 主控连接后先下发 `COMMAND_UPDATE_CONFIG`，强制同步 `collect_interval`、`ping_interval=1` 和启用的运营商目标；探针收到后立即保存 `agent.conf` 并重建采集器，不再等重启。③ `MetricsReport` 新增 `ip_v4` / `ip_v6`，探针启动后立即并每 10 分钟自测公网 IPv4/IPv6 出口 IP，随指标上报；主控写回 agents 表。④ 后台节点列表新增“出口 IP”列，显示 IPv4 和 IPv6（有 v6 显示，没有则不显示）。
 - **2026-06-25 07:55（北京时间）**：修正出口 IP 和 K 线展示。① 出口 IP 只允许公网地址：探针和主控双侧过滤 `10/172.16-31/192.168`、loopback、link-local（如 `fe80::/10`）、ULA（`fc00::/7`）等非公网地址，避免把 `172.31.*` 或 `fe80::*` 显示为出口 IP。② Ping K 线查询改为从原始 `metrics_ping_YYYYMMDDHH` 小时表按 `ts` 秒级聚合，前端时间标签改为 `HH:mm:ss`，实现每秒颗粒度；`ping_agg_1min` 继续保留用于历史兜底和维护。
 - **2026-06-25 08:05（北京时间）**：补强秒级 Ping 与 live2 出口 IP。① PingCollector 改为对所有运营商目标并发探测，不再串行等待 4 条线路；ICMP 从 `ping -c 3` 改为 `ping -c 1 -W 1`，配合 `ping_interval=1` 让每条线路尽量每秒产生一个原始点。② 公网 IP 获取改为多服务商兜底（api4/api6.ipify、icanhazip、ifconfig.me），并继续严格过滤非公网地址；live2 这类云内网 `172.31.*` / `fe80::*` 不再显示，若公网接口获取失败则留空而不是显示内网。
+- **2026-06-25 08:25（北京时间）**：修复告警中心和首页时间显示。① 告警中心改为读取 `/api/alerts` 最近 100 条历史告警，包含 `firing/resolved`，不再只显示 `/api/alerts/active` 活跃告警；新增恢复时间列。② store 新增 `ListAlerts(limit)` 查询历史告警。③ 告警引擎补齐 Ping 延迟和 Ping 丢包检查，默认阈值为 200ms / 20%，复用资源告警持续时间；系统设置告警阈值页新增 Ping 延迟/Ping 丢包阈值。④ 首页卡片最近上报时间优先使用 `last_seen_at`，避免 `updated_at` 偶发滞后导致 ff1 显示“3分钟前”但实际每秒心跳。
 
 ## 部署相关长期提示
 

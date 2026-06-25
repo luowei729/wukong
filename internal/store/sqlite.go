@@ -937,6 +937,32 @@ func (s *SQLiteStore) ResolveAlert(agentID, metric string) error {
 	return err
 }
 
+func (s *SQLiteStore) ListAlerts(limit int) ([]*Alert, error) {
+	if limit <= 0 || limit > 500 {
+		limit = 100
+	}
+	rows, err := s.db.Query(
+		`SELECT id, agent_id, metric, threshold, value, status, fired_at, resolved_at, notified
+		 FROM alerts ORDER BY fired_at DESC, id DESC LIMIT ?`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var alerts []*Alert
+	for rows.Next() {
+		a := &Alert{}
+		var resolved sql.NullTime
+		if err := rows.Scan(&a.ID, &a.AgentID, &a.Metric, &a.Threshold, &a.Value, &a.Status, &a.FiredAt, &resolved, &a.Notified); err != nil {
+			return nil, err
+		}
+		if resolved.Valid {
+			a.ResolvedAt = &resolved.Time
+		}
+		alerts = append(alerts, a)
+	}
+	return alerts, rows.Err()
+}
+
 func (s *SQLiteStore) ListActiveAlerts() ([]*Alert, error) {
 	rows, err := s.db.Query(
 		`SELECT id, agent_id, metric, threshold, value, fired_at, notified
