@@ -86,14 +86,26 @@ func (s *AgentServer) ReportStream(stream pb.AgentService_ReportStreamServer) er
 		return status.Errorf(codes.InvalidArgument, "首个消息必须是 MetricsReport")
 	}
 
-	// 验证探针身份：必须同时提供 agent_id 和 agent_secret
-	// 使用 store.ValidateAgent 验证 bcrypt 哈希，确保安全性
-	if report.AgentId == "" || report.AgentSecret == "" {
+	// 验证探针身份：优先使用 agent_secret bcrypt 校验
+	// 原因：旧版探针（不含 agent_secret 字段）会在升级前被拒绝连不上，
+	// 连不上就收不到升级指令 → 死锁。因此对 secret 为空的旧探针退回
+	// 只检查 agent_id 是否已注册的兼容逻辑，让它连上并收到升级指令；
+	// 新版探针（含 agent_secret）则强制校验，安全无妥协。
+	if report.AgentId == "" {
 		return status.Errorf(codes.PermissionDenied, "缺少探针身份凭证")
 	}
-	if !s.store.ValidateAgent(report.AgentId, report.AgentSecret) {
-		log.Printf("探针 %s 身份验证失败: secret 不匹配", report.AgentId)
-		return status.Errorf(codes.PermissionDenied, "探针身份验证失败")
+	if report.AgentSecret != "" {
+		// 新探针：强制 bcrypt 校验
+		if !s.store.ValidateAgent(report.AgentId, report.AgentSecret) {
+			log.Printf("探针 %s 身份验证失败: secret 不匹配", report.AgentId)
+			return status.Errorf(codes.PermissionDenied, "探针身份验证失败")
+		}
+	} else {
+		// 旧探针兼容：只检查 agent_id 是否已注册，允许连上接收升级指令
+		if _, err := s.store.GetAgent(report.AgentId); err != nil {
+			return status.Errorf(codes.PermissionDenied, "探针身份验证失败")
+		}
+		log.Printf("探针 %s 使用兼容模式连接（无 agent_secret），下发升级指令", report.AgentId)
 	}
 
 	agentID := report.AgentId
