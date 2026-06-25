@@ -277,7 +277,7 @@ function formatBytesShort(value: number) {
 function relativeTime(value?: string) {
   if (!value) return '暂无上报'
   const diff = Date.now() - new Date(value).getTime()
-  if (diff < 0) return '刚刚'
+  if (diff < 0) return '0秒前'
   const seconds = Math.floor(diff / 1000)
   if (seconds < 60) return `${seconds}秒前`
   const minutes = Math.floor(seconds / 60)
