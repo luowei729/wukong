@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	pb "wukong/proto/gen"
@@ -24,9 +25,44 @@ type SystemCollector struct {
 	lastNetCounters map[string]net.IOCountersStat
 	lastNetTime     time.Time
 	region          string
+
+	// CPU 异步采样相关
+	// 原因：cpu.Percent(time.Second) 会阻塞 1 秒等待采样，
+	// 如果在 Collect() 中同步调用，会拖慢后续 PingCollector 的执行节奏，
+	// 导致 Ping 采集间隔不均匀、数据点丢失。改为异步采样后，Collect() 不再阻塞。
+	cpuMu      sync.RWMutex
+	cpuPercent float64 // 最近一次 CPU 使用率（0~100）
+	cpuReady   bool    // 是否已采集到至少一次有效值
 }
 
 func (c *SystemCollector) Name() string { return "system" }
+
+// StartCPULoop 启动 CPU 异步采样循环。
+// 原因：cpu.Percent(duration) 是阻塞调用（duration 内两次采样取差值），
+// 必须在独立 goroutine 中持续运行，Collect() 只读取最新缓存值，避免阻塞采集流程。
+func (c *SystemCollector) StartCPULoop(ctx interface{ Done() <-chan struct{} }) {
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
+			// cpu.Percent 阻塞 1 秒采样，这是正常的
+			percent, err := cpu.Percent(time.Second, false)
+			if err != nil {
+				log.Printf("采集 CPU 失败: %v", err)
+				continue
+			}
+			if len(percent) > 0 {
+				c.cpuMu.Lock()
+				c.cpuPercent = percent[0]
+				c.cpuReady = true
+				c.cpuMu.Unlock()
+			}
+		}
+	}()
+}
 
 func isPublicNetInterface(name string) bool {
 	name = strings.ToLower(name)
@@ -47,13 +83,15 @@ func (c *SystemCollector) Collect() (*CollectResult, error) {
 	sys := &pb.SystemMetric{}
 	result.System = sys
 
-	// CPU 使用率（取 1 秒平均）
-	cpuPercent, err := cpu.Percent(time.Second, false)
-	if err != nil {
-		log.Printf("采集 CPU 失败: %v", err)
-	} else if len(cpuPercent) > 0 {
-		sys.CpuPercent = cpuPercent[0]
+	// CPU 使用率：从异步采样缓存读取，不再阻塞。
+	// 原因：cpu.Percent(time.Second) 会阻塞 1 秒，如果同步调用会拖慢整个采集周期，
+	// 导致 Ping 采集器被延迟执行，Ping 数据间隔不均匀。
+	c.cpuMu.RLock()
+	if c.cpuReady {
+		sys.CpuPercent = c.cpuPercent
 	}
+	c.cpuMu.RUnlock()
+
 	if cpuInfos, err := cpu.Info(); err == nil && len(cpuInfos) > 0 {
 		// CPU 型号和核心数用于公开详情页规格展示，不包含敏感信息。
 		sys.CpuModel = cpuInfos[0].ModelName
@@ -129,14 +167,11 @@ func (c *SystemCollector) Collect() (*CollectResult, error) {
 	}
 
 	// 操作系统版本：使用 Platform + PlatformVersion 组合显示
-	// hostInfo.OS 返回 "linux"，hostInfo.Platform 返回 "ubuntu"，hostInfo.PlatformVersion 返回 "22.04"
-	// 组合后显示为 "Ubuntu 22.04" 而不是 "linux 22.04"
 	hostInfo, err := host.Info()
 	if err != nil {
 		log.Printf("采集系统版本失败: %v", err)
 	} else {
 		if hostInfo.Platform != "" {
-			// 首字母大写：ubuntu → Ubuntu，centos → CentOS，debian → Debian
 			plat := strings.Title(hostInfo.Platform)
 			if hostInfo.PlatformVersion != "" {
 				sys.OsVersion = fmt.Sprintf("%s %s", plat, hostInfo.PlatformVersion)
@@ -144,7 +179,6 @@ func (c *SystemCollector) Collect() (*CollectResult, error) {
 				sys.OsVersion = plat
 			}
 		} else {
-			// 回退到 OS 字段（如 "linux"）
 			sys.OsVersion = hostInfo.OS
 		}
 		sys.Platform = hostInfo.Platform
@@ -152,7 +186,7 @@ func (c *SystemCollector) Collect() (*CollectResult, error) {
 		sys.BootTime = int64(hostInfo.BootTime)
 	}
 
-	// 系统负载用于详情页展示 1m/5m/15m；不支持的平台只记录日志并保持 0。
+	// 系统负载用于详情页展示 1m/5m/15m
 	if avg, err := load.Avg(); err == nil {
 		sys.Load1 = avg.Load1
 		sys.Load5 = avg.Load5
@@ -161,7 +195,7 @@ func (c *SystemCollector) Collect() (*CollectResult, error) {
 		log.Printf("采集系统负载失败: %v", err)
 	}
 
-	// 区域只读取手动配置或环境变量，避免探针自动访问第三方定位服务造成隐私和可用性问题。
+	// 区域只读取手动配置或环境变量
 	sys.Region = c.region
 	if sys.Region == "" {
 		sys.Region = os.Getenv("WUKONG_AGENT_REGION")

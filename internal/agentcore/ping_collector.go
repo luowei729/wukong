@@ -98,7 +98,10 @@ func (c *PingCollector) probe(target config.PingTargetConfig) *pb.PingMetric {
 func probeTCP(host string, port int) (float64, error) {
 	addr := net.JoinHostPort(host, strconv.Itoa(port))
 	start := time.Now()
-	conn, err := net.DialTimeout("tcp", addr, 2*time.Second)
+	// 超时从 2 秒降到 1 秒，与 ping -W 1 对齐。
+	// 原因：TCP 超时 2 秒 + ICMP 超时 1 秒 = 3 秒，远超 1 秒采集周期；
+	// 缩短到 1 秒后，ICMP 失败回退 TCP 最坏也只多 2 秒，不再严重拖慢整轮采集。
+	conn, err := net.DialTimeout("tcp", addr, 1*time.Second)
 	if err != nil {
 		return 0, err
 	}

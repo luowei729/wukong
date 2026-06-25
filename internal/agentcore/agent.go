@@ -43,7 +43,8 @@ type Agent struct {
 	bufferSize int // 最大缓冲条数
 
 	// 采集器
-	collectors []Collector
+	collectors   []Collector
+	sysCollector *SystemCollector // 保存引用用于启动 CPU 异步采样
 
 	// 探针版本
 	version string
@@ -165,6 +166,11 @@ func (a *Agent) Start(ctx context.Context) error {
 	// 初始化采集器
 	a.initCollectors()
 
+	// 启动 CPU 异步采样循环。
+	// 原因：cpu.Percent(time.Second) 是阻塞调用，不能放在 Collect() 里串行执行，
+	// 否会拖慢整个采集周期导致 Ping 数据间隔不规律。
+	a.startCPUSampler(ctx)
+
 	// 启动公网出口 IP 自测循环，确保旧节点无需重新注册也能把 IPv4/IPv6 上报给主站。
 	go a.publicIPLoop(ctx)
 
@@ -192,12 +198,24 @@ func (a *Agent) initCollectors() {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	// 系统采集器负责资源使用率、硬件规格、启动时间和区域等公开详情字段。
-	collectors := []Collector{&SystemCollector{region: a.cfg.Region}}
+	sysCollector := &SystemCollector{region: a.cfg.Region}
+	collectors := []Collector{sysCollector}
 	if len(a.cfg.PingTargets) > 0 {
 		// Ping 采集器内部按 PingInterval 限频；当前生产默认 1 秒，图表仍按 1 分钟聚合展示。
 		collectors = append(collectors, NewPingCollector(a.cfg.PingInterval, a.cfg.PingTargets))
 	}
 	a.collectors = collectors
+	a.sysCollector = sysCollector // 保存引用用于启动 CPU 采样循环
+}
+
+// startCPUSampler 启动 CPU 异步采样循环
+func (a *Agent) startCPUSampler(ctx context.Context) {
+	a.mu.RLock()
+	sc := a.sysCollector
+	a.mu.RUnlock()
+	if sc != nil {
+		sc.StartCPULoop(ctx)
+	}
 }
 
 // reportLoop 采集并上报循环
@@ -324,18 +342,37 @@ func (a *Agent) collectAndReport() *pb.MetricsReport {
 	a.mu.RLock()
 	collectors := append([]Collector(nil), a.collectors...)
 	a.mu.RUnlock()
+
+	// 所有采集器并发执行，互不阻塞。
+	// 原因：旧代码串行执行，SystemCollector.Collect() 内部 cpu.Percent() 阻塞 1 秒，
+	// 导致后续 PingCollector 被延迟执行。Ping 采集间隔从预期的 1 秒变成 3 秒，
+	// 大量数据点缺失或不规律，在图表上表现为"每隔几十秒一起丢包"。
+	type collectOutput struct {
+		result *CollectResult
+		err    error
+	}
+	ch := make(chan collectOutput, len(collectors))
 	for _, c := range collectors {
-		result, err := c.Collect()
-		if err != nil {
-			log.Printf("采集器 %s 失败: %v", c.Name(), err)
+		go func(collector Collector) {
+			result, err := collector.Collect()
+			ch <- collectOutput{result: result, err: err}
+		}(c)
+	}
+	for i := 0; i < len(collectors); i++ {
+		out := <-ch
+		if out.err != nil {
+			log.Printf("采集器失败: %v", out.err)
 			continue
 		}
-		if result.System != nil {
-			report.System = result.System
+		if out.result == nil {
+			continue
+		}
+		if out.result.System != nil {
+			report.System = out.result.System
 			report.System.Timestamp = now.Unix()
 		}
-		if len(result.Pings) > 0 {
-			report.Pings = append(report.Pings, result.Pings...)
+		if len(out.result.Pings) > 0 {
+			report.Pings = append(report.Pings, out.result.Pings...)
 		}
 	}
 
