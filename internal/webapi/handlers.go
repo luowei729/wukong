@@ -81,7 +81,7 @@ func (h *Handler) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 使用 auth.Service 统一校验用户名、密码和可选 TOTP，避免在 Web 层重复鉴权逻辑。
-	resp, err := h.authSvc.Authenticate(req.Username, req.Password, req.TOTPCode)
+	resp, err := h.authSvc.Authenticate(req.Username, req.Password, req.TOTPCode, getClientIP(r))
 	if err != nil {
 		writeError(w, http.StatusUnauthorized, err.Error())
 		return
@@ -1300,4 +1300,27 @@ func newJWTID() string {
 	b := make([]byte, 16)
 	rand.Read(b)
 	return hex.EncodeToString(b)
+}
+
+// getClientIP 从 HTTP 请求中获取客户端真实 IP。
+// 优先级：X-Forwarded-For 第一个 > X-Real-IP > RemoteAddr
+// 原因：生产环境 nginx 反代后 RemoteAddr 是 127.0.0.1，必须从转发头取真实 IP 用于登录限流。
+func getClientIP(r *http.Request) string {
+	// X-Forwarded-For 格式: client, proxy1, proxy2，取第一个即原始客户端 IP
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		ips := strings.Split(xff, ",")
+		if ip := strings.TrimSpace(ips[0]); ip != "" {
+			return ip
+		}
+	}
+	// X-Real-IP 由 nginx proxy_set_header X-Real-IP $remote_addr 设置
+	if xri := r.Header.Get("X-Real-IP"); xri != "" {
+		return strings.TrimSpace(xri)
+	}
+	// 兜底：直接连接时的远端地址（去掉端口）
+	ip, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr
+	}
+	return ip
 }

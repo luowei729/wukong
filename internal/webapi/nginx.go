@@ -70,6 +70,8 @@ server {
         grpc_pass grpc://%s;
         grpc_set_header Host $host;
         grpc_set_header X-Real-IP $remote_addr;
+        grpc_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        grpc_set_header X-Forwarded-Proto $scheme;
         grpc_read_timeout 86400s;  # 长连接超时（24小时）
         grpc_send_timeout 86400s;
     }

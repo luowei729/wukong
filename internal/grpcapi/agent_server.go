@@ -86,11 +86,14 @@ func (s *AgentServer) ReportStream(stream pb.AgentService_ReportStreamServer) er
 		return status.Errorf(codes.InvalidArgument, "首个消息必须是 MetricsReport")
 	}
 
-	// 验证探针身份。
-	// 当前 proto 的 MetricsReport 只有 agent_id，没有携带 agent_secret；因此先确认 agent_id 已注册，
-	// 避免注册成功后的本机探针因为空 secret 校验被拒绝。后续应在协议中补充签名或凭证字段。
-	if _, err := s.store.GetAgent(report.AgentId); err != nil {
-		return status.Errorf(codes.PermissionDenied, "身份验证失败")
+	// 验证探针身份：必须同时提供 agent_id 和 agent_secret
+	// 使用 store.ValidateAgent 验证 bcrypt 哈希，确保安全性
+	if report.AgentId == "" || report.AgentSecret == "" {
+		return status.Errorf(codes.PermissionDenied, "缺少探针身份凭证")
+	}
+	if !s.store.ValidateAgent(report.AgentId, report.AgentSecret) {
+		log.Printf("探针 %s 身份验证失败: secret 不匹配", report.AgentId)
+		return status.Errorf(codes.PermissionDenied, "探针身份验证失败")
 	}
 
 	agentID := report.AgentId

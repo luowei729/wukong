@@ -626,6 +626,7 @@ func (x *PingMetric) GetJitterMs() float64 {
 type MetricsReport struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	AgentId       string                 `protobuf:"bytes,1,opt,name=agent_id,json=agentId,proto3" json:"agent_id,omitempty"`                    // 探针身份
+	AgentSecret   string                 `protobuf:"bytes,10,opt,name=agent_secret,json=agentSecret,proto3" json:"agent_secret,omitempty"`       // 探针个体凭证密钥（用于 ReportStream 身份验证，防止伪造上报）
 	ReportSeq     int64                  `protobuf:"varint,2,opt,name=report_seq,json=reportSeq,proto3" json:"report_seq,omitempty"`             // 上报序号（用于去重）
 	System        *SystemMetric          `protobuf:"bytes,3,opt,name=system,proto3" json:"system,omitempty"`                                     // 系统指标
 	Pings         []*PingMetric          `protobuf:"bytes,4,rep,name=pings,proto3" json:"pings,omitempty"`                                       // 多运营商 Ping 结果
@@ -671,6 +672,13 @@ func (*MetricsReport) Descriptor() ([]byte, []int) {
 func (x *MetricsReport) GetAgentId() string {
 	if x != nil {
 		return x.AgentId
+	}
+	return ""
+}
+
+func (x *MetricsReport) GetAgentSecret() string {
+	if x != nil {
+		return x.AgentSecret
 	}
 	return ""
 }
@@ -1246,9 +1254,11 @@ const file_wukong_proto_rawDesc = "" +
 	"\n" +
 	"latency_ms\x18\x04 \x01(\x01R\tlatencyMs\x12\x1b\n" +
 	"\tloss_rate\x18\x05 \x01(\x01R\blossRate\x12\x1b\n" +
-	"\tjitter_ms\x18\x06 \x01(\x01R\bjitterMs\"\xab\x02\n" +
+	"\tjitter_ms\x18\x06 \x01(\x01R\bjitterMs\"\xce\x02\n" +
 	"\rMetricsReport\x12\x19\n" +
-	"\bagent_id\x18\x01 \x01(\tR\aagentId\x12\x1d\n" +
+	"\bagent_id\x18\x01 \x01(\tR\aagentId\x12!\n" +
+	"\fagent_secret\x18\n" +
+	" \x01(\tR\vagentSecret\x12\x1d\n" +
 	"\n" +
 	"report_seq\x18\x02 \x01(\x03R\treportSeq\x12,\n" +
 	"\x06system\x18\x03 \x01(\v2\x14.wukong.SystemMetricR\x06system\x12(\n" +

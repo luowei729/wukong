@@ -60,9 +60,12 @@ type LoginResponse struct {
 }
 
 // Authenticate 验证用户名密码和 TOTP
-func (s *Service) Authenticate(username, password, totpCode string) (*LoginResponse, error) {
+// ip 参数用于登录限流，从 HTTP 请求的 X-Forwarded-For / X-Real-IP / RemoteAddr 获取
+func (s *Service) Authenticate(username, password, totpCode, ip string) (*LoginResponse, error) {
 	// 限流检查
-	ip := "global" // 生产环境从请求中取 IP
+	if ip == "" {
+		ip = "global" // 兜底：无 IP 时按全局限流
+	}
 	if err := s.checkRateLimit(ip); err != nil {
 		return nil, err
 	}

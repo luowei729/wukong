@@ -77,6 +77,7 @@ message PingMetric {
 // 探针上报的数据帧
 message MetricsReport {
   string agent_id         = 1;          // 探针身份
+  string agent_secret     = 10;         // 探针个体凭证密钥（用于 ReportStream 身份验证，防止伪造上报）
   int64  report_seq       = 2;          // 上报序号（用于去重）
   SystemMetric system     = 3;          // 系统指标
   repeated PingMetric pings = 4;        // 多运营商 Ping 结果

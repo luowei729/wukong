@@ -312,6 +312,7 @@ func (a *Agent) collectAndReport() *pb.MetricsReport {
 	now := time.Now()
 	report := &pb.MetricsReport{
 		AgentId:      a.cfg.AgentID,
+		AgentSecret:  a.cfg.AgentSecret, // 携带个体凭证用于 ReportStream 身份验证
 		ReportSeq:    now.UnixNano(),
 		AgentVersion: a.version,
 		Arch:         getArch(),
