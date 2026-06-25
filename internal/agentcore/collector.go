@@ -59,6 +59,7 @@ func (c *SystemCollector) StartCPULoop(ctx interface{ Done() <-chan struct{} }) 
 				c.cpuPercent = percent[0]
 				c.cpuReady = true
 				c.cpuMu.Unlock()
+				log.Printf("CPU 异步采样: %.1f%%", percent[0])
 			}
 		}
 	}()
