@@ -234,6 +234,9 @@ func (s *AgentServer) buildConfigFrame(agentID string) *pb.ServerFrame {
 
 // buildUpgradeFrame 按数据库设置构造探针升级指令。
 // settings.agent_target_version 为空时不升级；download_url 可选，默认走主控公开二进制接口。
+// 版本比较使用前缀匹配：target_version 只需匹配 agent_ver 的前 7 位即可认为已升级。
+// 原因：git commit hash 在不同构建环境（本地 vs GitHub Actions shallow clone）可能产生不同完整 hash，
+// 精确匹配会导致"升级后版本仍不匹配 → 反复下发升级 → 探针无限重启"的死循环。
 func (s *AgentServer) buildUpgradeFrame(agentID string) *pb.ServerFrame {
 	targetVersion, _ := s.store.GetSetting("agent_target_version")
 	if targetVersion == "" {
@@ -243,7 +246,9 @@ func (s *AgentServer) buildUpgradeFrame(agentID string) *pb.ServerFrame {
 	if err != nil {
 		return nil
 	}
-	if agent.AgentVer == targetVersion {
+
+	// 前缀匹配：git short hash 至少 7 位，只要前缀一致就认为版本相同
+	if versionMatch(agent.AgentVer, targetVersion) {
 		return nil
 	}
 
@@ -424,4 +429,22 @@ func isPublicIP(value string) bool {
 		return false
 	}
 	return ip.IsGlobalUnicast() && !ip.IsPrivate() && !ip.IsLoopback() && !ip.IsLinkLocalUnicast() && !ip.IsLinkLocalMulticast() && !ip.IsUnspecified()
+}
+
+// versionMatch 版本匹配：前缀匹配即可认为版本相同。
+// 原因：git commit hash 在不同构建环境（本地 push vs GitHub Actions shallow clone）可能产生不同完整 hash，
+// 但 short hash（前 7 位）是一致的。只要前缀匹配就说明是同一个 commit 的构建产物，无需再升级。
+func versionMatch(agentVer, targetVersion string) bool {
+	if agentVer == targetVersion {
+		return true
+	}
+	// 取两者较短长度做前缀比较，至少比较 7 位（git short hash 标准长度）
+	minLen := len(agentVer)
+	if len(targetVersion) < minLen {
+		minLen = len(targetVersion)
+	}
+	if minLen < 7 {
+		return agentVer == targetVersion // 太短无法前缀匹配，回退精确比较
+	}
+	return agentVer[:minLen] == targetVersion[:minLen]
 }

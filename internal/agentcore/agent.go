@@ -457,8 +457,8 @@ func (a *Agent) handleUpgradeAgent(payload []byte) {
 		log.Println("[升级] target_version 为空，忽略升级指令")
 		return
 	}
-	if a.version == req.TargetVersion {
-		log.Printf("[升级] 当前版本 %s 已是目标版本，无需升级", a.version)
+	if agentVersionMatch(a.version, req.TargetVersion) {
+		log.Printf("[升级] 当前版本 %s 已是目标版本 %s（前缀匹配），无需升级", a.version, req.TargetVersion)
 		return
 	}
 
@@ -617,7 +617,7 @@ func (a *Agent) autoUpgradeCheck(ctx context.Context) {
 
 // checkAndUpgrade 检查主控是否有新版本并执行升级
 func (a *Agent) checkAndUpgrade() {
-	if a.targetVersion == "" || a.targetVersion == a.version {
+	if a.targetVersion == "" || agentVersionMatch(a.version, a.targetVersion) {
 		return
 	}
 	log.Printf("[自动升级] 发现新版本: %s -> %s，开始升级", a.version, a.targetVersion)
@@ -745,4 +745,21 @@ func minDuration(a, b time.Duration) time.Duration {
 		return a
 	}
 	return b
+}
+
+// agentVersionMatch 探针版本匹配：前缀匹配即可认为版本相同。
+// 原因：git commit hash 在不同构建环境（本地 push vs GitHub Actions shallow clone）可能产生不同完整 hash，
+// 但 short hash（前 7 位）是一致的。只要前缀匹配就说明是同一个 commit 的构建产物。
+func agentVersionMatch(current, target string) bool {
+	if current == target {
+		return true
+	}
+	minLen := len(current)
+	if len(target) < minLen {
+		minLen = len(target)
+	}
+	if minLen < 7 {
+		return current == target // 太短无法前缀匹配，回退精确比较
+	}
+	return current[:minLen] == target[:minLen]
 }

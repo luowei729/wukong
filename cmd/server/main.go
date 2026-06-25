@@ -55,6 +55,21 @@ func main() {
 	}
 	log.Println("数据库初始化完成")
 
+	// === 主控启动时自动将自己的 commit 同步为探针目标版本 ===
+	// 原因：主控和探针在同一 Docker 镜像中编译，commit hash 完全一致；
+	// 启动时自动写入，不再需要手动设置 agent_target_version，也不会因
+	// 本地 push 的 hash 与 Actions 构建的 hash 不同导致升级死循环。
+	if commit != "none" && commit != "" {
+		existingTarget, _ := s.GetSetting("agent_target_version")
+		if existingTarget != commit {
+			if err := s.SetSetting("agent_target_version", commit); err != nil {
+				log.Printf("同步探针目标版本失败: %v", err)
+			} else {
+				log.Printf("探针目标版本已同步为: %s", commit)
+			}
+		}
+	}
+
 	// === 启动时序聚合与清理任务 ===
 	maintenanceCtx, maintenanceCancel := context.WithCancel(context.Background())
 	defer maintenanceCancel()
