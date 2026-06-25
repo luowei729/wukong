@@ -370,9 +370,11 @@ func (a *Agent) collectAndReport() *pb.MetricsReport {
 		if out.result.System != nil {
 			report.System = out.result.System
 			report.System.Timestamp = now.Unix()
+			log.Printf("[DEBUG] System采集: cpu=%.1f", out.result.System.CpuPercent)
 		}
 		if len(out.result.Pings) > 0 {
 			report.Pings = append(report.Pings, out.result.Pings...)
+			log.Printf("[DEBUG] Ping采集: %d条", len(out.result.Pings))
 		}
 	}
 
