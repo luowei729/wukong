@@ -197,15 +197,22 @@ func (a *Agent) Stop() {
 func (a *Agent) initCollectors() {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	// 系统采集器负责资源使用率、硬件规格、启动时间和区域等公开详情字段。
-	sysCollector := &SystemCollector{region: a.cfg.Region}
+	// 系统采集器复用已有实例（保留 CPU 异步采样状态），仅在首次创建时初始化。
+	// 原因：主控下发配置更新时会调用 initCollectors() 重建 PingCollector，
+	// 但如果每次都 new SystemCollector，会丢失 CPU 异步采样循环的缓存值（cpuReady/cpuPercent），
+	// 导致 CPU 指标归零，直到新的 StartCPULoop 首次完成采样前都是 0。
+	var sysCollector *SystemCollector
+	if a.sysCollector != nil {
+		sysCollector = a.sysCollector // 复用已有实例，保留 CPU 采样状态
+	} else {
+		sysCollector = &SystemCollector{region: a.cfg.Region}
+	}
 	collectors := []Collector{sysCollector}
 	if len(a.cfg.PingTargets) > 0 {
-		// Ping 采集器内部按 PingInterval 限频；当前生产默认 1 秒，图表仍按 1 分钟聚合展示。
 		collectors = append(collectors, NewPingCollector(a.cfg.PingInterval, a.cfg.PingTargets))
 	}
 	a.collectors = collectors
-	a.sysCollector = sysCollector // 保存引用用于启动 CPU 采样循环
+	a.sysCollector = sysCollector
 }
 
 // startCPUSampler 启动 CPU 异步采样循环
@@ -370,11 +377,9 @@ func (a *Agent) collectAndReport() *pb.MetricsReport {
 		if out.result.System != nil {
 			report.System = out.result.System
 			report.System.Timestamp = now.Unix()
-			log.Printf("[DEBUG] System采集: cpu=%.1f", out.result.System.CpuPercent)
 		}
 		if len(out.result.Pings) > 0 {
 			report.Pings = append(report.Pings, out.result.Pings...)
-			log.Printf("[DEBUG] Ping采集: %d条", len(out.result.Pings))
 		}
 	}
 
