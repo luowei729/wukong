@@ -836,8 +836,8 @@ func (s *SQLiteStore) GetAllLatestMetrics() (map[string]*LatestMetric, error) {
 }
 
 func (s *SQLiteStore) GetPingAgg(agentID, isp string, since, until time.Time) ([]*PingAggMin, error) {
-	// 网络延时 K 线按秒级颗粒度展示延时，每个点的 loss_rate 来自单次 ping -c 3 的丢包率（0/0.33/0.67/1.0）。
-	// 原因：分钟级聚合会把延时的波动细节抹平，而 -c 3 每秒已经能产生有意义的丢包率数值。
+	// 网络延时 K 线按分钟级颗粒度聚合：每分钟内所有 ping 的平均延时和丢包率。
+	// 原因：秒级颗粒度在 24h 范围会产生 86400 个数据点，过度密集且 K 线更关注趋势。
 	start := since.Truncate(time.Hour)
 	end := until.Truncate(time.Hour)
 	var results []*PingAggMin
@@ -856,12 +856,12 @@ func (s *SQLiteStore) GetPingAgg(agentID, isp string, since, until time.Time) ([
 		}
 
 		table := tableNameForTime("metrics_ping", t)
-		query := fmt.Sprintf(`SELECT ts, COUNT(*), AVG(latency), MIN(latency), MAX(latency),
+		query := fmt.Sprintf(`SELECT (ts / 60) * 60, COUNT(*), AVG(latency), MIN(latency), MAX(latency),
 			AVG(loss)
 			FROM %s
 			WHERE agent_id = ? AND isp = ? AND ts >= ? AND ts < ?
-			GROUP BY ts
-			ORDER BY ts`, table)
+			GROUP BY (ts / 60) * 60
+			ORDER BY (ts / 60) * 60`, table)
 		rows, err := s.db.Query(query, agentID, isp, localSince.Unix(), localUntil.Unix())
 		if err != nil {
 			if strings.Contains(err.Error(), "no such table") {

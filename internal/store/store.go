@@ -101,9 +101,9 @@ type SystemMetricInput struct {
 	Platform          string
 }
 
-// PingAggMin 按秒级原始 Ping 聚合数据（用于 24h K线查询）
+// PingAggMin 按分钟级聚合的 Ping 数据（用于 24h K线查询）
 type PingAggMin struct {
-	BucketMin time.Time `json:"bucket_min"` // 数据时间（秒级）
+	BucketMin time.Time `json:"bucket_min"` // 数据时间（分钟桶）
 	AgentID   string    `json:"agent_id"`
 	ISP       string    `json:"isp"`
 	Count     int       `json:"count"`

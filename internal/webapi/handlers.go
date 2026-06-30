@@ -483,6 +483,8 @@ func validateISPTarget(target *store.ISPTarget) error {
 var allowedSettingKeys = map[string]bool{
 	"site_domain":                    true,
 	"agent_server_addr":              true,
+	"agent_target_version":           true,
+	"agent_upgrade_url":              true,
 	"theme_preset":                   true,
 	"theme_primary_color":            true,
 	"theme_site_title":               true,
