@@ -260,13 +260,26 @@ function renderPingChart() {
   )).sort()
   const labels = allTimestamps.map((item) => formatTime(item))
 
-  // 计算每个 ISP 的最新丢包率，用于图例名称显示（如"上海电信 2%loss"）
+  // 构建每个 ISP 的延时和丢包率时间映射。
+  // 关键修复：data 必须是数字类型，不能用字符串，
+  // 否则 ECharts trigger:'axis' 的 tooltip 无法正确聚合多个 series。
+  const ispLossMap = new Map<string, Map<string, number>>()
   const series = Object.entries(pingSeries.value).map(([isp, points], index) => {
-    const byTime = new Map(points.map(item => [item.timestamp, item.avg_lat]))
+    const byTime = new Map<string, number>()
+    const lossMap = new Map<string, number>()
+    for (const item of points) {
+      byTime.set(item.timestamp, Number(item.avg_lat || 0))
+      lossMap.set(item.timestamp, Number(item.loss_rate || 0) * 100)
+    }
+    ispLossMap.set(isp, lossMap)
     const lastPoint = points.length > 0 ? points[points.length - 1] : null
     const lossPercent = lastPoint ? (Number(lastPoint.loss_rate || 0) * 100).toFixed(1) : '0.0'
     const displayName = `${isp} ${lossPercent}%loss`
-    return lineSeries(displayName, allTimestamps.map(ts => byTime.get(ts) ?? null), colorList[index % colorList.length])
+    return {
+      ...lineSeries(displayName, allTimestamps.map(ts => byTime.has(ts) ? byTime.get(ts)! : null), colorList[index % colorList.length]),
+      connectNulls: true, // 连接断点，避免数据缺口处线条中断
+      _ispName: isp, // 保留原始 ISP 名称，tooltip 格式化时使用
+    }
   })
 
   pingChart.setOption({
@@ -277,21 +290,28 @@ function renderPingChart() {
       transitionDuration: 0,
       backgroundColor: 'rgba(15, 23, 42, 0.92)',
       borderColor: 'rgba(56, 189, 248, 0.3)',
-      // 自定义 tooltip 显示延时和丢包率
+      // 十字准线，方便定位时间点
+      axisPointer: { type: 'cross', lineStyle: { color: 'rgba(56, 189, 248, 0.3)' } },
+      // 自定义 tooltip：显示同一时间点所有运营商的延时和丢包率
       formatter: (params: any) => {
-        if (!Array.isArray(params)) return ''
-        let html = `<div style="font-size:12px;color:#94a3b8;margin-bottom:4px">${params[0].axisValue}</div>`
+        if (!Array.isArray(params) || params.length === 0) return ''
+        let html = `<div style="font-size:12px;color:#94a3b8;margin-bottom:6px;font-weight:600">${params[0].axisValue}</div>`
         params.forEach((p: any) => {
+          // 跳过无数据点，只显示该时间点有值的运营商
+          if (p.value === null || p.value === undefined) return
           const color = p.color || '#38bdf8'
-          const match = p.seriesName.match(/^(.+?)\s+([\d.]+)%loss$/)
-          const ispName = match ? match[1] : p.seriesName
-          const lossPct = match ? match[2] : '0.0'
-          const lat = p.value !== null && p.value !== undefined ? `${p.value.toFixed(2)} ms` : '-'
-          html += `<div style="display:flex;align-items:center;gap:6px;font-size:12px">
-            <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${color}"></span>
-            <span style="color:#e2e8f0">${ispName}</span>
-            <span style="color:#94a3b8;margin-left:auto">${lat}</span>
-            <span style="color:#f59e0b;font-size:11px">${lossPct}%loss</span>
+          // 从 series 配置中获取原始 ISP 名称
+          const ispName = p.series?._ispName || p.seriesName
+          // 从 ispLossMap 中获取该时间点的实际丢包率
+          const lossMap = ispLossMap.get(ispName)
+          const tsKey = allTimestamps[p.dataIndex]
+          const lossPct = lossMap?.get(tsKey)?.toFixed(1) ?? '0.0'
+          const lat = typeof p.value === 'number' ? `${p.value.toFixed(2)} ms` : `${p.value} ms`
+          html += `<div style="display:flex;align-items:center;gap:8px;font-size:12px;line-height:22px">
+            <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${color};flex-shrink:0"></span>
+            <span style="color:#e2e8f0;min-width:80px">${ispName}</span>
+            <span style="color:#38bdf8;font-weight:600;min-width:70px;text-align:right">${lat}</span>
+            <span style="color:#f59e0b;font-size:11px;min-width:55px;text-align:right">${lossPct}% loss</span>
           </div>`
         })
         return html

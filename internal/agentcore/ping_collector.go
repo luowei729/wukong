@@ -114,7 +114,7 @@ func probeICMP(host string) (latency, jitter, loss float64, err error) {
 	// 第一阶段使用系统 ping 命令，避免引入 raw socket 权限要求；auto 模式失败后会回退 TCP。
 	// IPv6 目标需要使用 ping6 或 ping -6，否则系统 ping 无法正确处理 IPv6 地址。
 	pingCmd := "ping"
-	pingArgs := []string{"-c", "1", "-W", "1"}
+	pingArgs := []string{"-c", "3", "-W", "1"}
 	if isIPv6(host) {
 		// 优先尝试 ping -6（Linux iputils），回退到 ping6（BSD/旧 Linux）
 		if _, lookupErr := exec.LookPath("ping6"); lookupErr == nil {

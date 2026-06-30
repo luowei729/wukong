@@ -836,19 +836,21 @@ func (s *SQLiteStore) GetAllLatestMetrics() (map[string]*LatestMetric, error) {
 }
 
 func (s *SQLiteStore) GetPingAgg(agentID, isp string, since, until time.Time) ([]*PingAggMin, error) {
-	// 网络延时 K 线需要秒级颗粒度：直接从原始 Ping 小时表按 ts 秒聚合，而不是读 1 分钟预聚合表。
-	// 1 分钟预聚合仍保留给历史统计/兜底，但前端 24h K 线按原始秒级数据展示。
+	// 网络延时 K 线按分钟级颗粒度聚合：每分钟 60 个 ping 中统计丢包比例，
+	// 而不是秒级二进制（0/1）导致 loss_rate 始终显示为 0。
+	// 原因：ping -c 1 每秒只发 1 个包，GROUP BY ts（秒级）时 loss 只有 0 或 1，
+	// 改为 GROUP BY (ts/60)*60 后，每分钟有 60 个采样点，loss_rate 才能反映真实丢包百分比。
 	start := since.Truncate(time.Hour)
 	end := until.Truncate(time.Hour)
 	var results []*PingAggMin
 	for t := start; !t.After(end); t = t.Add(time.Hour) {
 		table := tableNameForTime("metrics_ping", t)
-		query := fmt.Sprintf(`SELECT ts, COUNT(*), AVG(latency), MIN(latency), MAX(latency),
+		query := fmt.Sprintf(`SELECT (ts / 60) * 60, COUNT(*), AVG(latency), MIN(latency), MAX(latency),
 			SUM(CASE WHEN loss > 0 THEN 1 ELSE 0 END)
 			FROM %s
 			WHERE agent_id = ? AND isp = ? AND ts >= ? AND ts < ?
-			GROUP BY ts
-			ORDER BY ts`, table)
+			GROUP BY (ts / 60) * 60
+			ORDER BY (ts / 60) * 60`, table)
 		rows, err := s.db.Query(query, agentID, isp, since.Unix(), until.Unix())
 		if err != nil {
 			if strings.Contains(err.Error(), "no such table") {
