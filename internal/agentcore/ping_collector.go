@@ -3,6 +3,7 @@
 package agentcore
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"net"
@@ -146,8 +147,17 @@ func isIPv6(host string) bool {
 	if ip != nil {
 		return ip.To4() == nil
 	}
-	// 可能是域名，尝试 DNS 解析查看是否有 AAAA 记录
-	addrs, err := net.LookupHost(host)
+	// 可能是域名，尝试 DNS 解析查看是否有 AAAA 记录。
+	// 必须设置超时，避免 DNS 服务器无响应时永久阻塞。
+	// 原因：旧代码 net.LookupHost 无超时，某些 DNS 问题可能导致 Ping 采集器卡死。
+	resolver := &net.Resolver{
+		PreferGo: true,
+		Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
+			d := net.Dialer{Timeout: 3 * time.Second}
+			return d.DialContext(ctx, network, address)
+		},
+	}
+	addrs, err := resolver.LookupHost(context.Background(), host)
 	if err != nil {
 		return false
 	}

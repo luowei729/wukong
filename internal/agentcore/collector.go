@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	pb "wukong/proto/gen"
 
@@ -172,7 +173,10 @@ func (c *SystemCollector) Collect() (*CollectResult, error) {
 		log.Printf("采集系统版本失败: %v", err)
 	} else {
 		if hostInfo.Platform != "" {
-			plat := strings.Title(hostInfo.Platform)
+			// 使用手动首字母大写替代已弃用的 strings.Title。
+			// 原因：strings.Title 在 Go 1.18 被标记为 deprecated，推荐使用 golang.org/x/text/cases，
+			// 但为了一个简单转换引入额外依赖不值得，这里用 unicode 手动实现首字母大写。
+			plat := titleCase(hostInfo.Platform)
 			if hostInfo.PlatformVersion != "" {
 				sys.OsVersion = fmt.Sprintf("%s %s", plat, hostInfo.PlatformVersion)
 			} else {
@@ -202,4 +206,17 @@ func (c *SystemCollector) Collect() (*CollectResult, error) {
 	}
 
 	return result, nil
+}
+
+// titleCase 将字符串每个单词的首字母大写，替代已弃用的 strings.Title。
+func titleCase(s string) string {
+	prev := ' '
+	return strings.Map(func(r rune) rune {
+		if unicode.IsSpace(rune(prev)) || prev == ' ' {
+			prev = r
+			return unicode.ToTitle(r)
+		}
+		prev = r
+		return r
+	}, s)
 }

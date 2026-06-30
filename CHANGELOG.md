@@ -2,6 +2,48 @@
 
 所有变更记录使用北京时间（UTC+8）。
 
+## [2026-06-30 14:00] - 16 项 bug 与安全修复（P0-P3 全面修复）
+
+### 改动前总结
+全面代码审查发现 6 个严重 bug、4 个安全漏洞、2 个并发问题和 10 个功能缺陷，涵盖探针 ticker 泄漏、JWT 类型不区分、TOTP 密钥未持久化、SSE 鉴权不匹配、Logo 上传未写文件、Settings API 无白名单、Webhook 未实现、告警引擎无退出等。
+
+### 改动后总结
+**P0 严重修复：**
+1. **ticker 泄漏**：`reportLoop` 的 ticker 从循环内移到循环外创建，重连时 `Reset` 而非新建，避免每次重连旧 ticker 泄漏。
+2. **refresh token 类型区分**：Claims 新增 `token_type` 字段，新增 `ValidateAccessToken`/`ValidateRefreshToken`，authMiddleware 只接受 access token，refresh 接口只接受 refresh token，防止攻击者混用 token 类型。
+3. **TOTP 2FA 持久化**：`handleSetup2FA` 生成密钥后立即写入 SQLite 和内存，新增 `SetTOTPSecret` 方法，用户扫码后 TOTP 验证不再永远失败。
+
+**P1 重要修复：**
+4. **SSE 鉴权**：authMiddleware 支持 `?token=` 查询参数回退，解决 EventSource API 不支持自定义 header 的问题。
+5. **SSE 数据推送**：SSE 每 5s 推送 `metrics_update` 事件，不再只发心跳。
+6. **Logo 上传**：`handleUploadLogo` 实际写入 `/opt/wukong/data/uploads/` 并将 URL 写入数据库。
+7. **Settings 白名单**：`handleGetSetting`/`handleSetSetting` 加 `allowedSettingKeys` 白名单，防止访问/覆盖敏感配置。
+8. **PingTargets 清空**：`handleUpdateConfig` 始终用主控下发列表覆盖（含空列表），允许后台清空所有 Ping 目标。
+
+**P2 并发与质量：**
+9. **client 竞态**：`Agent.client` 加 `clientMu` 读写锁保护，避免 reportLoop 与 autoUpgradeCheck 并发读写。
+10. **Webhook 发送**：`WebhookNotifier.Send` 实际发送 HTTP POST + X-Webhook-Secret 头。
+11. **告警引擎退出**：`Run(ctx)` 支持 context 取消，主控可优雅停止告警引擎。
+12. **DNS 超时**：`isIPv6` 的 `LookupHost` 加 3s 超时，防止 DNS 问题卡死 Ping 采集器。
+13. **strings.Title 弃用**：替换为自定义 `titleCase` 函数。
+
+**P3 体验与清理：**
+14. **登出按钮**：MainLayout 用户图标改为 SwitchButton，点击清除 JWT 并跳转登录页。
+15. **退出清理**：main.go 先 cancel 维护/告警 context 再停服务，避免 SQLite "database is closed" 错误。
+16. **安装脚本占位符**：主控安装脚本动态替换站点域名，不再硬编码 `https://<域名>/...`。
+
+### 涉及文件
+- `internal/agentcore/agent.go` — ticker 泄漏、client 竞态、PingTargets 清空
+- `internal/auth/auth.go` — token 类型区分、TOTP 持久化接口
+- `internal/webapi/handlers.go` — SSE 鉴权/数据推送、Logo 上传、Settings 白名单、TOTP 持久化、安装脚本占位符
+- `internal/alert/engine.go` — context 退出
+- `internal/notify/notify.go` — Webhook HTTP 发送
+- `internal/agentcore/ping_collector.go` — DNS 超时
+- `internal/agentcore/collector.go` — strings.Title 替换
+- `cmd/server/main.go` — 退出清理顺序、alert engine context
+- `web/src/layouts/MainLayout.vue` — 登出按钮
+- `AGENTS.md` / `CHANGELOG.md` — 文档更新
+
 ## [2026-06-25 08:25] - 告警中心显示历史告警，补齐 Ping 告警，修复首页最近上报时间
 
 ### 改动前总结

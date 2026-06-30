@@ -26,8 +26,8 @@
           size="small"
           @click="toggleTheme"
         />
-        <el-button text>
-          <el-icon><User /></el-icon>
+        <el-button text @click="handleLogout" title="退出登录">
+          <el-icon><SwitchButton /></el-icon>
         </el-button>
       </div>
     </header>
@@ -43,7 +43,7 @@
 import { computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import {
-  Odometer, Monitor, WarningFilled, Setting, Moon, Sunny, User,
+  Odometer, Monitor, WarningFilled, Setting, Moon, Sunny, SwitchButton,
 } from '@element-plus/icons-vue'
 
 const router = useRouter()
@@ -78,6 +78,14 @@ document.documentElement.classList.toggle('dark', savedTheme === 'dark')
 
 function navigate(path: string) {
   router.push(path)
+}
+
+// 登出功能：清除本地 JWT 并跳转登录页。
+// 原因：旧代码用户图标按钮无登出功能，用户无法主动退出登录。
+function handleLogout() {
+  localStorage.removeItem('access_token')
+  localStorage.removeItem('refresh_token')
+  router.push('/login')
 }
 </script>
 

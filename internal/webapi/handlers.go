@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"net/http"
@@ -104,8 +105,8 @@ func (h *Handler) handleRefreshToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 验证 refresh token 是否有效
-	claims, err := h.authSvc.ValidateToken(req.RefreshToken)
+	// 只接受 refresh token 类型，防止攻击者用 access token 当作 refresh token 刷新。
+	claims, err := h.authSvc.ValidateRefreshToken(req.RefreshToken)
 	if err != nil {
 		writeError(w, http.StatusUnauthorized, fmt.Sprintf("refresh token 无效: %v", err))
 		return
@@ -179,21 +180,27 @@ func (h *Handler) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 // authMiddleware JWT 鉴权中间件
 func (h *Handler) authMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		// 优先从 Authorization header 读取，SSE 场景回退到 ?token= 查询参数。
+		// 原因：浏览器 EventSource API 不支持自定义 header，只能通过 URL 传 token。
+		var tokenStr string
 		authHeader := r.Header.Get("Authorization")
-		if authHeader == "" {
-			writeError(w, http.StatusUnauthorized, "需要 Authorization 头")
+		if authHeader != "" {
+			tokenStr = strings.TrimPrefix(authHeader, "Bearer ")
+			if tokenStr == authHeader {
+				writeError(w, http.StatusUnauthorized, "Authorization 格式应为 Bearer <token>")
+				return
+			}
+		} else {
+			// 回退：从查询参数读取（SSE 场景）
+			tokenStr = r.URL.Query().Get("token")
+		}
+		if tokenStr == "" {
+			writeError(w, http.StatusUnauthorized, "需要 Authorization 头或 token 参数")
 			return
 		}
 
-		// 提取 Bearer token
-		tokenStr := strings.TrimPrefix(authHeader, "Bearer ")
-		if tokenStr == authHeader {
-			writeError(w, http.StatusUnauthorized, "Authorization 格式应为 Bearer <token>")
-			return
-		}
-
-		// 验证 token
-		claims, err := h.authSvc.ValidateToken(tokenStr)
+		// 只接受 access token 类型，防止 refresh token 被用于 API 访问
+		claims, err := h.authSvc.ValidateAccessToken(tokenStr)
 		if err != nil {
 			writeError(w, http.StatusUnauthorized, fmt.Sprintf("token 无效: %v", err))
 			return
@@ -470,8 +477,35 @@ func validateISPTarget(target *store.ISPTarget) error {
 
 // ---- 设置 ----
 
+// allowedSettingKeys 允许通过通用 API 读写的 setting key 白名单。
+// 原因：旧代码 handleGetSetting/handleSetSetting 接受任意 key，
+// 攻击者可通过 /api/settings/admin_password_hash 读取或覆盖敏感配置。
+var allowedSettingKeys = map[string]bool{
+	"site_domain":                    true,
+	"agent_server_addr":              true,
+	"theme_preset":                   true,
+	"theme_primary_color":            true,
+	"theme_site_title":               true,
+	"theme_footer_text":              true,
+	"theme_logo_url":                 true,
+	"telegram_bot_token":             true,
+	"telegram_chat_id":               true,
+	"alert_cpu_threshold":            true,
+	"alert_mem_threshold":            true,
+	"alert_disk_threshold":           true,
+	"alert_offline_seconds":          true,
+	"alert_ping_latency_threshold":   true,
+	"alert_ping_loss_threshold":      true,
+	"alert_metric_duration_seconds":  true,
+}
+
 func (h *Handler) handleGetSetting(w http.ResponseWriter, r *http.Request) {
 	key := getPathValue(r, "key")
+	// 白名单校验，拒绝读取未授权的敏感配置
+	if !allowedSettingKeys[key] {
+		writeError(w, http.StatusForbidden, fmt.Sprintf("不允许读取配置项: %s", key))
+		return
+	}
 	value, err := h.store.GetSetting(key)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("查询设置失败: %v", err))
@@ -482,6 +516,11 @@ func (h *Handler) handleGetSetting(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) handleSetSetting(w http.ResponseWriter, r *http.Request) {
 	key := getPathValue(r, "key")
+	// 白名单校验，拒绝写入未授权的敏感配置
+	if !allowedSettingKeys[key] {
+		writeError(w, http.StatusForbidden, fmt.Sprintf("不允许写入配置项: %s", key))
+		return
+	}
 	var req struct {
 		Value string `json:"value"`
 	}
@@ -734,8 +773,17 @@ echo "wukong 探针安装完成！"
 }
 
 func (h *Handler) handleInstallServerScript(w http.ResponseWriter, r *http.Request) {
+	// 使用后台配置的站点域名替换脚本中的下载地址，避免硬编码占位符。
+	// 原因：旧代码写死 https://<域名>/... 占位符，用户复制后无法直接使用。
+	domain, _ := h.store.GetSetting("site_domain")
+	baseURL, err := normalizeSiteBaseURL(domain)
+	if err != nil || baseURL == "" {
+		baseURL = requestBaseURL(r)
+	}
+
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	script := `#!/bin/bash
+
+	script := fmt.Sprintf(`#!/bin/bash
 # wukong 主控安装脚本
 set -e
 
@@ -755,7 +803,7 @@ case "$ARCH" in
     *) echo "不支持的架构: $ARCH"; exit 1 ;;
 esac
 
-curl -fsSL "https://<域名>/api/server/binary/latest/$ARCH" -o "$INSTALL_DIR/wukong"
+curl -fsSL "%s/api/server/binary/latest/$ARCH" -o "$INSTALL_DIR/wukong"
 chmod +x "$INSTALL_DIR/wukong"
 
 # 创建默认配置
@@ -799,7 +847,7 @@ echo "wukong 主控安装完成！"
 echo "请编辑 $INSTALL_DIR/wukong.conf 配置，然后设置管理员密码："
 echo "  export WUKONG_ADMIN_PASSWORD=<密码>"
 echo "  systemctl restart wukong"
-`
+`, baseURL)
 
 	w.Write([]byte(script))
 }
@@ -882,15 +930,37 @@ func (h *Handler) handleSSE(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "event: connected\ndata: {\"status\":\"ok\"}\n\n")
 	flusher.Flush()
 
+	// 定时推送最新指标数据给前端，而不仅仅是心跳。
+	// 原因：旧代码只发心跳从不推送 metrics_update 事件，前端无法收到实时数据更新。
+	dataTicker := time.NewTicker(5 * time.Second)
+	defer dataTicker.Stop()
+
 	// 保持连接，每 30 秒发送一次心跳
-	ticker := time.NewTicker(30 * time.Second)
-	defer ticker.Stop()
+	heartbeatTicker := time.NewTicker(30 * time.Second)
+	defer heartbeatTicker.Stop()
 
 	for {
 		select {
 		case <-r.Context().Done():
 			return
-		case <-ticker.C:
+		case <-dataTicker.C:
+			// 推送最新指标数据
+			metrics, err := h.store.GetAllLatestMetrics()
+			if err != nil {
+				log.Printf("SSE: 查询最新指标失败: %v", err)
+				continue
+			}
+			data, err := json.Marshal(map[string]interface{}{
+				"type": "metrics_update",
+				"data": metrics,
+			})
+			if err != nil {
+				log.Printf("SSE: JSON 序列化失败: %v", err)
+				continue
+			}
+			fmt.Fprintf(w, "event: message\ndata: %s\n\n", data)
+			flusher.Flush()
+		case <-heartbeatTicker.C:
 			fmt.Fprintf(w, ": heartbeat\n\n")
 			flusher.Flush()
 		}
@@ -1270,14 +1340,36 @@ func (h *Handler) handleUploadLogo(w http.ResponseWriter, r *http.Request) {
 	}
 	filename := "logo" + ext
 
-	// 保存文件（后续实现完整路径）
-	// 简单实现：写到项目目录
-	_ = fmt.Sprintf("/opt/wukong/data/uploads/%s", filename) // 占位，后续实现文件写入
-	log.Printf("Logo 上传: %s (%s, %d bytes)", filename, mime, header.Size)
+	// 创建上传目录并写入文件。
+	// 原因：旧代码只打印日志不实际写文件，返回“上传成功”但文件不存在。
+	uploadDir := "/opt/wukong/data/uploads"
+	if err := os.MkdirAll(uploadDir, 0755); err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("创建上传目录失败: %v", err))
+		return
+	}
+	dstPath := filepath.Join(uploadDir, filename)
+	dst, err := os.Create(dstPath)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("创建文件失败: %v", err))
+		return
+	}
+	defer dst.Close()
+
+	written, err := io.Copy(dst, file)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("写入文件失败: %v", err))
+		return
+	}
+
+	// 将 logo URL 写入数据库，前端读取后可在主题设置中展示
+	logoURL := "/uploads/" + filename
+	_ = h.store.SetSetting("theme_logo_url", logoURL)
+
+	log.Printf("Logo 上传: %s (%s, %d bytes)", filename, mime, written)
 	writeJSON(w, http.StatusOK, map[string]string{
 		"message":  "上传成功",
 		"filename": filename,
-		"url":      "/uploads/" + filename,
+		"url":      logoURL,
 	})
 }
 
@@ -1289,6 +1381,16 @@ func (h *Handler) handleSetup2FA(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("生成 TOTP 密钥失败: %v", err))
 		return
 	}
+	// TOTP 密钥生成后立即写入数据库和内存，用户扫码后即可使用。
+	// 原因：旧代码只生成密钥返回给前端，但从未调用 SetTOTPSecret 或写入 SQLite，
+	// 导致用户扫码后 TOTP 验证永远失败（AdminTOTPSecret 始终为空）。
+	if err := h.store.SetSetting("admin_totp_secret", secret); err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("保存 TOTP 密钥失败: %v", err))
+		return
+	}
+	h.authSvc.SetTOTPSecret(secret)
+	log.Println("TOTP 2FA 密钥已生成并持久化到数据库")
+
 	writeJSON(w, http.StatusOK, map[string]string{
 		"secret":  secret,
 		"url":     url,

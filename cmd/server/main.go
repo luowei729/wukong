@@ -76,8 +76,10 @@ func main() {
 	go runMaintenanceLoop(maintenanceCtx, s)
 
 	// === 初始化并启动告警引擎 ===
+	alertCtx, alertCancel := context.WithCancel(context.Background())
+	defer alertCancel()
 	alertEngine := alert.NewEngine(s, cfg)
-	go alertEngine.Run()
+	go alertEngine.Run(alertCtx)
 
 	// === 初始化通知渠道 ===
 	notifier := notify.NewManager()
@@ -136,6 +138,15 @@ func main() {
 	<-quit
 
 	log.Println("收到退出信号，正在关闭服务...")
+
+	// 退出清理顺序：先取消维护/告警 context，再停止 gRPC/HTTP，最后关闭数据库。
+	// 原因：旧代码未先取消 maintenanceCancel/alertCancel，告警引擎和维护任务可能在
+	// 数据库已关闭后仍在运行，导致 SQLite "database is closed" 错误。
+	maintenanceCancel()
+	alertCancel()
+	// 等待告警引擎和维护任务退出
+	time.Sleep(500 * time.Millisecond)
+
 	grpcServer.GracefulStop()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

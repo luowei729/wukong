@@ -199,7 +199,30 @@ func (w *WebhookNotifier) Send(msg *Message) error {
 	if err != nil {
 		return err
 	}
-	// 使用 http.Post 发送
-	log.Printf("Webhook 通知: %s", body)
+
+	// 实际发送 HTTP POST 请求到 Webhook URL。
+	// 原因：旧代码只打印日志不发送请求，Webhook 通知形同虚设。
+	client := &http.Client{Timeout: 10 * time.Second}
+	req, err := http.NewRequest("POST", w.URL, strings.NewReader(string(body)))
+	if err != nil {
+		return fmt.Errorf("构建 Webhook 请求失败: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	// 如果配置了 Secret，通过 X-Webhook-Secret 头传递，接收方可用于验签
+	if w.Secret != "" {
+		req.Header.Set("X-Webhook-Secret", w.Secret)
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("发送 Webhook 请求失败: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		return fmt.Errorf("Webhook 返回 %d: %s", resp.StatusCode, strings.TrimSpace(string(respBody)))
+	}
+	log.Printf("Webhook 通知发送成功: %s", msg.Title)
 	return nil
 }

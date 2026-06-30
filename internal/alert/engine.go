@@ -3,6 +3,7 @@
 package alert
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"log"
@@ -80,14 +81,21 @@ func (e *Engine) settingFloat(key string, fallback float64) float64 {
 	return v
 }
 
-// Run 定时检查告警状态。
-// 原因：离线阈值默认 30 秒，若仍每分钟检查会明显滞后；这里用 5 秒轻量轮询，具体触发时间仍由数据库阈值控制。
-func (e *Engine) Run() {
+// Run 定时检查告警状态，支持 context 取消以实现优雅退出。
+// 原因：旧代码 Run() 无 context 参数，主控退出时无法等待告警引擎停止，
+// 可能导致正在发送的 Telegram 通知被强制中断。
+func (e *Engine) Run(ctx context.Context) {
 	ticker := time.NewTicker(alertCheckInterval)
 	defer ticker.Stop()
 
-	for range ticker.C {
-		e.checkAlerts()
+	for {
+		select {
+		case <-ctx.Done():
+			log.Println("告警引擎已停止")
+			return
+		case <-ticker.C:
+			e.checkAlerts()
+		}
 	}
 }
 

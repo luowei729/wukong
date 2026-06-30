@@ -1,6 +1,6 @@
 # wukong 监控系统 - 开发规范与提示
 
-> 最后更新: 2026-06-21 18:39 (北京时间)
+> 最后更新: 2026-06-30 14:00 (北京时间)
 
 ## 开发原则
 
@@ -97,6 +97,7 @@ wukong/
 - **2026-06-25 18:30（北京时间）**：修复 Ping 数据批量丢包 Bug。根因：`SystemCollector.Collect()` 内 `cpu.Percent(time.Second)` 同步阻塞 1 秒，后续 `PingCollector` 被延迟执行，加上 `probeTCP` 超时 2 秒，每轮 Ping 实际耗时 3 秒远超 1 秒采集周期，导致数据间隔不规律、图表表现为”每隔几十秒一起丢包”。修复：① `cpu.Percent` 改为独立 goroutine 异步采样循环 `StartCPULoop`，`Collect()` 只读缓存值不再阻塞；② `collectAndReport` 改为所有采集器并发执行，互不等待；③ `probeTCP` 超时从 2 秒降到 1 秒（与 `ping -W 1` 对齐）。
 - **2026-06-25 19:00（北京时间）**：修复探针升级死循环导致节点频繁掉线。根因：手动设置 `agent_target_version` 用的是本地 git commit hash，而 GHCR 镜像中探针的版本是 Actions 构建时的 hash，两者完整值不同但前缀相同，精确匹配 `==` 永远不等 → 主控反复下发升级 → 探针无限重启。修复：① 主控启动时自动将自己的 `commit` 写入 `agent_target_version`（同一 Docker 镜像内主控和探针 commit 完全一致，永不会不匹配）；② `buildUpgradeFrame` 和探针侧 `handleUpgradeAgent` / `checkAndUpgrade` 版本比较改为前缀匹配（`versionMatch` / `agentVersionMatch`，前 7 位一致即视为同版本）。
 - **2026-06-25 19:30（北京时间）**：修复首页 CPU 指标归零。根因：`handleUpdateConfig` 调用 `initCollectors()` 重建采集器时，每次都 `new SystemCollector` 创建新实例（`cpuReady=false, cpuPercent=0`），但新实例没有启动 `StartCPULoop`，CPU 异步采样循环仍在旧实例上运行，`Collect()` 从新实例读到 0。修复：`initCollectors()` 检测已有 `sysCollector` 时复用原实例，仅首次创建新的，保留 CPU 异步采样的缓存状态。
+- **2026-06-30 14:00（北京时间）**：16 项 bug 与安全修复。① P0 ticker 泄漏：`reportLoop` 的 ticker 从循环内移到循环外创建，重连时 `Reset` 而非新建。② P0 refresh token 类型区分：Claims 新增 `token_type` 字段，新增 `ValidateAccessToken`/`ValidateRefreshToken`，authMiddleware 只接受 access token，refresh 接口只接受 refresh token。③ P0 TOTP 2FA 持久化：`handleSetup2FA` 生成密钥后立即写入 SQLite 和内存，新增 `SetTOTPSecret` 方法。④ P1 SSE 鉴权：authMiddleware 支持 `?token=` 查询参数回退（EventSource 不支持自定义 header）。⑤ P1 SSE 数据推送：SSE 每 5s 推送 `metrics_update` 事件，不再只发心跳。⑥ P1 Logo 上传：`handleUploadLogo` 实际写入 `/opt/wukong/data/uploads/` 并持久化 URL。⑦ P1 Settings 白名单：`handleGetSetting`/`handleSetSetting` 加 `allowedSettingKeys` 白名单，拒绝访问敏感 key。⑧ P1 PingTargets 清空：`handleUpdateConfig` 始终用主控下发列表覆盖（含空列表）。⑨ P2 client 竞态：`Agent.client` 加 `clientMu` 读写锁保护。⑩ P2 Webhook 发送：`WebhookNotifier.Send` 实际发送 HTTP POST。⑪ P2 告警引擎退出：`Run(ctx)` 支持 context 取消。⑫ P2 DNS 超时：`isIPv6` 的 `LookupHost` 加 3s 超时。⑬ P2 strings.Title 弃用：替换为自定义 `titleCase`。⑭ P3 登出按钮：MainLayout 用户图标改为 SwitchButton，清除 JWT 并跳转登录页。⑮ P3 退出清理：main.go 先 cancel 维护/告警 context 再停服务。⑯ P3 安装脚本占位符：主控安装脚本动态替换站点域名。
 
 ## 部署相关长期提示
 

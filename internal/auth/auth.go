@@ -42,6 +42,10 @@ func NewService(cfg *config.ServerConfig) *Service {
 type Claims struct {
 	Username string `json:"username"`
 	IsAdmin  bool   `json:"is_admin"`
+	// TokenType 区分 access 和 refresh token，防止攻击者用 refresh token 当 access token 访问 API。
+	// 原因：旧代码两种 token 的 Claims 结构完全相同，ValidateToken 无法区分，
+	// 只要 token 未过期就能任意使用，降低了安全性。
+	TokenType string `json:"token_type"`
 	jwt.RegisteredClaims
 }
 
@@ -110,8 +114,9 @@ func (s *Service) GenerateTokens(username string) (*LoginResponse, error) {
 
 	// Access Token
 	accessClaims := &Claims{
-		Username: username,
-		IsAdmin:  true,
+		Username:  username,
+		IsAdmin:   true,
+		TokenType: "access",
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(now.Add(s.cfg.GetAccessExpiry())),
 			IssuedAt:  jwt.NewNumericDate(now),
@@ -126,8 +131,9 @@ func (s *Service) GenerateTokens(username string) (*LoginResponse, error) {
 
 	// Refresh Token
 	refreshClaims := &Claims{
-		Username: username,
-		IsAdmin:  true,
+		Username:  username,
+		IsAdmin:   true,
+		TokenType: "refresh",
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(now.Add(s.cfg.GetRefreshExpiry())),
 			IssuedAt:  jwt.NewNumericDate(now),
@@ -165,7 +171,35 @@ func (s *Service) ValidateToken(tokenStr string) (*Claims, error) {
 	return claims, nil
 }
 
-// SetupTOTP 设置 TOTP 密钥（首次配置）
+// ValidateAccessToken 验证 access token，拒绝 refresh token 用于 API 访问。
+// 原因：旧代码 ValidateToken 不区分 token 类型，refresh token 也可当 access token 使用，
+// 降低安全性。分开校验后，API 中间件只接受 access token，刷新接口只接受 refresh token。
+func (s *Service) ValidateAccessToken(tokenStr string) (*Claims, error) {
+	claims, err := s.ValidateToken(tokenStr)
+	if err != nil {
+		return nil, err
+	}
+	if claims.TokenType != "access" {
+		return nil, errors.New("该 token 类型不是 access token")
+	}
+	return claims, nil
+}
+
+// ValidateRefreshToken 验证 refresh token，拒绝 access token 用于刷新。
+func (s *Service) ValidateRefreshToken(tokenStr string) (*Claims, error) {
+	claims, err := s.ValidateToken(tokenStr)
+	if err != nil {
+		return nil, err
+	}
+	if claims.TokenType != "refresh" {
+		return nil, errors.New("该 token 类型不是 refresh token")
+	}
+	return claims, nil
+}
+
+// SetupTOTP 生成 TOTP 密钥，但不在内存中生效。
+// 原因：2FA 设置流程是“生成密钥 → 用户扫码 → 输入验证码确认 → 写入数据库”，
+// 未确认前密钥只是临时返回给前端，不应直接启用。
 func (s *Service) SetupTOTP() (string, string, error) {
 	key, err := totp.Generate(totp.GenerateOpts{
 		Issuer:      "wukong",
@@ -175,6 +209,13 @@ func (s *Service) SetupTOTP() (string, string, error) {
 		return "", "", fmt.Errorf("生成 TOTP 密钥失败: %w", err)
 	}
 	return key.Secret(), key.URL(), nil
+}
+
+// SetTOTPSecret 将 TOTP 密钥写入内存配置（配合数据库持久化使用）。
+// 原因：SetupTOTP 只生成密钥，必须在用户确认验证码后才调用本方法 + 写入数据库，
+// 保证密钥不会在未确认前意外生效。
+func (s *Service) SetTOTPSecret(secret string) {
+	s.cfg.AdminTOTPSecret = secret
 }
 
 // VerifyTOTP 验证 TOTP 验证码

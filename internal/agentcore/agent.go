@@ -29,8 +29,13 @@ import (
 // Agent 探针实例
 type Agent struct {
 	cfg    *config.AgentConfig
-	client pb.AgentServiceClient
 	conn   *grpc.ClientConn
+
+	// clientMu 保护 client 字段的并发读写。
+	// 原因：reportLoop goroutine 赋值 client，autoUpgradeCheck goroutine 读取 client，
+	// 无锁保护会导致 data race，极端情况下读到 nil 指针 panic。
+	clientMu sync.RWMutex
+	client   pb.AgentServiceClient
 
 	mu          sync.RWMutex
 	agentID     string
@@ -225,11 +230,31 @@ func (a *Agent) startCPUSampler(ctx context.Context) {
 	}
 }
 
+// setClient 线程安全地设置 gRPC 客户端
+func (a *Agent) setClient(c pb.AgentServiceClient) {
+	a.clientMu.Lock()
+	a.client = c
+	a.clientMu.Unlock()
+}
+
+// getClient 线程安全地获取 gRPC 客户端
+func (a *Agent) getClient() pb.AgentServiceClient {
+	a.clientMu.RLock()
+	defer a.clientMu.RUnlock()
+	return a.client
+}
+
 // reportLoop 采集并上报循环
 func (a *Agent) reportLoop(ctx context.Context) {
 	// 重连指数退避
 	backoff := 1 * time.Second
 	maxBackoff := 60 * time.Second
+
+	// ticker 在循环外创建，避免每次重连都新建 ticker 导致旧 ticker 泄漏。
+	// 原因：旧代码 ticker 在 for 循环内创建，defer ticker.Stop() 只在函数返回时执行，
+	// 重连时旧 ticker 永远不会被 Stop，造成 goroutine/资源泄漏。
+	ticker := time.NewTicker(time.Duration(a.cfg.CollectInterval) * time.Second)
+	defer ticker.Stop()
 
 	for {
 		select {
@@ -250,7 +275,7 @@ func (a *Agent) reportLoop(ctx context.Context) {
 
 		a.conn = conn
 		client := pb.NewAgentServiceClient(conn)
-		a.client = client
+		a.setClient(client) // 线程安全赋值
 
 		// 启动双向流
 		stream, err := client.ReportStream(ctx)
@@ -265,9 +290,8 @@ func (a *Agent) reportLoop(ctx context.Context) {
 		// 发送缓冲数据（如果有）
 		a.flushBuffer(stream)
 
-		// 定时采集并上报
-		ticker := time.NewTicker(time.Duration(a.cfg.CollectInterval) * time.Second)
-		defer ticker.Stop()
+		// 重置 ticker 间隔（配置可能在 handleUpdateConfig 中变更）
+		ticker.Reset(time.Duration(a.cfg.CollectInterval) * time.Second)
 
 		// 接收指令的 goroutine
 		cmdDone := make(chan error, 1)
@@ -427,9 +451,9 @@ func (a *Agent) handleUpdateConfig(payload []byte) {
 	if newCfg.PingInterval > 0 {
 		a.cfg.PingInterval = newCfg.PingInterval
 	}
-	if len(newCfg.PingTargets) > 0 {
-		a.cfg.PingTargets = newCfg.PingTargets
-	}
+	// PingTargets 始终用主控下发的完整列表覆盖（包括空列表），允许后台清空所有 Ping 目标。
+	// 原因：旧代码 if len > 0 才覆盖，导致后台删除全部目标后探针仍然继续探测旧目标。
+	a.cfg.PingTargets = newCfg.PingTargets
 	if newCfg.Region != "" {
 		a.cfg.Region = newCfg.Region
 	}
@@ -611,7 +635,8 @@ func (a *Agent) autoUpgradeCheck(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			if a.client == nil {
+			c := a.getClient() // 线程安全读取
+			if c == nil {
 				continue
 			}
 			// 通过 gRPC 注册接口查询主控当前 target_version
