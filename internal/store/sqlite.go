@@ -836,22 +836,33 @@ func (s *SQLiteStore) GetAllLatestMetrics() (map[string]*LatestMetric, error) {
 }
 
 func (s *SQLiteStore) GetPingAgg(agentID, isp string, since, until time.Time) ([]*PingAggMin, error) {
-	// 网络延时 K 线按分钟级颗粒度聚合：每分钟 60 个 ping 中统计丢包比例，
-	// 而不是秒级二进制（0/1）导致 loss_rate 始终显示为 0。
-	// 原因：ping -c 1 每秒只发 1 个包，GROUP BY ts（秒级）时 loss 只有 0 或 1，
-	// 改为 GROUP BY (ts/60)*60 后，每分钟有 60 个采样点，loss_rate 才能反映真实丢包百分比。
+	// 网络延时 K 线按秒级颗粒度展示延时，每个点的 loss_rate 来自单次 ping -c 3 的丢包率（0/0.33/0.67/1.0）。
+	// 原因：分钟级聚合会把延时的波动细节抹平，而 -c 3 每秒已经能产生有意义的丢包率数值。
 	start := since.Truncate(time.Hour)
 	end := until.Truncate(time.Hour)
 	var results []*PingAggMin
 	for t := start; !t.After(end); t = t.Add(time.Hour) {
+		// 计算当前小时表的局部起止时间，避免全局 since/until 跨越小时边界时截断数据。
+		localSince := since
+		if localSince.Before(t) {
+			localSince = t
+		}
+		localUntil := t.Add(time.Hour)
+		if localUntil.After(until) {
+			localUntil = until
+		}
+		if !localSince.Before(localUntil) {
+			continue
+		}
+
 		table := tableNameForTime("metrics_ping", t)
-		query := fmt.Sprintf(`SELECT (ts / 60) * 60, COUNT(*), AVG(latency), MIN(latency), MAX(latency),
-			SUM(CASE WHEN loss > 0 THEN 1 ELSE 0 END)
+		query := fmt.Sprintf(`SELECT ts, COUNT(*), AVG(latency), MIN(latency), MAX(latency),
+			AVG(loss)
 			FROM %s
 			WHERE agent_id = ? AND isp = ? AND ts >= ? AND ts < ?
-			GROUP BY (ts / 60) * 60
-			ORDER BY (ts / 60) * 60`, table)
-		rows, err := s.db.Query(query, agentID, isp, since.Unix(), until.Unix())
+			GROUP BY ts
+			ORDER BY ts`, table)
+		rows, err := s.db.Query(query, agentID, isp, localSince.Unix(), localUntil.Unix())
 		if err != nil {
 			if strings.Contains(err.Error(), "no such table") {
 				continue
@@ -861,15 +872,11 @@ func (s *SQLiteStore) GetPingAgg(agentID, isp string, since, until time.Time) ([
 		for rows.Next() {
 			p := &PingAggMin{AgentID: agentID, ISP: isp}
 			var bucket int64
-			var lossCnt int
-			if err := rows.Scan(&bucket, &p.Count, &p.AvgLat, &p.MinLat, &p.MaxLat, &lossCnt); err != nil {
+			if err := rows.Scan(&bucket, &p.Count, &p.AvgLat, &p.MinLat, &p.MaxLat, &p.LossRate); err != nil {
 				rows.Close()
 				return nil, err
 			}
 			p.BucketMin = time.Unix(bucket, 0)
-			if p.Count > 0 {
-				p.LossRate = float64(lossCnt) / float64(p.Count)
-			}
 			results = append(results, p)
 		}
 		if err := rows.Err(); err != nil {
@@ -943,9 +950,13 @@ func (s *SQLiteStore) ListAlerts(limit int) ([]*Alert, error) {
 	if limit <= 0 || limit > 500 {
 		limit = 100
 	}
+	// JOIN agents 表获取节点名称，避免前端只显示 agent_id 难以对应。
 	rows, err := s.db.Query(
-		`SELECT id, agent_id, metric, threshold, value, status, fired_at, resolved_at, notified
-		 FROM alerts ORDER BY fired_at DESC, id DESC LIMIT ?`, limit)
+		`SELECT a.id, a.agent_id, COALESCE(agents.name, agents.hostname, a.agent_id) AS agent_name,
+			a.metric, a.threshold, a.value, a.status, a.fired_at, a.resolved_at, a.notified
+		 FROM alerts a
+		 LEFT JOIN agents ON agents.id = a.agent_id
+		 ORDER BY a.fired_at DESC, a.id DESC LIMIT ?`, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -954,7 +965,7 @@ func (s *SQLiteStore) ListAlerts(limit int) ([]*Alert, error) {
 	for rows.Next() {
 		a := &Alert{}
 		var resolved sql.NullTime
-		if err := rows.Scan(&a.ID, &a.AgentID, &a.Metric, &a.Threshold, &a.Value, &a.Status, &a.FiredAt, &resolved, &a.Notified); err != nil {
+		if err := rows.Scan(&a.ID, &a.AgentID, &a.AgentName, &a.Metric, &a.Threshold, &a.Value, &a.Status, &a.FiredAt, &resolved, &a.Notified); err != nil {
 			return nil, err
 		}
 		if resolved.Valid {
@@ -967,8 +978,11 @@ func (s *SQLiteStore) ListAlerts(limit int) ([]*Alert, error) {
 
 func (s *SQLiteStore) ListActiveAlerts() ([]*Alert, error) {
 	rows, err := s.db.Query(
-		`SELECT id, agent_id, metric, threshold, value, fired_at, notified
-		 FROM alerts WHERE status = 'firing'`)
+		`SELECT a.id, a.agent_id, COALESCE(agents.name, agents.hostname, a.agent_id) AS agent_name,
+			a.metric, a.threshold, a.value, a.fired_at, a.notified
+		 FROM alerts a
+		 LEFT JOIN agents ON agents.id = a.agent_id
+		 WHERE a.status = 'firing'`)
 	if err != nil {
 		return nil, err
 	}
@@ -976,7 +990,7 @@ func (s *SQLiteStore) ListActiveAlerts() ([]*Alert, error) {
 	var alerts []*Alert
 	for rows.Next() {
 		a := &Alert{Status: "firing"}
-		err := rows.Scan(&a.ID, &a.AgentID, &a.Metric, &a.Threshold, &a.Value, &a.FiredAt, &a.Notified)
+		err := rows.Scan(&a.ID, &a.AgentID, &a.AgentName, &a.Metric, &a.Threshold, &a.Value, &a.FiredAt, &a.Notified)
 		if err != nil {
 			return nil, err
 		}

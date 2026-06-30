@@ -172,7 +172,9 @@ function renderChart() {
   // 构建每个 ISP 的延时和丢包率时间映射。
   // 关键修复：data 必须是数字类型，不能用 .toFixed() 转成字符串，
   // 否则 ECharts trigger:'axis' 的 tooltip 无法正确聚合多个 series。
-  const ispLossMap = new Map<string, Map<string, number>>()
+  // loss_rate 来自 ping -c 3 的单次探测丢包率（0/0.33/0.67/1.0），
+  // 按秒级展示，不再使用分钟级聚合。
+  const ispLossByTime = new Map<string, Map<string, number>>()
   const series = Object.entries(pingSeries.value).map(([isp, points], index) => {
     const byTime = new Map<string, number>()
     const lossMap = new Map<string, number>()
@@ -180,7 +182,7 @@ function renderChart() {
       byTime.set(point.bucket_min, Number(point.avg_lat || 0))
       lossMap.set(point.bucket_min, Number(point.loss_rate || 0) * 100)
     }
-    ispLossMap.set(isp, lossMap)
+    ispLossByTime.set(isp, lossMap)
     // 图例名称显示最新丢包率概览
     const lastPoint = points.length > 0 ? points[points.length - 1] : null
     const lossPercent = lastPoint ? (Number(lastPoint.loss_rate || 0) * 100).toFixed(1) : '0.0'
@@ -191,9 +193,8 @@ function renderChart() {
       smooth: false,
       sampling: 'lttb',
       symbol: 'none',
-      connectNulls: true, // 连接断点，避免数据缺口处线条中断
+      connectNulls: true,
       lineStyle: { color: colorList[index % colorList.length], width: 1.8 },
-      // 保留原始 ISP 名称，tooltip 格式化时使用
       _ispName: isp,
     }
   })
@@ -206,20 +207,17 @@ function renderChart() {
       transitionDuration: 0,
       backgroundColor: 'rgba(15, 23, 42, 0.92)',
       borderColor: 'rgba(56, 189, 248, 0.3)',
-      // 十字准线，方便定位时间点
       axisPointer: { type: 'cross', lineStyle: { color: 'rgba(56, 189, 248, 0.3)' } },
       // 自定义 tooltip：显示同一时间点所有运营商的延时和丢包率
       formatter: (params: any) => {
         if (!Array.isArray(params) || params.length === 0) return ''
         let html = `<div style="font-size:12px;color:#94a3b8;margin-bottom:6px;font-weight:600">${params[0].axisValue}</div>`
         params.forEach((p: any) => {
-          // 跳过无数据点，只显示该时间点有值的运营商
           if (p.value === null || p.value === undefined) return
           const color = p.color || '#38bdf8'
-          // 从 series 配置中获取原始 ISP 名称
           const ispName = p.series?._ispName || p.seriesName
-          // 从 ispLossMap 中获取该时间点的实际丢包率（而非 series 最后一个点的）
-          const lossMap = ispLossMap.get(ispName)
+          // 从 ispLossByTime 中获取该秒的实际丢包率
+          const lossMap = ispLossByTime.get(ispName)
           const bucketKey = allBuckets[p.dataIndex]
           const lossPct = lossMap?.get(bucketKey)?.toFixed(1) ?? '0.0'
           const lat = typeof p.value === 'number' ? `${p.value.toFixed(2)} ms` : `${p.value} ms`

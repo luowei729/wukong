@@ -101,9 +101,9 @@ type SystemMetricInput struct {
 	Platform          string
 }
 
-// PingAggMin 1 分钟预聚合的 Ping 数据（用于 24h K线查询）
+// PingAggMin 按秒级原始 Ping 聚合数据（用于 24h K线查询）
 type PingAggMin struct {
-	BucketMin time.Time `json:"bucket_min"` // 分钟桶时间
+	BucketMin time.Time `json:"bucket_min"` // 数据时间（秒级）
 	AgentID   string    `json:"agent_id"`
 	ISP       string    `json:"isp"`
 	Count     int       `json:"count"`
@@ -119,10 +119,11 @@ type PingAggMin struct {
 type Alert struct {
 	ID         int64      `json:"id"`
 	AgentID    string     `json:"agent_id"`
-	Metric     string     `json:"metric"`    // cpu/mem/disk/ping_loss/ping_latency/offline
-	Threshold  float64    `json:"threshold"` // 触发阈值
-	Value      float64    `json:"value"`     // 触发时的实际值
-	Status     string     `json:"status"`    // firing / resolved
+	AgentName  string     `json:"agent_name"` // 节点名称，从 agents 表 JOIN 查询
+	Metric     string     `json:"metric"`     // cpu/mem/disk/ping_loss/ping_latency/offline
+	Threshold  float64    `json:"threshold"`  // 触发阈值
+	Value      float64    `json:"value"`      // 触发时的实际值
+	Status     string     `json:"status"`     // firing / resolved
 	FiredAt    time.Time  `json:"fired_at"`
 	ResolvedAt *time.Time `json:"resolved_at"`
 	Notified   bool       `json:"notified"` // 是否已通知

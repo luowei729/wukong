@@ -27,7 +27,12 @@
         <el-table-column label="恢复时间" width="190">
           <template #default="{ row }">{{ formatTime(row.resolved_at) }}</template>
         </el-table-column>
-        <el-table-column label="探针" prop="agent_id" min-width="220" />
+        <el-table-column label="节点" min-width="220">
+          <template #default="{ row }">
+            <span>{{ row.agent_name || row.agent_id }}</span>
+            <span v-if="row.agent_name && row.agent_name !== row.agent_id" style="color: var(--wk-text-muted); font-size: 11px; margin-left: 6px;">{{ row.agent_id.slice(0, 8) }}</span>
+          </template>
+        </el-table-column>
       </el-table>
       <div v-if="!loading && alertList.length === 0" style="text-align: center; padding: 40px; color: var(--wk-text-muted);">
         暂无告警
