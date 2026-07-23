@@ -101,6 +101,8 @@ wukong/
 
 - **2026-07-23 14:15（北京时间）**：主站故障修复。根因：`runMaintenanceLoop` 数据保留期硬编码 30 天（`DropOldHourlyTables(24*30)`），13 节点 × 1s 采集 × 30 天 ≈ 1.3 亿行撑至 wukong.db 9.9GB，SQLite 写锁竞争导致全部 HTTP API goroutine 阻塞，主控 7 月 21 日静默卡死（进程存活无响应，docker stop 需 SIGKILL），前端经 openresty 能加载但 API 全部超时（000）。紧急处理：停容器批量 DROP 1086 张 7 天前历史小时表 + `VACUUM INTO` 压缩 9.9GB→2.4GB。代码修复：保留期 30 天→24 小时（`retentionHours=24`），清理频率 6h→1h。注意：主控容器为 alpine(musl) 镜像，本机 glibc 编译的二进制 docker cp 进去会报 `exec format: no such file`，必须走 GHCR Actions 重新构建镜像或用 alpine 容器编译 musl 二进制；重建容器时不传 `--config`（纯环境变量启动），原容器 Cmd `[--config ]` 带尾随空格会触发 `flag needs an argument`。
 
+- **2026-07-23 15:55（北京时间）**：修复 DropOldHourlyTables 死锁 bug。根因：`DropOldHourlyTables` 在 `rows.Next()` 循环内执行 `DROP TABLE`（schema 修改需独占锁），但 `defer rows.Close()` 使读事务一直持有，独占锁获取不到导致死锁，阻塞全部写 goroutine 致主控卡死（WAL 飙至 94MB）。30 天保留版因无过期表未触发；24 小时保留首次清理 DROP 约 360 张表即死锁。修复：先收集表名到 slice、显式 `rows.Close()` 释放读事务后再循环 DROP，末尾 `PRAGMA wal_checkpoint(TRUNCATE)` 防 WAL 膨胀。教训：SQLite schema 修改（DROP/ALTER TABLE）不能在未关闭的 rows 读事务中执行，必须先读完关闭再改 schema。本机 glibc 编译的二进制不可用（alpine musl），紧急修复用 `docker run golang:1.25-alpine` 编译 musl 二进制 + docker cp 部署，后续走 GHCR Actions 持久化。
+
 ## 部署相关长期提示
 
 - **部署目录**: `/opt/wukong/`，主控 wukong.conf 权限 600，signing/ 权限 400

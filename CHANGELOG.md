@@ -2,6 +2,18 @@
 
 所有变更记录使用北京时间（UTC+8）。
 
+## [2026-07-23 15:55] - 修复 DropOldHourlyTables 死锁致主控卡死
+
+### 改动前总结
+24 小时保留版部署后约 1 小时（清理定时器首次触发时），主控再次静默卡死：API 全部超时（000），WAL 飙至 94MB，日志停在清理触发时刻。根因为 `DropOldHourlyTables` 在 `rows.Next()` 循环内直接执行 `s.db.Exec("DROP TABLE")`（schema 修改需独占锁），但 `defer rows.Close()` 延迟关闭使读事务一直持有，schema 修改无法获取独占锁导致死锁，阻塞全部写操作 goroutine。30 天保留版因几乎无过期表未触发；24 小时保留首次清理需 DROP 约 360 张表，密集 schema 修改 + 读事务未关闭 = 死锁。
+
+### 改动后总结
+1. **死锁修复**：`DropOldHourlyTables` 改为先收集过期表名到 slice、显式 `rows.Close()` 关闭读事务释放锁、再循环执行 DROP TABLE，彻底消除 schema 修改与读事务的锁冲突。
+2. **WAL 膨胀防护**：批量 DROP 完成后执行 `PRAGMA wal_checkpoint(TRUNCATE)`，主动合并 WAL 到主库并截断 WAL 文件，防止 DROP 产生的大量 WAL 堆积。
+
+### 涉及文件
+- `internal/store/sqlite.go` - `DropOldHourlyTables` 读事务关闭前置 + WAL checkpoint
+
 ## [2026-07-23 14:15] - 主站故障修复：数据库膨胀致 API 卡死 + 清理保留期修复
 
 ### 改动前总结

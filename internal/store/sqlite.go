@@ -1021,9 +1021,12 @@ func (s *SQLiteStore) DropOldHourlyTables(keepHours int) error {
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
 
+	// 先收集要删除的表名，再关闭读事务，最后执行 DROP TABLE。
+	// 原因：DROP TABLE 属于 schema 修改，需要独占锁；若在 rows 未关闭（持有读事务）时
+	// 执行会导致锁冲突死锁，曾造成主控全部 HTTP API goroutine 阻塞卡死。
 	cutoff := time.Now().Add(-time.Duration(keepHours) * time.Hour)
+	var toDrop []string
 	for rows.Next() {
 		var name string
 		if err := rows.Scan(&name); err != nil {
@@ -1037,12 +1040,23 @@ func (s *SQLiteStore) DropOldHourlyTables(keepHours int) error {
 			continue
 		}
 		if t.Before(cutoff) {
-			_, err := s.db.Exec("DROP TABLE IF EXISTS " + name)
-			if err != nil {
-				log.Printf("删除旧表 %s 失败: %v", name, err)
-			} else {
-				log.Printf("已删除过期小时表: %s", name)
-			}
+			toDrop = append(toDrop, name)
+		}
+	}
+	rows.Close() // 关闭读事务释放锁后再执行 schema 修改，避免死锁
+
+	// 逐张删除过期小时表；删除完成后执行 WAL checkpoint，防止 WAL 文件膨胀
+	for _, name := range toDrop {
+		if _, err := s.db.Exec("DROP TABLE IF EXISTS " + name); err != nil {
+			log.Printf("删除旧表 %s 失败: %v", name, err)
+		} else {
+			log.Printf("已删除过期小时表: %s", name)
+		}
+	}
+	if len(toDrop) > 0 {
+		// 批量 DROP 后主动 checkpoint 合并 WAL 到主库并截断 WAL 文件，避免 WAL 无限增长
+		if _, err := s.db.Exec("PRAGMA wal_checkpoint(TRUNCATE)"); err != nil {
+			log.Printf("清理小时表后 WAL checkpoint 失败: %v", err)
 		}
 	}
 	return nil
