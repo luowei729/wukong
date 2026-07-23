@@ -166,9 +166,9 @@ func runMaintenanceLoop(ctx context.Context, s store.MetricsStore) {
 	cleanupTicker := time.NewTicker(time.Hour)
 	defer cleanupTicker.Stop()
 
-	// 数据保留期：系统指标/Ping 原始小时表与 Ping 分钟聚合均只保留 7 天，
-	// 7 天足够排查问题且控制单库体积在 2GB 量级，避免写锁卡死主控。
-	const retentionHours = 24 * 7
+	// 数据保留期：系统指标/Ping 原始小时表与 Ping 分钟聚合均只保留 24 小时（1 天），
+	// 控制单库体积在百 MB 量级，避免写锁卡死主控；前端 24h K 线与告警排查均覆盖。
+	const retentionHours = 24
 
 	for {
 		select {
