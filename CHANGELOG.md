@@ -2,6 +2,19 @@
 
 所有变更记录使用北京时间（UTC+8）。
 
+## [2026-07-23 14:15] - 主站故障修复：数据库膨胀致 API 卡死 + 清理保留期修复
+
+### 改动前总结
+主控服务器（72.249.203.145）生产故障：wukong.db 膨胀至 9.9GB（1455 张按小时分表，含 30 天未清理的系统指标与 Ping 原始数据），SQLite 单写者锁在高频写入（13 节点 × 1s 采集）下产生严重锁竞争，导致全部 HTTP API goroutine 阻塞，主控于 7 月 21 日 09:19 后静默卡死（进程存活但无响应，docker stop 需 SIGKILL）。前端静态页经 openresty 仍可加载，但全部 API 请求超时（HTTP 000），探针 gRPC 通道同时中断。根因为 `runMaintenanceLoop` 中数据保留期硬编码为 30 天（`DropOldHourlyTables(24*30)`、`CleanOldAggData(24*30)`），1 秒级采集 × 13 节点 × 30 天 ≈ 1.3 亿行撑至 10GB。
+
+### 改动后总结
+1. **紧急数据清理**：停容器后用 python3 批量 DROP 1086 张 7 月 14 日前的历史小时表（metrics_sys_ 544 张 + metrics_ping_ 542 张），`VACUUM INTO` 将数据库从 9.9GB 压缩至 2.4GB，回收 7.5GB 空间，磁盘占用 67% → 46%。
+2. **保留期修复**：`cmd/server/main.go` 历史数据保留期从 30 天（`24*30`）缩短为 7 天（`24*7`），系统指标/Ping 原始小时表与 Ping 分钟聚合统一使用 `retentionHours` 常量，控制单库体积在 2GB 量级。
+3. **清理频率修复**：`cleanupTicker` 从每 6 小时改为每 1 小时执行一次，更及时回收过期表，降低峰值膨胀风险。
+
+### 涉及文件
+- `cmd/server/main.go` - `runMaintenanceLoop` 保留期 30天→7天、清理频率 6h→1h
+
 ## [2026-06-30 14:00] - 16 项 bug 与安全修复（P0-P3 全面修复）
 
 ### 改动前总结

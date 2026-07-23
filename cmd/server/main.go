@@ -160,9 +160,15 @@ func runMaintenanceLoop(ctx context.Context, s store.MetricsStore) {
 	pingTicker := time.NewTicker(time.Minute)
 	defer pingTicker.Stop()
 
-	// 历史清理低频执行，避免 SQLite 文件无限增长；失败只记录日志，不影响主控服务。
-	cleanupTicker := time.NewTicker(6 * time.Hour)
+	// 历史清理定时执行，避免 SQLite 文件无限增长；失败只记录日志，不影响主控服务。
+	// 原因：默认 1s 高频采集 × 多节点，保留期过长会导致小时表累积膨胀（曾因 30 天保留撑到 10GB，
+	// SQLite 写锁竞争使全部 HTTP API goroutine 阻塞卡死）。此处每 1 小时清理一次过期表。
+	cleanupTicker := time.NewTicker(time.Hour)
 	defer cleanupTicker.Stop()
+
+	// 数据保留期：系统指标/Ping 原始小时表与 Ping 分钟聚合均只保留 7 天，
+	// 7 天足够排查问题且控制单库体积在 2GB 量级，避免写锁卡死主控。
+	const retentionHours = 24 * 7
 
 	for {
 		select {
@@ -173,10 +179,10 @@ func runMaintenanceLoop(ctx context.Context, s store.MetricsStore) {
 				log.Printf("聚合 Ping 分钟数据失败: %v", err)
 			}
 		case <-cleanupTicker.C:
-			if err := s.CleanOldAggData(24 * 30); err != nil {
+			if err := s.CleanOldAggData(retentionHours); err != nil {
 				log.Printf("清理旧 Ping 聚合数据失败: %v", err)
 			}
-			if err := s.DropOldHourlyTables(24 * 30); err != nil {
+			if err := s.DropOldHourlyTables(retentionHours); err != nil {
 				log.Printf("清理旧小时表失败: %v", err)
 			}
 		}
