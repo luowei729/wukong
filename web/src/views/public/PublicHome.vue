@@ -1,67 +1,85 @@
 <template>
-  <!-- 公开状态首页：qio.ng 风格，未登录用户可查看脱敏后的服务器运行状态 -->
+  <!-- ============================================================
+       公开首页：未登录用户可查看脱敏后的服务器运行状态
+       设计参考 QuantKing：蓝色主色调 + 圆角卡片 + 双主题
+       ============================================================ -->
   <div class="public-page">
-    <div class="glow glow-a" />
-    <div class="glow glow-b" />
-
+    <!-- 顶部导航栏：品牌标志 + 站点标题 + 管理登录按钮 -->
     <header class="public-nav">
-      <div class="brand">
-        <span class="brand-mark">悟</span>
-        <div>
+      <div class="nav-brand">
+        <span class="wk-brand-mark">悟</span>
+        <div class="nav-brand-text">
           <strong>{{ siteTitle }}</strong>
-          <small>Public server monitor</small>
+          <small>公开服务器监控</small>
         </div>
       </div>
-      <div class="nav-actions">
-        <el-button type="primary" plain @click="goAdmin">
-          {{ hasToken ? '管理后台' : '管理登录' }}
-        </el-button>
-      </div>
+      <el-button type="primary" plain @click="goAdmin">
+        {{ hasToken ? '管理后台' : '管理登录' }}
+      </el-button>
     </header>
 
+    <!-- 主内容区域 -->
     <main class="public-main">
-      <!-- 统计摘要卡片 -->
-      <section class="summary-grid">
-        <div class="summary-card wk-card">
-          <span class="summary-label">服务器</span>
-          <strong class="summary-value">{{ servers.length }}</strong>
-          <small class="summary-unit">台</small>
+      <!-- 统计摘要区域：6 个指标卡，展示服务器数 / 在线 / 离线 / 平均 CPU / 平均内存 / 网络流量 -->
+      <section class="wk-metrics summary-grid">
+        <div class="wk-metric">
+          <span class="label">服务器</span>
+          <span class="value">{{ servers.length }}</span>
+          <span class="sub">台</span>
         </div>
-        <div class="summary-card wk-card">
-          <span class="summary-label">在线</span>
-          <strong class="summary-value summary-online">{{ onlineCount }}</strong>
-          <small class="summary-unit">台</small>
+        <div class="wk-metric">
+          <span class="label">在线</span>
+          <span class="value green">{{ onlineCount }}</span>
+          <span class="sub">台</span>
         </div>
-        <div class="summary-card wk-card">
-          <span class="summary-label">离线</span>
-          <strong class="summary-value summary-offline">{{ offlineCount }}</strong>
-          <small class="summary-unit">台</small>
+        <div class="wk-metric">
+          <span class="label">离线</span>
+          <span class="value red">{{ offlineCount }}</span>
+          <span class="sub">台</span>
         </div>
-        <div class="summary-card wk-card">
-          <span class="summary-label">平均 CPU</span>
-          <strong class="summary-value">{{ avgCpu }}</strong>
-          <small class="summary-unit">%</small>
+        <div class="wk-metric">
+          <span class="label">平均 CPU</span>
+          <span class="value">{{ avgCpu }}</span>
+          <span class="sub">%</span>
         </div>
-        <div class="summary-card wk-card">
-          <span class="summary-label">平均内存</span>
-          <strong class="summary-value">{{ avgMem }}</strong>
-          <small class="summary-unit">%</small>
+        <div class="wk-metric">
+          <span class="label">平均内存</span>
+          <span class="value">{{ avgMem }}</span>
+          <span class="sub">%</span>
         </div>
-        <div class="summary-card wk-card">
-          <span class="summary-label">网络流量</span>
-          <strong class="summary-value">{{ totalNet }}</strong>
-          <small class="summary-unit">/s</small>
+        <div class="wk-metric">
+          <span class="label">网络流量</span>
+          <span class="value">{{ totalNet }}</span>
+          <span class="sub">/s</span>
         </div>
       </section>
 
-      <!-- 服务器列表 -->
-      <section class="section-head">
+      <!-- 服务器列表区域标题 -->
+      <div class="wk-page-header">
         <h2>服务器列表</h2>
-        <span class="section-hint">点击卡片查看详情</span>
-      </section>
+        <span class="muted">点击卡片查看详情</span>
+      </div>
 
-      <el-skeleton v-if="loading" :rows="6" animated />
-      <el-empty v-else-if="servers.length === 0" description="暂无服务器，请登录管理后台安装探针" />
+      <!-- 数据加载时显示骨架屏 -->
+      <div v-if="loading" class="server-grid">
+        <div v-for="i in 6" :key="i" class="server-card wk-card">
+          <div class="wk-skeleton skeleton-line" style="width: 60%" />
+          <div class="wk-skeleton skeleton-line" style="width: 40%; margin-top: 8px" />
+          <div class="wk-skeleton skeleton-bar" />
+          <div class="wk-skeleton skeleton-bar" />
+          <div class="wk-skeleton skeleton-bar" />
+          <div class="wk-skeleton skeleton-line" style="width: 80%; margin-top: 12px" />
+        </div>
+      </div>
+
+      <!-- 空状态提示 -->
+      <div v-else-if="servers.length === 0" class="empty-state">
+        <div class="empty-icon">📭</div>
+        <p class="empty-title">暂无服务器</p>
+        <p class="empty-desc">请登录管理后台安装探针</p>
+      </div>
+
+      <!-- 服务器卡片网格 -->
       <section v-else class="server-grid">
         <article
           v-for="server in servers"
@@ -69,16 +87,16 @@
           class="server-card wk-card"
           @click="router.push(`/server/${server.id}`)"
         >
+          <!-- 卡片头部：名称 + 状态灯 -->
           <div class="server-card-head">
-            <div>
+            <div class="server-info">
               <span class="server-name">{{ server.name || '未命名服务器' }}</span>
               <div class="server-meta">{{ serverMeta(server) }}</div>
             </div>
-            <span :class="['status-badge', server.status]">
-              <span class="status-dot-inline" :class="server.status" />
-              {{ statusText(server.status) }}
-            </span>
+            <span :class="['wk-status-dot', server.status === 'online' ? 'online' : 'offline']" />
           </div>
+
+          <!-- 指标进度条：CPU / 内存 / 磁盘 -->
           <div class="metric-bars">
             <div class="metric-row">
               <span class="metric-label">CPU</span>
@@ -111,6 +129,8 @@
               <strong class="metric-val">{{ formatPercent(server.disk) }}</strong>
             </div>
           </div>
+
+          <!-- 卡片底部：上下行流量 + 最后活跃时间 -->
           <div class="server-foot">
             <span class="foot-item">
               <span class="foot-icon up">↑</span>
@@ -127,7 +147,7 @@
         </article>
       </section>
 
-      <!-- 页脚 -->
+      <!-- 页脚：站点 footer 文本 -->
       <footer v-if="siteFooter" class="public-footer">
         <a href="https://github.com/luowei729/wukong" target="_blank" rel="noopener noreferrer">
           {{ siteFooter }}
@@ -162,24 +182,30 @@ interface PublicServer {
   uptime_seconds?: number
 }
 
+// 响应式状态
 const router = useRouter()
-const loading = ref(false)
-const servers = ref<PublicServer[]>([])
-const siteTitle = ref('wukong 监控')
-const siteFooter = ref('')
-const hasToken = computed(() => Boolean(localStorage.getItem('access_token')))
-let refreshTimer: ReturnType<typeof setInterval> | null = null
+const loading = ref(false)                     // 加载状态标志
+const servers = ref<PublicServer[]>([])         // 服务器列表数据
+const siteTitle = ref('wukong 监控')            // 站点标题，从主题接口加载
+const siteFooter = ref('')                      // 站点页脚，从主题接口加载
+const hasToken = computed(() => Boolean(localStorage.getItem('access_token')))  // 是否已登录
+let refreshTimer: ReturnType<typeof setInterval> | null = null                  // 定时刷新计时器
+
+// ==================== 主题加载 ====================
 
 // 加载站点主题（标题和页脚），公开首页也需要显示后台设置的标题
 async function loadTheme() {
   try {
     const res = await http.get(`/api/public/theme?_=${Date.now()}`)
+    // 设置站点标题并写入 localStorage 供其他页面读取
     if (res.data.title) {
       siteTitle.value = res.data.title
       localStorage.setItem('site_title', res.data.title)
       document.title = res.data.title
     }
+    // 设置页脚文本
     if (res.data.footer_text) siteFooter.value = res.data.footer_text
+    // 设置主题预设（dark / light）
     if (res.data.preset) {
       document.documentElement.dataset.theme = res.data.preset
       document.documentElement.classList.toggle('dark', res.data.preset === 'dark')
@@ -187,25 +213,33 @@ async function loadTheme() {
   } catch {}
 }
 
-// 统计摘要计算
+// ==================== 统计摘要计算 ====================
+
+// 在线服务器数量
 const onlineCount = computed(() => servers.value.filter(s => s.status === 'online').length)
+// 离线服务器数量（非 online 均算离线）
 const offlineCount = computed(() => servers.value.filter(s => s.status !== 'online').length)
+// 平均 CPU 使用率
 const avgCpu = computed(() => {
   const list = servers.value.filter(s => typeof s.cpu === 'number')
   return list.length ? (list.reduce((sum, s) => sum + (s.cpu || 0), 0) / list.length).toFixed(1) : '-'
 })
+// 平均内存使用率
 const avgMem = computed(() => {
   const list = servers.value.filter(s => typeof s.mem === 'number')
   return list.length ? (list.reduce((sum, s) => sum + (s.mem || 0), 0) / list.length).toFixed(1) : '-'
 })
+// 网络流量汇总（上行 + 下行）
 const totalNet = computed(() => {
   const up = servers.value.reduce((sum, s) => sum + (s.net_up || 0), 0)
   const down = servers.value.reduce((sum, s) => sum + (s.net_down || 0), 0)
   return `${formatBytesShort(up)}↑ ${formatBytesShort(down)}↓`
 })
 
+// ==================== 数据加载 ====================
+
+// 获取公开服务器列表，公开首页只访问 /api/public/servers，不携带 JWT
 async function loadData(showLoading = false) {
-  // 公开首页只访问 /api/public/servers，不携带 JWT，确保未登录也可展示
   if (showLoading) loading.value = true
   try {
     const res = await http.get(`/api/public/servers?_=${Date.now()}`)
@@ -215,13 +249,16 @@ async function loadData(showLoading = false) {
   }
 }
 
+// 跳转管理后台，已登录去 dashboard，未登录去 login
 function goAdmin() {
   router.push(hasToken.value ? '/dashboard' : '/login')
 }
 
-// 服务器元信息：系统 + 区域，类似 qio.ng 风格
+// ==================== 工具函数 ====================
+
+// 服务器元信息：系统 + 区域 + 架构，类似 qio.ng 风格
 function serverMeta(server: PublicServer) {
-  const parts = []
+  const parts: string[] = []
   if (server.platform) parts.push(server.platform)
   else if (server.os_version) parts.push(server.os_version)
   if (server.region) parts.push(server.region)
@@ -229,27 +266,31 @@ function serverMeta(server: PublicServer) {
   return parts.length ? parts.join(' · ') : '系统信息待上报'
 }
 
+// 状态文本映射
 function statusText(status: string) {
   return ({ online: '在线', offline: '离线', stale: '数据延迟', unknown: '未知' } as Record<string, string>)[status] || '未知'
 }
 
+// 数值转百分比（0-100），用于进度条
 function metricPercent(value?: number) {
   return Math.max(0, Math.min(100, Math.round(value || 0)))
 }
 
-// 进度条颜色：低绿色、中蓝色、高红色，类似 qio.ng
+// 进度条颜色：低绿色、中蓝色、高红色，参考 QuantKing 配色
 function progressColor(value?: number): string {
-  if (typeof value !== 'number') return '#38bdf8'
-  if (value < 50) return '#22c55e'
-  if (value < 80) return '#38bdf8'
-  if (value < 90) return '#f59e0b'
-  return '#ef4444'
+  if (typeof value !== 'number') return '#3b82f6'
+  if (value < 50) return '#34d399'
+  if (value < 80) return '#3b82f6'
+  if (value < 90) return '#fbbf24'
+  return '#f87171'
 }
 
+// 格式化百分比显示
 function formatPercent(value?: number) {
   return typeof value === 'number' ? `${value.toFixed(1)}%` : '-'
 }
 
+// 格式化字节数（完整单位）
 function formatBytes(value?: number) {
   if (!value) return '0 B'
   const units = ['B', 'KB', 'MB', 'GB']
@@ -262,6 +303,7 @@ function formatBytes(value?: number) {
   return `${size.toFixed(size >= 10 ? 0 : 1)} ${units[index]}`
 }
 
+// 格式化字节数（简短单位，用于摘要区域）
 function formatBytesShort(value: number) {
   if (!value) return '0B'
   const units = ['B', 'K', 'M', 'G']
@@ -274,6 +316,7 @@ function formatBytesShort(value: number) {
   return `${size.toFixed(size >= 10 ? 0 : 1)}${units[index]}`
 }
 
+// 相对时间格式化（如"5分钟前"）
 function relativeTime(value?: string) {
   if (!value) return '暂无上报'
   const diff = Date.now() - new Date(value).getTime()
@@ -287,7 +330,10 @@ function relativeTime(value?: string) {
   return `${Math.floor(hours / 24)}天前`
 }
 
+// ==================== 生命周期 ====================
+
 onMounted(() => {
+  // 初始化加载主题和服务器数据
   loadTheme()
   loadData(true)
   // 首页状态卡片每秒刷新一次，保证公开展示接近实时
@@ -295,40 +341,29 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  // 组件卸载时清除定时器，避免内存泄漏
   if (refreshTimer) clearInterval(refreshTimer)
 })
 </script>
 
 <style scoped>
+/* 公开首页容器：简洁渐变背景，移除旧的 glow 装饰效果 */
 .public-page {
   min-height: 100vh;
-  background: radial-gradient(circle at top left, rgba(56, 189, 248, 0.22), transparent 34%), var(--wk-bg);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--wk-primary) 8%, transparent) 0%, transparent 280px),
+    var(--wk-bg);
   color: var(--wk-text);
-  position: relative;
-  overflow: hidden;
 }
 
-.glow {
-  position: fixed;
-  width: 360px;
-  height: 360px;
-  border-radius: 999px;
-  filter: blur(80px);
-  opacity: 0.28;
-  pointer-events: none;
-}
-
-.glow-a { top: 120px; right: 8%; background: #38bdf8; }
-.glow-b { bottom: 10%; left: 4%; background: #8b5cf6; }
-
+/* 顶部导航栏和主内容区统一宽度居中 */
 .public-nav,
 .public-main {
   width: min(1180px, calc(100% - 32px));
   margin: 0 auto;
-  position: relative;
-  z-index: 1;
 }
 
+/* 导航栏：左右两端对齐 */
 .public-nav {
   height: 76px;
   display: flex;
@@ -336,93 +371,55 @@ onUnmounted(() => {
   justify-content: space-between;
 }
 
-.brand {
+/* 品牌区域：标志 + 标题文字 */
+.nav-brand {
   display: flex;
   align-items: center;
   gap: 12px;
 }
 
-.brand-mark {
-  width: 42px;
-  height: 42px;
-  border-radius: 14px;
-  display: grid;
-  place-items: center;
-  color: #00111f;
-  background: linear-gradient(135deg, #38bdf8, #22c55e);
-  font-weight: 800;
+/* 品牌标志放大（覆盖全局 .wk-brand-mark 的 28px） */
+.nav-brand .wk-brand-mark {
+  width: 40px;
+  height: 40px;
+  font-size: 18px;
+  border-radius: 12px;
 }
 
-.brand strong,
-.brand small {
+/* 品牌标题文字 */
+.nav-brand-text strong {
   display: block;
+  font-size: 16px;
+  font-weight: 700;
 }
 
-.brand small {
+.nav-brand-text small {
+  display: block;
   color: var(--wk-text-muted);
+  font-size: 12px;
 }
 
-.nav-actions {
-  display: flex;
-  gap: 10px;
-}
-
-/* 统计摘要区域 */
+/* 统计摘要网格：6 列 */
 .summary-grid {
-  display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
-  gap: 16px;
   margin-top: 24px;
 }
 
-.summary-card {
-  padding: 18px;
-  text-align: center;
-}
-
-.summary-label {
-  display: block;
-  color: var(--wk-text-muted);
-  font-size: 12px;
-  margin-bottom: 8px;
-}
-
-.summary-value {
-  display: block;
-  font-size: 28px;
-  font-weight: 700;
-  color: var(--wk-primary);
-  font-family: 'JetBrains Mono', monospace;
-}
-
-.summary-online { color: #22c55e; }
-.summary-offline { color: #ef4444; }
-
-.summary-unit {
-  display: block;
-  color: var(--wk-text-muted);
-  font-size: 11px;
-  margin-top: 4px;
-}
-
-/* 服务器列表区域 */
-.section-head {
+/* 页面标题区域 */
+.public-main .wk-page-header {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
+  gap: 12px;
   margin: 32px 0 18px;
 }
 
-.section-head h2 {
-  margin: 0;
+.public-main .wk-page-header h2 {
   font-size: 20px;
+  font-weight: 700;
+  margin: 0;
 }
 
-.section-hint {
-  color: var(--wk-text-muted);
-  font-size: 12px;
-}
-
+/* 服务器卡片网格：3 列 */
 .server-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -430,17 +427,19 @@ onUnmounted(() => {
   padding-bottom: 64px;
 }
 
+/* 服务器卡片：可点击，悬停浮起 */
 .server-card {
-  padding: 20px;
   cursor: pointer;
+  margin-bottom: 0;
   transition: transform 0.2s ease, box-shadow 0.2s ease;
 }
 
 .server-card:hover {
   transform: translateY(-4px);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+  box-shadow: var(--wk-shadow-md);
 }
 
+/* 卡片头部：名称 + 状态灯 */
 .server-card-head {
   display: flex;
   align-items: flex-start;
@@ -461,42 +460,14 @@ onUnmounted(() => {
   margin-top: 4px;
 }
 
-.status-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  border-radius: 999px;
-  padding: 4px 10px;
-  font-size: 12px;
-  border: 1px solid var(--wk-border);
-  background: rgba(15, 23, 42, 0.56);
-  white-space: nowrap;
-}
-
-.status-dot-inline {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  display: inline-block;
-}
-
-.status-dot-inline.online { background: #22c55e; box-shadow: 0 0 6px #22c55e; }
-.status-dot-inline.offline { background: #ef4444; }
-.status-dot-inline.stale,
-.status-dot-inline.unknown { background: #f59e0b; }
-
-.status-badge.online { color: #22c55e; }
-.status-badge.offline { color: #ef4444; }
-.status-badge.stale,
-.status-badge.unknown { color: #f59e0b; }
-
-/* 指标进度条 */
+/* 指标进度条容器 */
 .metric-bars {
   display: grid;
   gap: 12px;
   margin: 16px 0;
 }
 
+/* 单行指标：标签 + 进度条 + 数值 */
 .metric-row {
   display: flex;
   align-items: center;
@@ -507,6 +478,7 @@ onUnmounted(() => {
   width: 36px;
   font-size: 12px;
   color: var(--wk-text-muted);
+  flex-shrink: 0;
 }
 
 .metric-row .el-progress {
@@ -516,12 +488,12 @@ onUnmounted(() => {
 .metric-val {
   width: 52px;
   text-align: right;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: ui-monospace, 'JetBrains Mono', monospace;
   font-size: 13px;
   font-weight: 600;
 }
 
-/* 卡片底部 */
+/* 卡片底部：流量 + 时间 */
 .server-foot {
   display: flex;
   align-items: center;
@@ -538,28 +510,48 @@ onUnmounted(() => {
   gap: 2px;
 }
 
-.foot-icon.up { color: #22c55e; }
-.foot-icon.down { color: #38bdf8; }
+.foot-icon.up { color: var(--wk-success); }
+.foot-icon.down { color: var(--wk-primary); }
 
 .foot-time {
   margin-left: auto;
 }
 
-/* 响应式 */
-@media (max-width: 980px) {
-  .summary-grid {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
-  .server-grid {
-    grid-template-columns: 1fr;
-  }
+/* 骨架屏样式 */
+.skeleton-line {
+  height: 16px;
+  border-radius: 6px;
 }
 
-@media (max-width: 640px) {
-  .summary-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
+.skeleton-bar {
+  height: 8px;
+  border-radius: 4px;
+  margin-top: 12px;
 }
+
+/* 空状态提示 */
+.empty-state {
+  text-align: center;
+  padding: 80px 20px;
+  color: var(--wk-text-muted);
+}
+
+.empty-icon {
+  font-size: 48px;
+  margin-bottom: 16px;
+}
+
+.empty-title {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--wk-text);
+  margin-bottom: 8px;
+}
+
+.empty-desc {
+  font-size: 14px;
+}
+
 /* 页脚 */
 .public-footer {
   text-align: center;
@@ -576,5 +568,19 @@ onUnmounted(() => {
 
 .public-footer a:hover {
   color: var(--wk-primary);
+}
+
+/* 响应式：中等屏幕 2 列 */
+@media (max-width: 980px) {
+  .server-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* 响应式：小屏幕单列 */
+@media (max-width: 640px) {
+  .server-grid {
+    grid-template-columns: 1fr;
+  }
 }
 </style>

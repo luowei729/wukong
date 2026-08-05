@@ -2,6 +2,42 @@
 
 所有变更记录使用北京时间（UTC+8）。
 
+## [2026-08-06 05:12] - Web UI 全面重构：参考 QuantKing 设计系统现代化改造
+
+### 改动前总结
+wukong 前端 UI 使用 neon cyan (#38bdf8) 暗黑科技风，顶部导航栏布局，卡片简单无侧栏，视觉风格偏旧。
+
+### 改动后总结
+参考 QuantKing 项目设计系统，全面重构 wukong Web UI，使其美观现代化：
+- **设计令牌系统**：蓝色主色调 #3b82f6，charcoal 深色 + 明亮浅色双主题，CSS 变量统一管理
+- **布局重构**：顶栏 + 可折叠侧栏 + 主内容区（替代纯顶部导航），参考 QuantKing AppShell 布局
+- **顶栏**：品牌 Logo + 实时指标条（在线/CPU/内存/告警）+ 时钟 + 主题切换 + 退出按钮
+- **侧栏**：分组导航 + 状态指示灯 + 折叠/展开 + 移动端响应式
+- **卡片系统**：圆角卡片 + 微阴影 + hover 浮起效果 + 骨架屏加载
+- **登录页**：径向渐变背景 + 品牌标志 + 主题切换
+- **仪表盘**：统计条 + 节点卡片网格 + 进度条指标
+- **ECharts 配色**：统一使用新主题配色 (#3b82f6/#34d399/#fbbf24/#f87171)
+- **公开页面**：简洁渐变背景 + 服务器卡片网格 + Hero 区域
+
+### 修改文件（16 个）
+1. `web/src/styles/variables.scss` - 设计令牌系统重写（双主题 CSS 变量 + Element Plus 覆盖）
+2. `web/src/styles/index.scss` - 全局样式重写（AppShell + 侧栏 + 卡片 + 骨架屏 + 响应式）
+3. `web/src/layouts/MainLayout.vue` - 顶栏+可折叠侧栏布局重写
+4. `web/src/views/Login.vue` - 现代登录页重写
+5. `web/src/views/Dashboard.vue` - 仪表盘重写（统计条+进度条+骨架屏）
+6. `web/src/views/Nodes.vue` - 节点列表页重写
+7. `web/src/views/NodeDetail.vue` - 节点详情页重写
+8. `web/src/views/Alerts.vue` - 告警中心重写
+9. `web/src/views/Settings.vue` - 系统设置页重写
+10. `web/src/views/public/PublicHome.vue` - 公开首页重写
+11. `web/src/views/public/PublicServerDetail.vue` - 公开详情页重写
+12. `internal/webapi/dist/*` - 构建产物更新
+
+### 构建验证
+- `npm run build` ✅ 通过（44.98s，0 错误）
+- TypeScript 类型检查 ✅ 通过
+- 所有功能逻辑保持不变（API 调用、SSE、定时刷新、路由守卫等）
+
 ## [2026-07-23 15:55] - 修复 DropOldHourlyTables 死锁致主控卡死
 
 ### 改动前总结

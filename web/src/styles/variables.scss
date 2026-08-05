@@ -1,60 +1,123 @@
 // =============================================
 // wukong 监控 - 全局样式变量
-// 暗黑科技风 + 浅色可切换 双主题
+// 参考 QuantKing 设计令牌系统：蓝色主色调 + 双主题 + 圆角卡片
+// 设计原则：只换展示层，保留 wk-* 类名兼容既有组件
 // =============================================
 
-// 字体
-$wk-font-family: 'Inter', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif;
-$wk-radius: 12px;
-$wk-transition: 0.2s ease;
+// 字体栈：系统字体优先，禁用外部 CDN 字体
+$wk-font-family: -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", "Helvetica Neue", Arial, sans-serif;
+$wk-mono-family: ui-monospace, "JetBrains Mono", "Fira Code", SFMono-Regular, Consolas, monospace;
+$wk-radius: 1rem;
+$wk-radius-sm: 0.75rem;
+$wk-transition: 0.15s ease;
 
-// 暗黑主题 CSS 变量
+// ========== 暗黑主题（默认，charcoal 风格） ==========
 :root,
 html[data-theme='dark'] {
-  --wk-bg: #050b18;
-  --wk-bg-soft: #0b1224;
-  --wk-panel: rgba(15, 23, 42, 0.86);
-  --wk-panel-solid: #111827;
-  --wk-border: rgba(56, 189, 248, 0.22);
-  --wk-text: #e5f2ff;
-  --wk-text-muted: #8aa4bf;
-  --wk-primary: #38bdf8;
-  --wk-primary-glow: rgba(56, 189, 248, 0.38);
-  --wk-success: #22c55e;
-  --wk-warning: #f59e0b;
-  --wk-danger: #ef4444;
-  --wk-chart-grid: rgba(148, 163, 184, 0.18);
+  --wk-bg: #1c1c1c;
+  --wk-bg-soft: #171717;
+  --wk-panel: #262626;
+  --wk-panel-solid: #262626;
+  --wk-border: rgb(255 255 255 / 0.10);
+  --wk-border-light: rgb(255 255 255 / 0.16);
+  --wk-text: #f5f5f5;
+  --wk-text-muted: #a3a3a3;
+  --wk-text-secondary: #a3a3a3;
+
+  --wk-primary: #3b82f6;
+  --wk-primary-hover: #60a5fa;
+  --wk-primary-glow: rgba(59, 130, 246, 0.38);
+  --wk-primary-soft: rgba(59, 130, 246, 0.15);
+
+  --wk-success: #34d399;
+  --wk-success-soft: rgba(52, 211, 153, 0.14);
+  --wk-warning: #fbbf24;
+  --wk-warning-soft: rgba(251, 191, 36, 0.14);
+  --wk-danger: #f87171;
+  --wk-danger-soft: rgba(248, 113, 113, 0.14);
+  --wk-info: #38bdf8;
+  --wk-info-soft: rgba(56, 189, 248, 0.14);
+
+  --wk-chart-grid: rgb(255 255 255 / 0.08);
+  --wk-shadow-sm: 0 1px 2px rgb(0 0 0 / 0.25);
+  --wk-shadow-md: 0 4px 12px rgb(0 0 0 / 0.35);
+  --wk-header-bg: rgba(28, 28, 28, 0.88);
+  --wk-log-bg: #141414;
 
   // Element Plus 暗黑覆盖
-  --el-bg-color: #0b1224;
-  --el-bg-color-overlay: #111827;
-  --el-text-color-primary: #e5f2ff;
-  --el-text-color-secondary: #8aa4bf;
-  --el-border-color: rgba(56, 189, 248, 0.22);
-  --el-color-primary: #38bdf8;
+  --el-bg-color: #262626;
+  --el-bg-color-overlay: #2a2a2a;
+  --el-bg-color-page: #1c1c1c;
+  --el-text-color-primary: #f5f5f5;
+  --el-text-color-secondary: #a3a3a3;
+  --el-text-color-regular: #d4d4d4;
+  --el-border-color: rgb(255 255 255 / 0.10);
+  --el-border-color-light: rgb(255 255 255 / 0.08);
+  --el-border-color-lighter: rgb(255 255 255 / 0.06);
+  --el-color-primary: #3b82f6;
+  --el-color-primary-light-3: #60a5fa;
+  --el-color-primary-light-5: #93c5fd;
+  --el-color-primary-light-7: #bfdbfe;
+  --el-color-primary-light-9: rgba(59, 130, 246, 0.12);
+  --el-color-primary-dark-2: #2563eb;
+  --el-fill-color: #2e2e2e;
+  --el-fill-color-light: #333333;
+  --el-fill-color-lighter: #2a2a2a;
+  --el-fill-color-blank: #262626;
+  --el-mask-bg: rgba(0, 0, 0, 0.6);
 }
 
-// 浅色主题 CSS 变量
+// ========== 浅色主题（明亮简洁） ==========
 html[data-theme='light'] {
-  --wk-bg: #f5f7fb;
-  --wk-bg-soft: #eef3f8;
+  --wk-bg: #ffffff;
+  --wk-bg-soft: #fafafa;
   --wk-panel: #ffffff;
   --wk-panel-solid: #ffffff;
-  --wk-border: rgba(15, 23, 42, 0.12);
-  --wk-text: #0f172a;
-  --wk-text-muted: #64748b;
-  --wk-primary: #0284c7;
-  --wk-primary-glow: rgba(2, 132, 199, 0.18);
-  --wk-success: #16a34a;
-  --wk-warning: #d97706;
-  --wk-danger: #dc2626;
-  --wk-chart-grid: rgba(100, 116, 139, 0.2);
+  --wk-border: #ebebeb;
+  --wk-border-light: rgba(15, 23, 42, 0.12);
+  --wk-text: #171717;
+  --wk-text-muted: #737373;
+  --wk-text-secondary: #737373;
+
+  --wk-primary: #3b82f6;
+  --wk-primary-hover: #2563eb;
+  --wk-primary-glow: rgba(59, 130, 246, 0.18);
+  --wk-primary-soft: rgba(59, 130, 246, 0.08);
+
+  --wk-success: #10b981;
+  --wk-success-soft: rgba(16, 185, 129, 0.12);
+  --wk-warning: #f59e0b;
+  --wk-warning-soft: rgba(245, 158, 11, 0.14);
+  --wk-danger: #ef4444;
+  --wk-danger-soft: rgba(239, 68, 68, 0.12);
+  --wk-info: #0ea5e9;
+  --wk-info-soft: rgba(14, 165, 233, 0.12);
+
+  --wk-chart-grid: rgba(100, 116, 139, 0.15);
+  --wk-shadow-sm: 0 1px 2px rgb(0 0 0 / 0.04);
+  --wk-shadow-md: 0 4px 12px rgb(0 0 0 / 0.06);
+  --wk-header-bg: rgba(255, 255, 255, 0.88);
+  --wk-log-bg: #f8fafc;
 
   // Element Plus 浅色覆盖
   --el-bg-color: #ffffff;
-  --el-bg-color-overlay: #f8fafc;
-  --el-text-color-primary: #0f172a;
-  --el-text-color-secondary: #64748b;
-  --el-border-color: rgba(15, 23, 42, 0.12);
-  --el-color-primary: #0284c7;
+  --el-bg-color-overlay: #ffffff;
+  --el-bg-color-page: #f5f7fb;
+  --el-text-color-primary: #171717;
+  --el-text-color-secondary: #737373;
+  --el-text-color-regular: #404040;
+  --el-border-color: #ebebeb;
+  --el-border-color-light: #f0f0f0;
+  --el-border-color-lighter: #f5f5f5;
+  --el-color-primary: #3b82f6;
+  --el-color-primary-light-3: #60a5fa;
+  --el-color-primary-light-5: #93c5fd;
+  --el-color-primary-light-7: #bfdbfe;
+  --el-color-primary-light-9: rgba(59, 130, 246, 0.08);
+  --el-color-primary-dark-2: #2563eb;
+  --el-fill-color: #f5f5f5;
+  --el-fill-color-light: #fafafa;
+  --el-fill-color-lighter: #fafafa;
+  --el-fill-color-blank: #ffffff;
+  --el-mask-bg: rgba(0, 0, 0, 0.4);
 }
