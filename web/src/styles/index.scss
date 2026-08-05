@@ -21,7 +21,7 @@ body {
   background: var(--wk-bg);
   color: var(--wk-text);
   min-height: 100vh;
-  overflow: hidden;
+  /* 默认允许滚动；后台管理布局 .wk-app-shell 自行 overflow:hidden 管理内部滚动 */
 }
 
 a {
