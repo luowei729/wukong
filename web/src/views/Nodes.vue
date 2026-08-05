@@ -110,8 +110,9 @@ const loading = ref(false)
 let refreshTimer: ReturnType<typeof setInterval> | null = null
 
 // 获取节点列表：并行请求 /api/agents 和 /api/agents/latest，合并数据
-async function fetchNodes() {
-  loading.value = true
+// showLoading 参数控制是否显示加载遮罩，仅首次加载时传 true，每秒定时刷新时不传避免闪烁
+async function fetchNodes(showLoading = false) {
+  if (showLoading) loading.value = true
   try {
     // 并行请求节点基础信息和最新实时指标，加时间戳避免缓存
     const [agentsRes, latestRes] = await Promise.all([
@@ -127,7 +128,7 @@ async function fetchNodes() {
   } catch (e) {
     console.error('获取节点列表失败', e)
   } finally {
-    loading.value = false
+    if (showLoading) loading.value = false
   }
 }
 
@@ -202,11 +203,11 @@ function rowClassName({ row }: { row: any }) {
   return row.online ? '' : 'row-offline'
 }
 
-// 组件挂载：首次获取数据 + 每秒定时刷新
+// 组件挂载：首次获取数据（显示加载遮罩）+ 每秒定时刷新（静默刷新不闪烁）
 onMounted(() => {
-  fetchNodes()
-  // 每秒刷新一次，保证实时状态更新
-  refreshTimer = setInterval(fetchNodes, 1000)
+  fetchNodes(true)
+  // 每秒静默刷新一次，保证实时状态更新
+  refreshTimer = setInterval(() => fetchNodes(false), 1000)
 })
 
 // 组件卸载：清除定时器避免内存泄漏
