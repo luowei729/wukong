@@ -77,31 +77,41 @@ export function formatRate(value?: number | null): string {
   return `${formatBytes(value)}/s`
 }
 
-/** 运行时长：秒 → "12d 3h 5m"（详情页/卡片用同一紧凑格式） */
+/** 运行时长：秒 → "12d3h5m"（不带空格，避免在卡片页脚空格处折行把卡片撑高） */
 export function formatDuration(seconds?: number | null): string {
   if (!isNum(seconds) || seconds <= 0) return "-"
   const days = Math.floor(seconds / 86400)
   const hours = Math.floor((seconds % 86400) / 3600)
   const minutes = Math.floor((seconds % 3600) / 60)
-  if (days > 0) return `${days}d ${hours}h ${minutes}m`
-  if (hours > 0) return `${hours}h ${minutes}m`
+  if (days > 0) return `${days}d${hours}h${minutes}m`
+  if (hours > 0) return `${hours}h${minutes}m`
   return `${minutes}m`
 }
 
-/** 相对时间："3 秒前 / 5 分钟前"，用于"最近上报"这类实时字段 */
+/** 速率紧凑写法："745B/s"、"12.4MB/s"（无空格）
+ * 原因：卡片页脚一行内要同时放下上行/下行/运行时长/最近上报，
+ * "745.0 B/s" 这种带空格的写法会在空格处折行，导致卡片每秒在 1 行↔ 2 行之间跳动 */
+export function formatRateShort(value?: number | null): string {
+  if (!isNum(value) || value <= 0) return "0B/s"
+  return `${formatBytesShort(value)}/s`
+}
+
+/** 相对时间："0秒前 / 5分钟前"，用于"最近上报"这类实时字段。
+ * 全部不加空格：带空格时浏览器会在空格处折行，而"刚刚"与"0 秒前"宽度不同，
+ * 每秒刷新会造成卡片高度反复变化 */
 export function relativeTime(value?: string | number | Date | null): string {
   if (value == null || value === "") return "暂无上报"
   const time = new Date(value).getTime()
   if (Number.isNaN(time)) return "暂无上报"
   const diff = Date.now() - time
-  if (diff < 0) return "刚刚"
+  if (diff < 0) return "0秒前"
   const seconds = Math.floor(diff / 1000)
-  if (seconds < 60) return `${seconds} 秒前`
+  if (seconds < 60) return `${seconds}秒前`
   const minutes = Math.floor(seconds / 60)
-  if (minutes < 60) return `${minutes} 分钟前`
+  if (minutes < 60) return `${minutes}分钟前`
   const hours = Math.floor(minutes / 60)
-  if (hours < 24) return `${hours} 小时前`
-  return `${Math.floor(hours / 24)} 天前`
+  if (hours < 24) return `${hours}小时前`
+  return `${Math.floor(hours / 24)}天前`
 }
 
 /** 本地日期时间（tooltip 与详情页绝对时间用） */

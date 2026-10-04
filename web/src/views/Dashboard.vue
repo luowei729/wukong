@@ -141,10 +141,10 @@
           </div>
 
           <div class="wk-node-card-foot">
-            <span class="up">↑ {{ formatRate(node.net_up) }}</span>
-            <span class="down">↓ {{ formatRate(node.net_down) }}</span>
+            <span class="up">↑ {{ formatRateShort(node.net_up) }}</span>
+            <span class="down">↓ {{ formatRateShort(node.net_down) }}</span>
             <span class="wk-node-card-time">
-              {{ node.uptime_seconds ? formatDuration(node.uptime_seconds) + '·' : ''
+              {{ node.uptime_seconds ? formatDuration(node.uptime_seconds) + ' ·' : ''
               }}{{ relativeTime(node.last_seen_at || node.updated_at) }}
             </span>
           </div>
@@ -178,17 +178,17 @@
             <WkProgressBar :value="row.disk" />
           </template>
         </el-table-column>
-        <el-table-column label="上行" width="110" align="right">
+        <el-table-column label="上行" width="96" align="right">
           <template #default="{ row }">
-            <span class="wk-num">{{ formatRate(row.net_up) }}</span>
+            <span class="wk-num">{{ formatRateShort(row.net_up) }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="下行" width="110" align="right">
+        <el-table-column label="下行" width="96" align="right">
           <template #default="{ row }">
-            <span class="wk-num">{{ formatRate(row.net_down) }}</span>
+            <span class="wk-num">{{ formatRateShort(row.net_down) }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="最近上报" width="120" align="right">
+        <el-table-column label="最近上报" width="104" align="right">
           <template #default="{ row }">
             <span class="wk-sub">{{ relativeTime(row.last_seen_at || row.updated_at) }}</span>
           </template>
@@ -284,7 +284,7 @@ import {
   archText,
   formatClock,
   formatDuration,
-  formatRate,
+  formatRateShort,
   loadLevel,
   relativeTime,
 } from '@/utils/format'

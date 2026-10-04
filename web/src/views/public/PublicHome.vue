@@ -171,10 +171,10 @@
           </div>
 
           <div class="wk-node-card-foot">
-            <span class="up">↑ {{ formatRate(server.net_up) }}</span>
-            <span class="down">↓ {{ formatRate(server.net_down) }}</span>
+            <span class="up">↑ {{ formatRateShort(server.net_up) }}</span>
+            <span class="down">↓ {{ formatRateShort(server.net_down) }}</span>
             <span class="wk-node-card-time">
-              {{ server.uptime_seconds ? formatDuration(server.uptime_seconds) + ' · ' : '' }}
+              {{ server.uptime_seconds ? formatDuration(server.uptime_seconds) + ' ·' : '' }}
               {{ relativeTime(server.last_seen_at || server.updated_at) }}
             </span>
           </div>
@@ -206,7 +206,7 @@ import {
   archText,
   formatClock,
   formatDuration,
-  formatRate,
+  formatRateShort,
   loadLevel,
   relativeTime,
 } from '@/utils/format'

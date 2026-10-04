@@ -137,6 +137,8 @@
   display: flex;
   align-items: baseline;
   gap: 4px;
+  // 数值带单位时（如 "1.25 MB/s"）不允许折行，否则卡片高度会随数值位数变化
+  white-space: nowrap;
 }
 
 .wk-metric-unit {
@@ -151,6 +153,11 @@
   display: flex;
   align-items: center;
   gap: 6px;
+  // 提示文字每秒会变长变短（如“已用 2.1 GB / 共 8.0 GB”），
+  // 不强制单行会让卡片高度反复跳动
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 // 指标卡色调：仅状态语义时使用（Stripe 规则：颜色只表达状态）
@@ -583,17 +590,28 @@
   border-top: 1px solid var(--wk-border);
   font-size: var(--wk-fs-sm);
   color: var(--wk-text-muted);
+  // 强制单行：速率/运行时长/最近上报 都是每秒变化的文本，
+  // 一旦允许折行，卡片就会在 1 行 ↔ 2 行之间每秒反复跳动
+  flex-wrap: nowrap;
+  white-space: nowrap;
+  overflow: hidden;
 
   .up {
     color: var(--wk-success-text);
+    flex-shrink: 0;
   }
   .down {
     color: var(--wk-primary);
+    flex-shrink: 0;
   }
   .wk-node-card-time {
     margin-left: auto;
     font-family: var(--wk-mono-family);
     font-variant-numeric: tabular-nums;
+    // 空间不足时只省略时间文本，不把整张卡推成两行
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 }
 
