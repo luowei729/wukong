@@ -152,7 +152,9 @@ function buildOverlayOption(list: PingLine[]) {
     },
     legend: baseLegend(tokens),
     xAxis: baseCategoryAxis(tokens, labels),
-    yAxis: baseValueAxis(tokens, { name: 'ms' }),
+    // 不写 yAxis.name：ECharts 把轴名画在轴顶端（左上），会和同一行的图例（如“上海电信”）重叠遮挡。
+    // 单位改由卡片副标题和上方统计摘要行（均 6.1ms）承载，画面更干净也不会互挡。
+    yAxis: baseValueAxis(tokens, {}),
     dataZoom: baseDataZoom(tokens),
     series,
   }

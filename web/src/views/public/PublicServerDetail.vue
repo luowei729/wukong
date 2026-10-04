@@ -125,7 +125,7 @@
         <!-- ---------------- 网络质量 ---------------- -->
         <WkCard
           title="网络质量"
-          :subtitle="`最近 24 小时运营商线路延时；上方色条按分钟粒度显示丢包（${stripBucketLabel}）`"
+          :subtitle="`最近 24 小时运营商线路延时（ms）；上方色条按分钟粒度显示丢包（${stripBucketLabel}）`"
         >
           <WkEmptyState
             v-if="pingISPs.length === 0"

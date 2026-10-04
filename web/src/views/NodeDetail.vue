@@ -114,7 +114,7 @@
     </WkCard>
 
     <!-- ---------------- 网络质量（Ping K 线） ---------------- -->
-    <WkCard title="网络质量" subtitle="最近 24 小时运营商线路延时与丢包（秒级原始数据聚合）">
+    <WkCard title="网络质量" subtitle="最近 24 小时运营商线路延时（ms）与丢包，秒级原始数据聚合">
       <template #actions>
         <el-button text size="small" @click="router.push('/settings')">配置运营商</el-button>
       </template>
