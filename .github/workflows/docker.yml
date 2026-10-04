@@ -53,6 +53,9 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          # 必须显式声明多平台：不写时 buildx 只构宿主架构（amd64），
+          # 导致 arm64 生产机 docker pull 报 "no matching manifest for linux/arm64/v8"
+          platforms: linux/amd64,linux/arm64
           build-args: |
             VERSION=${{ github.sha }}
             COMMIT=${{ github.sha }}

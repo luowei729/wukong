@@ -33,10 +33,15 @@ COPY --from=frontend-builder /app/internal/webapi/dist/ ./internal/webapi/dist/
 
 # 编译主控和探针（CGO_ENABLED=1 因为 SQLite 需要 CGO；同时内置 agent 供在线安装脚本下载）
 # 版本号通过 ARG 注入，每次构建自动递增
+# TARGETARCH 由 docker buildx 多平台构建自动注入（amd64/arm64）：
+# 之前主控二进制写死 GOARCH=amd64，导致 arm64 生产机（如 146.56.173.198）拉不到可用镜像；
+# 单平台本地构建时 TARGETARCH 为空，用 ${TARGETARCH:-amd64} 回退保持旧行为不变。
 ARG VERSION=dev
 ARG COMMIT=unknown
 ARG BUILD_TIME=unknown
-RUN CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w -X main.version=${VERSION} -X main.commit=${COMMIT} -X main.buildTime=${BUILD_TIME}" -o /build/wukong-server ./cmd/server && \
+ARG TARGETARCH
+RUN TARGET_ARCH=${TARGETARCH:-amd64} && \
+    CGO_ENABLED=1 GOOS=linux GOARCH=$TARGET_ARCH go build -ldflags="-s -w -X main.version=${VERSION} -X main.commit=${COMMIT} -X main.buildTime=${BUILD_TIME}" -o /build/wukong-server ./cmd/server && \
     CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w -X main.version=${VERSION} -X main.commit=${COMMIT} -X main.buildTime=${BUILD_TIME}" -o /build/wukong-agent-amd64 ./cmd/agent && \
     CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags="-s -w -X main.version=${VERSION} -X main.commit=${COMMIT} -X main.buildTime=${BUILD_TIME}" -o /build/wukong-agent-arm64 ./cmd/agent
 
