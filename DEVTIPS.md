@@ -113,6 +113,23 @@ cd web && npx vite               # http://127.0.0.1:5173，登录接受任意账
   节点能否走 v6 直接看探针自报的 `agents.ip_v6`（设置页一键选择用的就是它）。
 - 公开详情页 `publicPingISPs(agentID)` 同样要过滤，否则会出现“有线路名、永远没数据”的空行。
 
+### 告警抑制期与配置热下发（两个易错点）
+
+- **抑制期只能压制“重复触发”，绝不能 `return` 掉整个检查**。
+  旧实现 `if 抑制期 { return }` 写在阈值判断之前，结果是指标恢复后告警最长 30 分钟不转 resolved，
+  用户看到的就是一条“早就好了但还在报警”的记录。正确写法：抑制期只拦住 `shouldFire` 分支，
+  `value <= recovery` 的恢复分支必须照走（`resolveAlert` 会顺带清掉抑制标记）。
+- **改完影响探针行为的配置（ISP 目标、节点采集/Ping 频率）必须主动重发一次**。
+  探针只在建连时收到一次 `COMMAND_UPDATE_CONFIG`，不重发就会一直用本地旧配置探测，
+  表现为“改了没生效”+ 告警数据源本身就是错的。
+  机制：`AgentServer.InvalidateAgentConfigs()` 给在线探针打 `configDirty`，
+  stream 心跳循环（≤15s）取出后重发。**gRPC stream 的 Send 必须在处理该 stream 的 goroutine 里做**，
+  所以只能“标记 + 由 stream 自己发”，不能从 webapi 直接往 stream 里 Send。
+- `webapi` 不直接依赖 `grpcapi`：用 `ConfigInvalidator` 接口在 `cmd/server/main.go` 里注入，
+  未注入时仅影响下发时效，不会报错。
+- `ping_intv` 下限曾是 5 秒，与“默认 1 秒”的决策矛盾，会让节点详情页保存 1 直接 400；
+  改默认值时要回头检查校验区间是否跟着改了。
+
 ## 生产部署与 CI（2026-10-05 迁移后）
 
 ### Cloudflare 与 gRPC 的硬限制（重要）

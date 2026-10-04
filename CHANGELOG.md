@@ -2,6 +2,35 @@
 
 所有变更记录使用北京时间（UTC+8）。
 
+## [2026-10-05 06:05] - 修复：改完运营商目标后告警不恢复、新配置不生效
+
+### 改动前总结
+用户反馈“修改上海移动目标 IP 后，ping 丢包告警还在继续”。实测两个叠加缺陷：
+1. `alert.checkMetric` 在 30 分钟抑制期内**直接 return**，连恢复判断一起跳过 →
+   hk2香港 三条线路 21:42–21:47 全部 0% 丢包，告警 id=15 仍挂 firing；
+2. 主控仅在**建连时**下发一次 `COMMAND_UPDATE_CONFIG` → 改完目标 IP 后已连接的探针
+   仍按本地旧配置探测（sh1上海 21:47 仍为 100% 丢包），告警数据源本身就是错的。
+
+### 改动后总结
+- `internal/alert/engine.go`：抑制期语义收敛为“只压制重复触发”——超阈值且处于抑制期时不告警也不累计持续时间；
+  低于恢复阈值的分支照常执行，`resolveAlert` 会顺便清除抑制标记（抑制期与恢复通知不再冲突）。
+- `internal/grpcapi/agent_server.go`：新增 `configDirty` 标记表与 `InvalidateAgentConfigs()`；
+  stream 心跳循环（≤15s）用 `takeConfigDirty` 取出标记后重发一次配置。
+  **发送仍在 stream goroutine 内完成**，避免 gRPC 并发 SendMsg；探针断线时清理标记防 map 增长。
+- `internal/webapi/handler.go`：新增 `ConfigInvalidator` 接口 + `SetConfigInvalidator`（不直接依赖 grpcapi），
+  `handlers.go` 在 ISP 目标新增/修改/删除与节点采集配置更新四处调用；`cmd/server/main.go` 把
+  `RegisterService` 移出 goroutine 并注入实例。
+- 顺带修：`PUT /api/agents/{id}` 的 `ping_intv` 下限 5 秒与默认 1 秒的既定决策矛盾，
+  节点详情页填 1 会被 400 拒掉，改为 1-3600。
+
+### 验证（生产 13 节点）
+- 部署后 70 秒：`firing=0`，之前卡住的 ping_loss id=13/15 均变 resolved。
+- 启用“上海移动IPV6 = 2409:8088::a”（`scope=include`，7 个有 v6 出口的节点）后：
+  主控日志 `已标记 13 个在线探针待重新下发配置`，同一轮心跳内 v6 节点 `targets=4`、
+  无 v6 节点 `targets=3`；本机探针无需重连就在 22:02:49 收到 `Ping目标数: 4`。
+- 数据侧：sel2/sel3/sel4 新线路 35 个点、真实延时 201~331ms、0% 丢包；
+  hk2香港/server1上海 的脏数据停在 22:00（作用域生效前），之后不再产生 100% 丢包点。
+
 ## [2026-10-05 05:52] - 运营商 Ping 目标支持按节点作用域（include/exclude）
 
 ### 改动前总结

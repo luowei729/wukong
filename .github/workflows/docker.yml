@@ -9,6 +9,9 @@ on:
   push:
     branches: [main]
     tags: ['v*']
+    # 文档变更不需要重新构建镜像：否则每次写文档都会推一个新 commit 版本，
+    # 连带触发全部探针自升级（下载+替换+重启），白白制造一轮节点抖动。
+    paths-ignore: ['**.md', 'docs/**']
   workflow_dispatch:
 
 env:
