@@ -137,7 +137,9 @@ export function nodeState(
   }
   if (!node.online) return "offline"
   // 在线但从来没有指标 → 待上报，不能当作正常在线
-  const stamp = node.updated_at || node.last_seen_at
+  // 优先用 last_seen_at（主控收到上报时用服务器时间写入），而不是 updated_at：
+  // 后者是探针自报时间戳，机器时钟偏慢时会把健康节点误判成“数据延迟”（ff1 实测慢 5.6 分钟）
+  const stamp = node.last_seen_at || node.updated_at
   if (!stamp) return "unknown"
   const time = new Date(stamp).getTime()
   if (Number.isNaN(time)) return "unknown"

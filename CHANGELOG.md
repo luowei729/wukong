@@ -2,6 +2,23 @@
 
 所有变更记录使用北京时间（UTC+8）。
 
+## [2026-10-05 06:30] - 节点新鲜度改用主控时钟（修正 ff1 误判根因）
+
+### 改动前总结
+上一条只是把两端判定统一到一个函数，但没解决数据从哪来：`metric.UpdatedAt` 来自探针自报的
+`sys.Timestamp`。实测 ff1 最新点 22:17:06 而主控当时 22:22:43（hk2 只差 4 秒），
+即 **ff1 机器时钟比主控慢约 5.6 分钟**，刚好越过 5 分钟阈值 → 两端统一后反而会一起错。
+
+### 改动后总结
+- `internal/webapi/public.go` `publicStatus()`：新鲜度改为优先用 `agents.last_seen_at`
+  （主控收到上报时用服务器时间写入），无该字段时才回退到指标时间；探针时钟偏差不再影响在线判定。
+- `web/src/utils/format.ts` `nodeState()`：同样改为 `last_seen_at || updated_at`，与后端保持一致。
+
+### 验证
+- 部署后 ff1 在公开页与后台应均为“在线”（它的 `last_seen_at` 一直是秒级新鲜的）。
+- 待用户在 ff1 上处理：`timedatectl` 看 NTP 是否同步（大概率 System clock not synchronized），
+  校时后 `systemctl restart wukong-agent`；否则它的小时表分桶、启动时间、趋势图 X 轴仍会偏 5~6 分钟。
+
 ## [2026-10-05 06:22] - 列表默认按名称排序 + 统一节点状态口径
 
 ### 改动前总结

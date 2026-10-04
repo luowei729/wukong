@@ -295,7 +295,15 @@ func publicStatus(agent *store.Agent, metric *store.LatestMetric) string {
 		}
 		return "unknown"
 	}
-	if time.Since(metric.UpdatedAt) > 5*time.Minute {
+	// 新鲜度以主控记录的 last_seen_at（服务器时钟）为准，不能用 metric.UpdatedAt：
+	// 后者来自探针自报的 sys.Timestamp，机器时钟偏慢时会长期被判 stale。
+	// 实测 ff1 法兰克福时钟比主控慢约 5.6 分钟，导致“后台在线、公开页离线”的不一致。
+	if agent.LastSeenAt != nil {
+		if time.Since(*agent.LastSeenAt) > 5*time.Minute {
+			return "stale"
+		}
+	} else if time.Since(metric.UpdatedAt) > 5*time.Minute {
+		// 兼容：旧数据没有 last_seen_at 时才回退到指标时间
 		return "stale"
 	}
 	if agent.Online {
