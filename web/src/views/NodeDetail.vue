@@ -131,31 +131,14 @@
       </WkEmptyState>
 
       <template v-else>
-        <!-- 线路摘要：丢包不能套用 70/85 的资源阈值，改用独立语气徽章 -->
-        <div class="wk-isp-summary">
-          <div v-for="item in ispSummary" :key="item.name" class="wk-isp-row">
-            <span class="wk-isp-name" :style="{ color: item.color }">{{ item.name }}</span>
-            <WkBadge :tone="lossTone(item.loss)">丢包 {{ item.loss.toFixed(1) }}%</WkBadge>
-            <span class="wk-num wk-isp-stat">平均 {{ formatOneDecimal(item.avg) }} ms</span>
-            <span class="wk-sub wk-isp-stat">
-              最低 {{ formatOneDecimal(item.min) }} / 最高 {{ formatOneDecimal(item.max) }}
-            </span>
-          </div>
-        </div>
-
         <WkEmptyState
           v-if="Object.keys(pingSeries).length === 0 && !pingLoading"
           icon="search"
           title="暂无 Ping 数据"
           description="已配置运营商目标，但最近 24 小时没有收到探测结果"
         />
-        <WkChart
-          v-else
-          :builder="buildPingOption"
-          :deps="pingSeries"
-          height="340px"
-          :loading="pingLoading"
-        />
+        <!-- 分线路/叠加双模式：每条线路自带 均/最低/最高/丢包 摘要，不再需要单独的列表区 -->
+        <WkPingChart v-else :series="pingSeries" :single-height="'120px'" />
       </template>
     </WkCard>
 
@@ -204,7 +187,7 @@ import WkCard from '@/components/WkCard.vue'
 import WkChart from '@/components/WkChart.vue'
 import WkEmptyState from '@/components/WkEmptyState.vue'
 import WkMetric from '@/components/WkMetric.vue'
-import WkBadge from '@/components/WkBadge.vue'
+import WkPingChart from '@/components/WkPingChart.vue'
 import WkStatusDot from '@/components/WkStatusDot.vue'
 import http from '@/utils/http'
 import { refreshOverview, useOverview } from '@/composables/useOverview'
@@ -218,12 +201,10 @@ import {
   baseValueAxis,
   buildLineSeries,
   readChartTokens,
-  seriesColor,
   tooltipRow,
 } from '@/utils/charts'
 import {
   archText,
-  average,
   formatBytes,
   formatBytesShort,
   formatClock,
@@ -234,7 +215,6 @@ import {
   formatRate,
   loadLevel,
   loadText,
-  lossPercent,
   relativeTime,
 } from '@/utils/format'
 
@@ -457,94 +437,6 @@ async function loadPingAgg() {
   }
 }
 
-// 丢包语气色：有任何丢包就进入警告，超过 5% 视为危险（与资源负载阈值无关）
-function lossTone(loss: number): 'ok' | 'warn' | 'fail' {
-  if (loss >= 5) return 'fail'
-  if (loss > 0) return 'warn'
-  return 'ok'
-}
-
-// 线路摘要：平均值/最小/最大/丢包，直接摊在图表上方
-const ispSummary = computed(() => {
-  const tokens = readChartTokens()
-  return Object.entries(pingSeries.value).map(([name, points], index) => {
-    const lats = points.map((item: any) => Number(item.avg_lat || 0))
-    const mins = points.map((item: any) => Number(item.min_lat || 0))
-    const maxs = points.map((item: any) => Number(item.max_lat || 0))
-    const losses = points.map((item: any) => lossPercent(Number(item.loss_rate || 0)))
-    return {
-      name,
-      color: seriesColor(tokens, index),
-      avg: average(lats) ?? 0,
-      min: mins.length ? Math.min(...mins) : 0,
-      max: maxs.length ? Math.max(...maxs) : 0,
-      loss: average(losses) ?? 0,
-    }
-  })
-})
-
-// Ping 延时图：与旧版同样的多线路口径，颜色改为随主题解析
-function buildPingOption() {
-  const tokens = readChartTokens()
-  const entries = Object.entries(pingSeries.value)
-  // 时间点取并集后排序，保证多条线路在同一个 x 位置上对齐
-  const allTimes = Array.from(
-    new Set(entries.flatMap(([, points]) => points.map((item: any) => item.bucket_min)))
-  ).sort()
-  const labels = allTimes.map((time) => formatClock(time))
-
-  // 每条线路建立"时间 → 延时/丢包"的索引，tooltip 才能同时给出两个指标
-  const lossIndex = new Map<string, Map<string, number>>()
-  const series = entries.map(([isp, points], index) => {
-    const latMap = new Map<string, number>()
-    const lossMap = new Map<string, number>()
-    for (const point of points) {
-      latMap.set(point.bucket_min, Number(point.avg_lat || 0))
-      lossMap.set(point.bucket_min, lossPercent(Number(point.loss_rate || 0)))
-    }
-    lossIndex.set(isp, lossMap)
-    return {
-      ...buildLineSeries(
-        isp,
-        allTimes.map((time) => (latMap.has(time as string) ? latMap.get(time as string)! : null)),
-        seriesColor(tokens, index)
-      ),
-      _ispName: isp,
-    }
-  })
-
-  return {
-    animation: false,
-    grid: baseGrid(),
-    tooltip: {
-      ...baseTooltip(tokens),
-      axisPointer: { type: 'cross', lineStyle: { color: tokens.axis }, crossStyle: { color: tokens.axis } },
-      formatter: (params: any) => {
-        if (!Array.isArray(params) || params.length === 0) return ''
-        let html = `<div style="font-size:11px;opacity:.7;margin-bottom:6px;font-weight:600">${params[0].axisValue}</div>`
-        params.forEach((param: any, order: number) => {
-          if (param.value === null || param.value === undefined) return
-          const isp = param.seriesName
-          const lossMap = lossIndex.get(isp)
-          const lossPct = lossMap?.get(allTimes[param.dataIndex])?.toFixed(1) ?? '0.0'
-          html += tooltipRow(
-            seriesColor(tokens, order),
-            isp,
-            `${Number(param.value).toFixed(2)} ms`,
-            `${lossPct}% loss`
-          )
-        })
-        return html
-      },
-    },
-    legend: baseLegend(tokens),
-    xAxis: baseCategoryAxis(tokens, labels),
-    yAxis: baseValueAxis(tokens, { name: 'ms' }),
-    dataZoom: baseDataZoom(tokens),
-    series,
-  }
-}
-
 // ---------------- 采集配置 ----------------
 const configForm = reactive({ name: '', collect_intv: 1, ping_intv: 1 })
 const savingConfig = ref(false)
@@ -692,42 +584,6 @@ watch(
   margin-top: 2px;
 }
 
-/* ISP 摘要行 */
-.wk-isp-summary {
-  display: flex;
-  flex-direction: column;
-  gap: var(--wk-space-2);
-  margin-bottom: var(--wk-space-4);
-}
-
-.wk-isp-row {
-  display: flex;
-  align-items: center;
-  gap: var(--wk-space-3);
-  padding: 6px 0;
-  border-bottom: 1px dashed var(--wk-border);
-}
-
-.wk-isp-row:last-child {
-  border-bottom: none;
-}
-
-.wk-isp-name {
-  width: 104px;
-  flex-shrink: 0;
-  font-size: var(--wk-fs-base);
-  font-weight: 600;
-}
-
-/* 丢包徽章与统计文本的行内排列 */
-.wk-isp-stat {
-  font-size: var(--wk-fs-sm);
-}
-
-.wk-isp-stat:last-child {
-  margin-left: auto;
-}
-
 /* 配置表单：三列栅格 + 保存按钮同行，比 inline form 更整齐 */
 .wk-config-form {
   display: grid;
@@ -764,15 +620,6 @@ watch(
 
   .wk-hero-side {
     text-align: left;
-  }
-
-  /* 窄屏下摘要行换行，统计文本不再靠右对齐 */
-  .wk-isp-row {
-    flex-wrap: wrap;
-  }
-
-  .wk-isp-stat:last-child {
-    margin-left: 0;
   }
 }
 

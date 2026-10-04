@@ -50,6 +50,12 @@ canvas **不解析** `var(--x)`。任何 `axisLabel: { color: 'var(--wk-text-mut
 
 细节：`baseGrid()` 默认 `bottom: 28`，是给底部 dataZoom 滑块让位；只用滚轮缩放时传 `{ bottom: 8 }`，否则时间轴与滑块会重叠。
 
+**量级差异大的多系列不要共轴**：Ping 延时就是典型——上海电信 5.40ms 与上海联通 5.57ms 在
+0~60ms 轴上只差 0.3% 高度，完全重叠；**对数刻度也解决不了**（问题不是量级而是绝对差值太小）。
+正确做法是 small multiples：`WkPingChart.vue` 默认“分线路”，每线一个小图且 Y 轴 `min` 按本线数据下界
+自适应（不从 0 开始），“叠加对比”作为可切换模式保留（存 localStorage）。新增多系列图表时先问一句：
+这些系列的取值范围是否吻合？差一个量级就该拆图而不是调颜色。
+
 ### 实时数据与轮询
 
 - 统一走 `composables/useOverview.ts`：模块级单例 + 引用计数，多个组件共用**一个** 1s 定时器；`document.visibilityState !== 'visible'` 时暂停（`usePolling.ts` 同理）。

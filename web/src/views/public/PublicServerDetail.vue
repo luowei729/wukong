@@ -125,7 +125,7 @@
         <!-- ---------------- 网络质量 ---------------- -->
         <WkCard
           title="网络质量"
-          :subtitle="`最近 24 小时运营商线路延时；下方色条按分钟粒度显示丢包（${stripBucketLabel}）`"
+          :subtitle="`最近 24 小时运营商线路延时；上方色条按分钟粒度显示丢包（${stripBucketLabel}）`"
         >
           <WkEmptyState
             v-if="pingISPs.length === 0"
@@ -153,13 +153,13 @@
                     :title="`${row.name} 第 ${index + 1} 段：${cellLabel(cell)}`"
                   />
                 </div>
-                <span class="wk-strip-value">
-                  均 {{ formatOneDecimal(row.avgLat) }}ms · 丢 {{ row.loss.toFixed(1) }}%
-                </span>
+                <!-- 色条只负责“什么时段丢包”；延时统计已在下方分线路图标题里，不重复写 -->
+                <span class="wk-strip-value">丢 {{ row.loss.toFixed(1) }}%</span>
               </div>
             </div>
 
-            <WkChart :builder="buildPingOption" :deps="pingSeries" height="320px" />
+            <!-- 分线路/叠加双模式：避免 5.4ms 与 5.6ms 这类接近的线路在同一纵轴上互相盖住 -->
+            <WkPingChart :series="pingSeries" />
           </template>
         </WkCard>
 
@@ -187,6 +187,7 @@ import WkCard from '@/components/WkCard.vue'
 import WkChart from '@/components/WkChart.vue'
 import WkEmptyState from '@/components/WkEmptyState.vue'
 import WkMetric from '@/components/WkMetric.vue'
+import WkPingChart from '@/components/WkPingChart.vue'
 import WkSkeleton from '@/components/WkSkeleton.vue'
 import WkStatusDot from '@/components/WkStatusDot.vue'
 import http from '@/utils/http'
@@ -201,7 +202,6 @@ import {
   baseValueAxis,
   buildLineSeries,
   readChartTokens,
-  seriesColor,
   tooltipRow,
 } from '@/utils/charts'
 import {
@@ -507,60 +507,6 @@ function cellLabel(cell: string): string {
   if (cell === 'warn') return '部分丢包'
   if (cell === 'bad') return '严重丢包'
   return '无数据'
-}
-
-function buildPingOption() {
-  const tokens = readChartTokens()
-  const entries = Object.entries(pingSeries.value)
-  const allTimes = Array.from(
-    new Set(entries.flatMap(([, points]) => points.map((item) => item.timestamp)))
-  ).sort()
-  const labels = allTimes.map((time) => formatHourMinute(time))
-
-  const lossIndex = new Map<string, Map<string, number>>()
-  const series = entries.map(([isp, points], index) => {
-    const latMap = new Map<string, number>()
-    const lossMap = new Map<string, number>()
-    for (const point of points) {
-      latMap.set(point.timestamp, Number(point.avg_lat || 0))
-      lossMap.set(point.timestamp, lossPercent(Number(point.loss_rate || 0)))
-    }
-    lossIndex.set(isp, lossMap)
-    return buildLineSeries(
-      isp,
-      allTimes.map((time) => (latMap.has(time) ? latMap.get(time)! : null)),
-      seriesColor(tokens, index)
-    )
-  })
-
-  return {
-    animation: false,
-    grid: baseGrid(),
-    tooltip: {
-      ...baseTooltip(tokens),
-      formatter: (params: any) => {
-        if (!Array.isArray(params) || params.length === 0) return ''
-        let html = `<div style="font-size:11px;opacity:.7;margin-bottom:6px;font-weight:600">${params[0].axisValue}</div>`
-        params.forEach((param: any) => {
-          if (param.value === null || param.value === undefined) return
-          const lossMap = lossIndex.get(param.seriesName)
-          const lossPct = lossMap?.get(allTimes[param.dataIndex])?.toFixed(1) ?? '0.0'
-          html += tooltipRow(
-            param.color,
-            param.seriesName,
-            `${Number(param.value).toFixed(2)} ms`,
-            `${lossPct}% loss`
-          )
-        })
-        return html
-      },
-    },
-    legend: baseLegend(tokens),
-    xAxis: baseCategoryAxis(tokens, labels),
-    yAxis: baseValueAxis(tokens, { name: 'ms' }),
-    dataZoom: baseDataZoom(tokens),
-    series,
-  }
 }
 
 // ==================== 生命周期 ====================
