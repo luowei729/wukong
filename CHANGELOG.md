@@ -2,6 +2,43 @@
 
 所有变更记录使用北京时间（UTC+8）。
 
+## [2026-10-05 05:10] - 生产部署到 arm64 机 + CI 多架构提速 + 安装脚本 ETXTBSY 修复
+
+### 改动前总结
+- 要求把新 UI 部署到生产 `146.56.173.198`（Cloudflare CDN → 回源 64443，域名 `https://server.lkz.pub`）；
+- 但该机器是 **arm64**，而 GHCR 只有 amd64 镜像（`no matching manifest for linux/arm64/v8`）：
+  `docker.yml` 未声明 `platforms`，且 `Dockerfile` 把主控二进制写死 `GOARCH=amd64`；
+- 改成单 job + QEMU 多平台后构建超过 10 分钟未完（arm64 层在 x86 上模拟编译 Go+CGO）；
+- 安装脚本在已装过探针的机器上必然失败：`curl -o` 直接覆盖运行中的二进制 → ETXTBSY → `curl: (23)`。
+
+### 改动后总结
+1. **CI 多架构提速**（`.github/workflows/docker.yml`）：改为 amd64/arm64 各跑一个**原生 runner**
+   （`ubuntu-24.04` / `ubuntu-24.04-arm`，公开仓库免费），按 digest 推送后由 merge job 用
+   `docker buildx imagetools create` 合并 manifest 并打 tag；`gha` 缓存按架构分 scope。
+   实测整体 **~2.5 分钟**（对比 QEMU 方案 10 分钟未完）。中途踩到：`download-artifact` 不带 pattern
+   会把 buildx 产出的 `*.dockerbuild` 元数据 artifact 一起下载并重试失败，已限定 `pattern: digests-*`。
+2. **Dockerfile**：主控二进制改用 buildx 注入的 `TARGETARCH`（本地单平台构建为空时回退 amd64，行为不变）。
+3. **安装脚本**（`internal/webapi/handlers.go` 的 `handleInstallAgentScript`）：先 `systemctl stop wukong-agent`，
+   再下载到 `wukong-agent.new` 后 `mv -f` 原子替换（rename 不受 ETXTBSY 影响，下载中断也不会写坏原二进制），
+   失败提示补充排查方向。探针自升级路径本来就是临时文件+rename，无需改。
+4. **鉴权日志**（`internal/grpcapi/agent_server.go`）：`ValidateAgent` 在“节点不存在”时也返回 false，
+   旧日志一律打“secret 不匹配”会误导排查；现在先查 `GetAgent` 区分“节点未注册（已在后台删除）”与“密钥不匹配”。
+
+### 部署结果（生产已验证）
+- 容器：`wukong` on `146.56.173.198`，`-p 64443:64443`（对公网，CF 要外部回源）+ `-v /opt/wukong/data:/opt/wukong/data`
+  + `--env-file /opt/wukong/wukong.env`（JWT 密钥与管理员密码已固化，重启不失效）。
+- 链路：`https://server.lkz.pub/api/health` 经 Cloudflare 200；`index.html` 引用的资源哈希与本地构建一致，确认新 UI 已上线；
+  静态资源与 favicon 均 200；浏览器核验 6 个页面 console error 0、非 200 请求 0。
+- 节点：`ubuntu`(arm64, 主控本机) / `sel4`(arm64) / `tk3`(amd64) 共 3 台在线每秒上报；
+  Ping 运营商目标已补回 3 条，主控侧已收到真实聚合（上海电信 29.0ms / 0 丢包）。
+- 重要结论：**Cloudflare 橙云不能把 gRPC 代理到明文源站**（实测 403 + text/html），
+  因此 `agent_server_addr` 改为直连源站 `146.56.173.198:64443`，网页继续走 CDN 443。
+
+### 遗留风险（已记入 DEPLOY_CREDENTIALS.md）
+- `AGENTS.md` 把管理员密码明文写进了公开仓库，建议立即改密并清理文档。
+- 探针上报为公网明文 gRPC，每帧携带 `agent_secret`；要加密需在源站给 64443 前置 TLS 或走灰云。
+- 旧主控上的其他节点仍连 `server.lkz.pub:443`，会被 CF 403 拒绝，需在每台重新执行安装命令。
+
 ## [2026-10-05 04:13] - Web UI 重构为现代 SaaS 控制台（设计令牌 + 组件层 + 页面信息架构）
 
 ### 改动前总结

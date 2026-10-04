@@ -90,6 +90,53 @@ cd web && npx vite               # http://127.0.0.1:5173，登录接受任意账
 
 ### 构建产物与嵌入
 
-- `cd web && npm run build` → 产物直接输出到 `internal/webapi/dist/`（`vite.config.ts` 的 `build.outDir`），该目录**在仓库里是被跟踪的**，改完前端要一并提交。
+- `cd web && npm run build` → 产物输出到 `internal/webapi/dist/`（`vite.config.ts` 的 `build.outDir`）。
+  该目录**本身不参与发布**：镜像里的前端是 CI 在 `node:22-alpine` 阶段从源码重新构建的。
 - Go 侧用 `//go:embed all:dist`，`all:` 前缀不能少（Vite 会生成 `_` 开头的资源）。
 - 新增静态资源放 `web/public/`（如 `favicon.svg`），Vite 会原样复制进 `dist/`。
+- `internal/webapi/dist/` 已被 `.gitignore` 排除，但仓库里还残留两个早期误提交的跟踪文件
+  （`dist/index.html` 与一个旧 js）。改前端后 **不要只提交这两个文件**（会留下指向未跟踪资源的破状态），
+  镜像里的前端是 CI 从源码重新构建的；建议后续单独一次 `git rm --cached internal/webapi/dist` 清理。
+
+## 生产部署与 CI（2026-10-05 迁移后）
+
+### Cloudflare 与 gRPC 的硬限制（重要）
+
+- 橙云（Proxied）记录 **不能把 gRPC 代理到明文源站**：探针连 `server.lkz.pub:443` 会拿到
+  `403 Forbidden` + `content-type: text/html`（gRPC 报 `PermissionDenied`），因为 Flexible 回源只会用 HTTP/1.1，
+  h2/gRPC 被降级。因此 `agent_server_addr` 必须给 **直连源站的 `IP:64443`**（非 443 端口时代码走明文 gRPC），
+  网页继续走 CDN。要统一走 TLS 就得在源站给 64443 前置 `listen ssl http2` + `grpc_pass`，并把 CF SSL 改成 Full。
+- 回源端口非标准（64443）靠 CF 的 Origin Rules 实现；`521` = 源站 TCP 连不上（没服务/端口不通），
+  `525` = TCP 通了但 TLS 握手失败（源站没上 TLS），`403+html` = 被 CF 边缘拦下，三种错误码能直接定位问题层。
+
+### 多架构镜像（CI）
+
+- 生产机是 arm64，拉镜像报 `no matching manifest for linux/arm64/v8` 就是镜像只有 amd64：
+  `docker/build-push-action` **不写 `platforms` 时只构宿主架构**；`Dockerfile` 里也不能写死 `GOARCH`，
+  要用 buildx 注入的 `TARGETARCH`（本地单平台构建时为空，用 `${TARGETARCH:-amd64}` 回退）。
+- 提速：用原生 `ubuntu-24.04-arm` runner 每架构一个 job（公仓免费），按 digest 推送
+  （`outputs: type=image,...,push-by-digest=true,name-canonical=true,push=true`，**push 要写在 outputs 里**），
+  再由 merge job `docker buildx imagetools create -t <tag> <digest...>` 统一打 tag；
+  QEMU 模拟编译 Go+CGO 要 10~25 分钟，原生并行只要 ~2.5 分钟。
+- `actions/download-artifact` **必须带 `pattern: digests-*`**：不带 name 时会把 buildx 顺带产生的
+  `*.dockerbuild` 元数据 artifact 一起下载，实测会重试 5 次后失败，直接把 merge job 带崩。
+- `gha` 缓存要按架构分 `scope`，否则 Go 构建产物会跨架构污染。
+
+### 覆盖已安装二进制必须用 rename
+
+- `curl -o /path/to/wukong-agent` 覆盖 **正在运行** 的文件会被内核拒绝（ETXTBSY），
+  curl 只报 `(23) Failure writing output to destination`，完全看不出真实原因。
+- 正确做法（安装脚本与探针自升级都已采用）：先 `systemctl stop`，下到 `xxx.new`，`chmod +x` 后 `mv -f`；
+  同目录 rename 不受 ETXTBSY 影响，且下载中断不会写坏原本可用的二进制。
+
+### 鉴权失败日志
+
+- `ValidateAgent` 在“查不到节点”与“密钥不对”两种情况都返回 false；已改为先 `GetAgent` 再区分，
+  否则在后台删过节点后会满屏刷“secret 不匹配”，把人往密钥方向带偏。
+- 后台删节点后，目标机上的探针不会自动停，会带着旧 `agent_secret` 每秒重试；
+  要么重新执行安装命令，要么 `systemctl stop wukong-agent`。
+
+### 本机运维入口
+
+- 部署参数、容器重建命令、env 文件位置、遗留安全风险均记在根目录 `DEPLOY_CREDENTIALS.md`（已 gitignore，勿提交）。
+- 本机（开发机）未安装 Go 工具链（`go: command not found`），Go 侧改动验证依赖 GHCR 镜像或 `docker run golang:*-alpine` 编译。

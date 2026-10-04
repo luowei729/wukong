@@ -97,6 +97,13 @@ func (s *AgentServer) ReportStream(stream pb.AgentService_ReportStreamServer) er
 	if report.AgentSecret != "" {
 		// 新探针：强制 bcrypt 校验
 		if !s.store.ValidateAgent(report.AgentId, report.AgentSecret) {
+			// 区分两种失败原因：ValidateAgent 在“查不到节点”时同样返回 false，
+			// 统一打成“secret 不匹配”会把人往密钥方向带偏（实际多是在后台删了节点，
+			// 探针还在用旧个体凭证上报）。
+			if _, err := s.store.GetAgent(report.AgentId); err != nil {
+				log.Printf("探针 %s 连接被拒: 节点未注册（可能已在后台删除，需在目标机重新执行安装命令）", report.AgentId)
+				return status.Errorf(codes.PermissionDenied, "探针未注册")
+			}
 			log.Printf("探针 %s 身份验证失败: secret 不匹配", report.AgentId)
 			return status.Errorf(codes.PermissionDenied, "探针身份验证失败")
 		}

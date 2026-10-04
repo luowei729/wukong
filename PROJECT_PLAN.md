@@ -245,6 +245,29 @@ Telegram 通知配置缺少测试按钮，Bot Token 输入框容易被浏览器�
 - 重点回归项：探针每秒上报下页面稳定性、`agent_server_addr`/`site_domain` 保存与安装命令生成、告警阈值保存、Telegram 测试发送。
 
 ### 验证结果
-- `npx vue-tsc --noEmit` 零错误；`npx vite build` 成功，产物含 `favicon.svg` 并已输出到 `internal/webapi/dist/`（该目录被 git 跟踪，需一并提交）。
+- `npx vue-tsc --noEmit` 零错误；`npx vite build` 成功，产物含 `favicon.svg`（输出到 `internal/webapi/dist/`，
+  该目录已被 gitignore，镜像里的前端由 CI 从源码重新构建，不需提交产物）。
 - 无头浏览器三轮逐页截图：公开首页/公开详情/登录/总览/节点列表/节点详情/告警/设置 均非白屏，图表轴与图例颜色随主题正确变化，自定义主色在侧栏/按钮/图表首色上生效。
+
+## 十五、2026-10-05 05:10（北京时间）新 UI 上生产：arm64 机 + Cloudflare CDN
+
+### 改动前总结
+要求把重构后的前端部署到生产 `146.56.173.198`（Cloudflare 已配到 64443，域名 `https://server.lkz.pub`）。
+实际发现三个阻塞：① 该机是 arm64 且从未跑过主控（全盘无 `wukong.db`，只有 agent），而 GHCR 只有 amd64 镜像；
+② QEMU 多架构构建超 10 分钟未完；③ 安装脚本在已装探针的机器上因 ETXTBSY 必然失败（`curl: (23)`）。
+
+### 改动后总结
+- CI 改为原生 ARM runner 并行 + digest/manifest 合并（~2.5 分钟），`Dockerfile` 主控改用 `TARGETARCH`。
+- 安装脚本改为先停服务 + 临时文件 `mv -f` 原子替换；`agent_server.go` 鉴权日志区分“节点未注册”与“密钥不匹配”。
+- 容器部署：`-p 64443:64443`（对公网，CF 需外部回源）+ `-v /opt/wukong/data:/opt/wukong/data` + `--env-file /opt/wukong/wukong.env`（JWT 与管理员密码固化）。
+- 关键结论：**Cloudflare 橙云不能代理 gRPC 到明文源站**（实测 403+html），`agent_server_addr` 改为直连 `146.56.173.198:64443`，网页仍走 CDN 443。
+- 补回 Ping 运营商目标 3 条；部署参数与遗留风险记入 `DEPLOY_CREDENTIALS.md`（gitignore）。
+
+### 验证结果
+- `https://server.lkz.pub/api/health` 经 CDN 200；`index.html` 资源哈希与本地构建一致（确认是新 UI）。
+- 浏览器核验线上 6 个页面：console error 0、非 200 请求 0；在线率圆环、KPI sparkline、双 Y 轴趋势图、
+  系统信息定义列表（含出口 IPv4/IPv6、CPU 型号、探针版本）、Ping 引导空态均正常。
+- 节点：`ubuntu`(arm64) / `sel4`(arm64) / `tk3`(amd64) 共 3 台在线每秒上报；主控已收到真实 Ping 聚合（上海电信 29.0ms / 0 丢包）。
+- 待办：旧主控剩余节点需在每台重新执行安装命令；建议轮换管理员密码（已泄露在公开仓库的 AGENTS.md）；
+  若要给探针链路加 TLS，需在源站给 64443 前置 `ssl http2 + grpc_pass` 并把 CF SSL 改为 Full。
 
