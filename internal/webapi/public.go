@@ -144,7 +144,8 @@ func (h *Handler) handlePublicGetServer(w http.ResponseWriter, r *http.Request) 
 	metric, _ := h.store.GetLatestMetrics(id)
 	writeJSON(w, http.StatusOK, publicServerDetailResponse{
 		Server:   buildPublicServerSummary(agent, metric),
-		PingISPs: h.publicPingISPs(),
+		// 只列出适用于该节点的线路，避开“有线路名但永远没数据”的空行
+		PingISPs: h.publicPingISPs(id),
 	})
 }
 
@@ -262,7 +263,10 @@ func buildPublicServerSummary(agent *store.Agent, metric *store.LatestMetric) pu
 	return server
 }
 
-func (h *Handler) publicPingISPs() []publicISPTarget {
+// publicPingISPs 返回指定节点实际会探测的启用线路名称。
+// 原因：运营商目标可以按节点设置作用域（如 IPv6 目标排除无 IPv6 出口的节点），
+// 公开详情页如果列出该节点不测的线路，会渲染出一个永远空白的数据行。
+func (h *Handler) publicPingISPs(agentID string) []publicISPTarget {
 	// 公开详情只暴露启用运营商名称，隐藏目标 IP/端口等管理配置。
 	targets, err := h.store.ListISPTargets()
 	if err != nil {
@@ -272,6 +276,9 @@ func (h *Handler) publicPingISPs() []publicISPTarget {
 	seen := make(map[string]bool)
 	for _, target := range targets {
 		if target == nil || !target.Enabled || target.Name == "" || seen[target.Name] {
+			continue
+		}
+		if !target.AppliesTo(agentID) {
 			continue
 		}
 		seen[target.Name] = true

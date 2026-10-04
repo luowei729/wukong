@@ -382,11 +382,13 @@ func (h *Handler) handleListISPTargets(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) handleCreateISPTarget(w http.ResponseWriter, r *http.Request) {
 	var target struct {
-		Name    string `json:"name"`
-		IP      string `json:"ip"`
-		Port    int    `json:"port"`
-		Mode    string `json:"mode"`
-		Enabled bool   `json:"enabled"`
+		Name     string   `json:"name"`
+		IP       string   `json:"ip"`
+		Port     int      `json:"port"`
+		Mode     string   `json:"mode"`
+		Enabled  bool     `json:"enabled"`
+		Scope    string   `json:"scope"`
+		AgentIDs []string `json:"agent_ids"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&target); err != nil {
 		writeError(w, http.StatusBadRequest, "请求体解析失败")
@@ -395,6 +397,7 @@ func (h *Handler) handleCreateISPTarget(w http.ResponseWriter, r *http.Request) 
 	t := &store.ISPTarget{
 		Name: target.Name, IP: target.IP, Port: target.Port,
 		Mode: target.Mode, Enabled: target.Enabled,
+		Scope: target.Scope, AgentIDs: target.AgentIDs,
 	}
 	if err := validateISPTarget(t); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
@@ -465,6 +468,19 @@ func validateISPTarget(target *store.ISPTarget) error {
 	}
 	if target.Mode != "auto" && target.Mode != "icmp" && target.Mode != "tcp" {
 		return fmt.Errorf("探测模式必须是 auto、icmp 或 tcp")
+	}
+	// 作用域校验：非法值统一回退为 all，include/exclude 必须带上节点列表，
+	// 否则“仅选中”会变成“全部节点”，与用户直觉相反且难以发现。
+	switch target.Scope {
+	case "", store.ISPScopeAll:
+		target.Scope = store.ISPScopeAll
+		target.AgentIDs = nil
+	case store.ISPScopeInclude, store.ISPScopeExclude:
+		if len(target.AgentIDs) == 0 {
+			return fmt.Errorf("选择“仅选中/排除选中节点”时必须至少选择一个节点")
+		}
+	default:
+		return fmt.Errorf("作用域必须是 all、include 或 exclude")
 	}
 	if target.Port == 0 {
 		target.Port = 80

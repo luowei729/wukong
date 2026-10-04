@@ -2,6 +2,53 @@
 
 所有变更记录使用北京时间（UTC+8）。
 
+## [2026-10-05 05:52] - 运营商 Ping 目标支持按节点作用域（include/exclude）
+
+### 改动前总结
+`isp_targets` 只有 `name/ip/port/mode/enabled`，启用目标无条件下发给全部探针。用户要加
+上海移动 IPv6 目标 `2409:8088::a`，但现网 8 台里 **hk2香港、sh1上海 没有公网 IPv6 出口**，
+这类节点探测 IPv6 会全部失败，在图表上表现为该线路长期 100% 丢包并可能误触告警。
+
+### 改动后总结（三态作用域，仅主控侧过滤，探针不改不升级）
+- `internal/store/store.go`：`ISPTarget` 新增 `Scope`（`all`/`include`/`exclude`）与 `AgentIDs`；
+  新增 `ScopeText()`（非法值回退 all，旧调用方行为不变）与 `AppliesTo(agentID)`。
+- `internal/store/sqlite.go`：`isp_targets` 建表新增 `scope`/`agent_ids` 两列，并加入 ALTER TABLE 迁移列表
+  （旧库自动升级，存量数据默认 `all`）；读写均进过 `splitIDs/joinIDs` 序列化。
+- `internal/grpcapi/agent_server.go`：`enabledPingTargets()` → `enabledPingTargetsFor(agentID)`，
+  注册响应与配置热更新两处下发都按节点过滤。
+- `internal/webapi/handlers.go`：`validateISPTarget` 校验 scope，**include/exclude 时必须至少选一个节点**
+  （否则“仅选中”会退化成“全部”，难发现）；创建接口接受 `scope`/`agent_ids`。
+- `internal/webapi/public.go`：`publicPingISPs(agentID)` 只列出该节点实际会测的线路，
+  避免公开详情页出现“有线路名但永远没数据”的空行。
+- `web/src/views/Settings.vue`：Ping 运营商区新增“作用域”下拉 + 节点多选（带 IPv6/IPv4 标记）；
+  目标地址含冒号时出现“选中有 IPv6 的 / 选中无 IPv6 的”一键按钮；列表新增“作用域”列。
+
+### 验证
+- `npx vue-tsc --noEmit` 零错误、`vite build` 成功；Go 编译由 GHCR 镜像构建验证（本机无 Go 工具链）。
+- 线上：新增“上海移动IPv6 = 2409:8088::a”并排除无 IPv6 的节点后，核对各探针日志的
+  `Ping目标数`：有 IPv6 出口的节点应为 4，hk2/sh1 仍为 3。
+
+## [2026-10-05 05:30] - 修复节点卡每秒 1 行↔2 行跳动
+
+### 改动前总结
+用户在线上发现：公开首页与总览的节点卡每秒在 1 行与 2 行之间反复跳动。根因是页脚一行内要装
+上行/下行/运行时长/最近上报 四段每秒变化的文本，而 `formatRate` 输出 `745.0 B/s`、
+`relativeTime` 输出 `0 秒前`/`刚刚`、`formatDuration` 输出 `22d 18h 32m` 全带空格，
+浏览器会在空格处折行；叠加“刚刚”(2字) 与 “0 秒前”(4字) 宽度不同，高度就会反复变。
+
+### 改动后总结
+- `utils/format.ts`：新增 `formatRateShort`（无空格 `745B/s`）；`relativeTime` 去掉全部空格并将
+  “刚刚”归一为“0秒前”；`formatDuration` 改为 `22d18h32m`。
+- `styles/components.scss`：`.wk-node-card-foot` 强制 `flex-wrap/white-space: nowrap` + `overflow: hidden`，
+  时间段 `min-width: 0` + 省略号（空间不足只裁时间，不撑高卡片）；`.wk-metric-hint` 与
+  `.wk-metric-value` 同步 nowrap + 省略号，防止 KPI 卡随数值位数抖动。
+- `Dashboard.vue` / `PublicHome.vue`：页脚与表格速率列改用 `formatRateShort`。
+
+### 验证（生产 8 节点真实数据）
+- 公开首页与后台总览各做 8 轮（间隔 1.2s）DOM 高度采样：8 张卡均 **恒定 198px**、页脚 **31px**、
+  `flexWrap=nowrap`，无任何卡出现两个高度交替；`scrollWidth > clientWidth` 截断元素 **0**。
+- KPI 卡 hint 实测高度 18px = 行高 → 均单行未换行；两页 console error/warn 均为 0。
+
 ## [2026-10-05 05:10] - 生产部署到 arm64 机 + CI 多架构提速 + 安装脚本 ETXTBSY 修复
 
 ### 改动前总结

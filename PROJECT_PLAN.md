@@ -271,3 +271,21 @@ Telegram 通知配置缺少测试按钮，Bot Token 输入框容易被浏览器�
 - 待办：旧主控剩余节点需在每台重新执行安装命令；建议轮换管理员密码（已泄露在公开仓库的 AGENTS.md）；
   若要给探针链路加 TLS，需在源站给 64443 前置 `ssl http2 + grpc_pass` 并把 CF SSL 改为 Full。
 
+## 十六、2026-10-05 05:52（北京时间）运营商 Ping 目标按节点作用域
+
+### 改动前总结
+用户要新增上海移动 IPv6 目标 `2409:8088::a`，但 `isp_targets` 无节点维度配置，启用目标无条件
+下发全部探针；而现网 8 台中 hk2香港、sh1上海 无公网 IPv6 出口，这两个节点上该线路会永远 100% 丢包。
+
+### 改动后总结
+`isp_targets` 新增 `scope`（all/include/exclude）与 `agent_ids` 两列（含 ALTER TABLE 迁移，旧库默认 all）；
+统一由 `ISPTarget.AppliesTo(agentID)` 判定，在 `enabledPingTargetsFor(agentID)` 处按节点过滤下发
+（注册响应与配置热更新两处），**探针无需改动也无需升级**；`validateISPTarget` 强制 include/exclude 至少选一个节点；
+公开详情 `publicPingISPs(agentID)` 同步过滤；设置页新增作用域下拉、节点多选（带 IPv6/IPv4 标记）、
+IPv6 目标一键选节点与列表作用域列。
+
+### 验证结果
+- 前端 `vue-tsc` 零错误、`vite build` 成功；Go 编译由 GHCR 多架构镜像构建把关（本机无 Go 工具链）。
+- 线上验收项：新增“上海移动IPv6”并排除无 IPv6 节点后，有 v6 出口的节点日志 `Ping目标数` 为 4，
+  hk2/sh1 仍为 3；公开详情页不再出现无数据线路行。
+

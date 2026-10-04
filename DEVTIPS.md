@@ -98,6 +98,21 @@ cd web && npx vite               # http://127.0.0.1:5173，登录接受任意账
   （`dist/index.html` 与一个旧 js）。改前端后 **不要只提交这两个文件**（会留下指向未跟踪资源的破状态），
   镜像里的前端是 CI 从源码重新构建的；建议后续单独一次 `git rm --cached internal/webapi/dist` 清理。
 
+## 运营商 Ping 目标的作用域（2026-10-05）
+
+- `isp_targets.scope` 三态：`all` / `include` / `exclude`，配套 `agent_ids`（逗号串，存库前 `joinIDs`、读取后 `splitIDs`）。
+  不用关联表是因为目标与节点量级都很小，且只在配置下发时整体读取。
+- 判定入口只有一个：`store.ISPTarget.AppliesTo(agentID)`。**所有下发路径都必须走它**：
+  `AgentServer.enabledPingTargetsFor(agentID)`（注册响应 + `buildConfigFrame` 配置热更新）。
+  新增下发渠道时如果直连 `ListISPTargets()`，作用域会被绕过。
+- 过滤故意只在主控做：探针不需要知道作用域概念，也不需要为了这个能力全量升级。
+- 旧库兼容：`InitSchema` 的 ALTER TABLE 列表会补 `scope`/`agent_ids` 列，默认 `all`，行为与升级前一致；
+  `ScopeText()` 对非法值也回退 `all`。
+- 为什么需要它：IPv6 目标（上海移动 `2409:8088::a`）在无公网 IPv6 出口的节点上必然全部失败，
+  表现为该线路 100% 丢包、拉高告警。现网 hk2香港、sh1上海 就没有 IPv6 出口。
+  节点能否走 v6 直接看探针自报的 `agents.ip_v6`（设置页一键选择用的就是它）。
+- 公开详情页 `publicPingISPs(agentID)` 同样要过滤，否则会出现“有线路名、永远没数据”的空行。
+
 ## 生产部署与 CI（2026-10-05 迁移后）
 
 ### Cloudflare 与 gRPC 的硬限制（重要）

@@ -73,12 +73,19 @@ func (s *SQLiteStore) InitSchema() error {
 	);
 
 	CREATE TABLE IF NOT EXISTS isp_targets (
-		id      INTEGER PRIMARY KEY AUTOINCREMENT,
-		name    TEXT NOT NULL,
-		ip      TEXT NOT NULL,
-		port    INTEGER NOT NULL DEFAULT 80,
-		mode    TEXT NOT NULL DEFAULT 'auto',
-		enabled INTEGER NOT NULL DEFAULT 1
+		id        INTEGER PRIMARY KEY AUTOINCREMENT,
+		name      TEXT NOT NULL,
+		ip        TEXT NOT NULL,
+		port      INTEGER NOT NULL DEFAULT 80,
+		mode      TEXT NOT NULL DEFAULT 'auto',
+		enabled   INTEGER NOT NULL DEFAULT 1,
+		-- 作用域：all=全部节点 / include=仅选中节点 / exclude=排除选中节点。
+		-- 原因：IPv6 目标（如上海移动 2409:8088::a）在无公网 IPv6 出口的节点上必然全部失败，
+		-- 按节点排除才能避免这些线路在部分节点上报出 100% 丢包、污染延时与告警。
+		scope     TEXT NOT NULL DEFAULT 'all',
+		-- 节点 ID 列表，逗号分隔（include/exclude 模式生效）；用逗号串而不是关联表，
+		-- 是因为目标数与节点数都很小且只在配置下发时整体读取，不需要按节点反查。
+		agent_ids TEXT NOT NULL DEFAULT ''
 	);
 
 	CREATE TABLE IF NOT EXISTS settings (
@@ -129,10 +136,12 @@ func (s *SQLiteStore) InitSchema() error {
 		return err
 	}
 
-	// 数据库迁移：为已有数据库添加 ip_v4/ip_v6 列（新数据库已包含，忽略错误即可）
+	// 数据库迁移：为已有数据库添加新列（新数据库已包含，忽略错误即可）
 	migrations := []string{
 		`ALTER TABLE agents ADD COLUMN ip_v4 TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE agents ADD COLUMN ip_v6 TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE isp_targets ADD COLUMN scope TEXT NOT NULL DEFAULT 'all'`,
+		`ALTER TABLE isp_targets ADD COLUMN agent_ids TEXT NOT NULL DEFAULT ''`,
 	}
 	for _, m := range migrations {
 		// SQLite ALTER TABLE ADD COLUMN 失败时（列已存在）忽略错误
@@ -482,7 +491,7 @@ func (s *SQLiteStore) DeleteGroup(id string) error {
 
 func (s *SQLiteStore) ListISPTargets() ([]*ISPTarget, error) {
 	// 管理页需要看到已停用目标，注册下发和公开展示再按 Enabled 过滤。
-	rows, err := s.db.Query("SELECT id, name, ip, port, mode, enabled FROM isp_targets ORDER BY id")
+	rows, err := s.db.Query("SELECT id, name, ip, port, mode, enabled, scope, agent_ids FROM isp_targets ORDER BY id")
 	if err != nil {
 		return nil, err
 	}
@@ -490,19 +499,48 @@ func (s *SQLiteStore) ListISPTargets() ([]*ISPTarget, error) {
 	var targets []*ISPTarget
 	for rows.Next() {
 		t := &ISPTarget{}
-		err := rows.Scan(&t.ID, &t.Name, &t.IP, &t.Port, &t.Mode, &t.Enabled)
+		var scope, agentIDs string
+		err := rows.Scan(&t.ID, &t.Name, &t.IP, &t.Port, &t.Mode, &t.Enabled, &scope, &agentIDs)
 		if err != nil {
 			return nil, err
 		}
+		// 旧数据或空值统一回退为全部节点，保证升级后行为与之前一致
+		if scope != ISPScopeInclude && scope != ISPScopeExclude {
+			scope = ISPScopeAll
+		}
+		t.Scope = scope
+		t.AgentIDs = splitIDs(agentIDs)
 		targets = append(targets, t)
 	}
 	return targets, nil
 }
 
+// splitIDs 把逗号分隔的节点 ID 串解析为切片，顺带去掉空段与空白。
+func splitIDs(raw string) []string {
+	ids := []string{}
+	for _, item := range strings.Split(raw, ",") {
+		if trimmed := strings.TrimSpace(item); trimmed != "" {
+			ids = append(ids, trimmed)
+		}
+	}
+	return ids
+}
+
+// joinIDs 把节点 ID 切片序列化成逗号串写入数据库。
+func joinIDs(ids []string) string {
+	cleaned := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if trimmed := strings.TrimSpace(id); trimmed != "" {
+			cleaned = append(cleaned, trimmed)
+		}
+	}
+	return strings.Join(cleaned, ",")
+}
+
 func (s *SQLiteStore) CreateISPTarget(target *ISPTarget) (int64, error) {
 	res, err := s.db.Exec(
-		"INSERT INTO isp_targets (name, ip, port, mode, enabled) VALUES (?, ?, ?, ?, ?)",
-		target.Name, target.IP, target.Port, target.Mode, target.Enabled)
+		"INSERT INTO isp_targets (name, ip, port, mode, enabled, scope, agent_ids) VALUES (?, ?, ?, ?, ?, ?, ?)",
+		target.Name, target.IP, target.Port, target.Mode, target.Enabled, target.ScopeText(), joinIDs(target.AgentIDs))
 	if err != nil {
 		return 0, err
 	}
@@ -511,8 +549,8 @@ func (s *SQLiteStore) CreateISPTarget(target *ISPTarget) (int64, error) {
 
 func (s *SQLiteStore) UpdateISPTarget(target *ISPTarget) error {
 	_, err := s.db.Exec(
-		"UPDATE isp_targets SET name=?, ip=?, port=?, mode=?, enabled=? WHERE id=?",
-		target.Name, target.IP, target.Port, target.Mode, target.Enabled, target.ID)
+		"UPDATE isp_targets SET name=?, ip=?, port=?, mode=?, enabled=?, scope=?, agent_ids=? WHERE id=?",
+		target.Name, target.IP, target.Port, target.Mode, target.Enabled, target.ScopeText(), joinIDs(target.AgentIDs), target.ID)
 	return err
 }
 

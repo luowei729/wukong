@@ -112,6 +112,8 @@ wukong/
 
 - **2026-10-05 05:10（北京时间）**：生产已迁到 **arm64 机 `146.56.173.198`**（容器 `wukong`，`-p 64443:64443` 对公网 + `-v /opt/wukong/data:/opt/wukong/data` + `--env-file /opt/wukong/wukong.env`），入口 `https://server.lkz.pub`（Cloudflare 橙云→回源 64443 明文）。三条必须知道的结论：① **Cloudflare 橙云不能代理 gRPC 到明文源站**（实测 403 + text/html），所以 SQLite `agent_server_addr` 定为 `146.56.173.198:64443` 直连源站，只有网页走 CDN；② CI 已改为 **amd64/arm64 各跑一个原生 runner（`ubuntu-24.04-arm`）按 digest 推送 + merge job 合并 manifest**，约 2.5 分钟；不要再回到 QEMU 方案（超 10 分钟），也不要在 `Dockerfile` 里写死 `GOARCH`（用 `TARGETARCH`）；`download-artifact` 必须限定 `pattern: digests-*`，否则会把 buildx 的 `*.dockerbuild` artifact 一起下载并失败；③ 安装脚本已改为“先 `systemctl stop wukong-agent` + 下载到 `.new` 再 `mv -f`”；**直接 `curl -o` 覆盖运行中的二进制会被内核拒（ETXTBSY，curl 报 error 23）**，写任何“覆盖已安装二进制”的脚本都要用 rename 而不是原地写。另：`AGENTS.md` 历史上把管理员密码明文写进了公开仓库，已记入 `DEPLOY_CREDENTIALS.md` 待处理，新节点接入统一用一次性 token 的安装命令。
 
+- **2026-10-05 05:52（北京时间）**：运营商 Ping 目标改为**可按节点设作用域**。`isp_targets` 新增 `scope`（`all`/`include`/`exclude`）与 `agent_ids`（逗号串，已加 ALTER TABLE 迁移，旧库自动升级且默认 `all`）；判定入口统一用 `store.ISPTarget.AppliesTo(agentID)`，**过滤只在主控下发时做**（`enabledPingTargetsFor(agentID)`，包括注册响应与 `buildConfigFrame` 两处），探针不改也不升级。约束：`validateISPTarget` 要求 include/exclude 至少选一个节点，否则“仅选中”会静默退化成“全部节点”。公开详情页的 `publicPingISPs(agentID)` 也只列该节点实际会测的线路，避免空行。典型用途：IPv6 目标（如上海移动 `2409:8088::a`）必须排除无公网 IPv6 出口的节点（现网 hk2香港、sh1上海），否则这些节点上该线路永远 100% 丢包并误告警；设置页目标地址含冒号时会提供“选中有/无 IPv6 出口节点”一键选择（依据探针自报的 `ip_v6`）。
+
 ## 部署相关长期提示
 
 - **部署目录**: `/opt/wukong/`，主控 wukong.conf 权限 600，signing/ 权限 400

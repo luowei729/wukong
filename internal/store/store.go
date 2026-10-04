@@ -38,6 +38,13 @@ type Group struct {
 	TelegramConfID *int64 `json:"telegram_conf_id"` // 分组绑定的 Telegram 配置
 }
 
+// ISP 运营商 Ping 目标作域取值。
+const (
+	ISPScopeAll     = "all"     // 全部节点探测
+	ISPScopeInclude = "include" // 仅选中节点探测
+	ISPScopeExclude = "exclude" // 排除选中节点，其余都探测
+)
+
 // ISP 运营商 Ping 目标
 type ISPTarget struct {
 	ID      int64  `json:"id"`
@@ -46,6 +53,48 @@ type ISPTarget struct {
 	Port    int    `json:"port"` // TCP ping 端口
 	Mode    string `json:"mode"` // "icmp" / "tcp" / "auto"
 	Enabled bool   `json:"enabled"`
+	// Scope 作用域：部分节点（如无公网 IPv6 出口的机器）探测 IPv6 目标必然全部失败，
+	// 需要按节点选择/排除，否则该线路在这些节点上长期报 100% 丢包并误触告警。
+	Scope string `json:"scope"`
+	// AgentIDs 是 include/exclude 模式下涉及的节点 ID 列表；all 模式下忽略。
+	AgentIDs []string `json:"agent_ids"`
+}
+
+// ScopeText 返回可入库的作用域值，非法或为空时回退为 all，
+// 保证旧调用方（只传 name/ip/port/mode/enabled）行为不变。
+func (t *ISPTarget) ScopeText() string {
+	switch t.Scope {
+	case ISPScopeInclude, ISPScopeExclude:
+		return t.Scope
+	default:
+		return ISPScopeAll
+	}
+}
+
+// AppliesTo 判断指定探针是否需要探测该目标。
+// 过滤只发生在主控下发配置时，探针本身不需要改动也不需要升级。
+func (t *ISPTarget) AppliesTo(agentID string) bool {
+	if t == nil {
+		return false
+	}
+	switch t.ScopeText() {
+	case ISPScopeInclude:
+		return containsID(t.AgentIDs, agentID)
+	case ISPScopeExclude:
+		return !containsID(t.AgentIDs, agentID)
+	default:
+		return true
+	}
+}
+
+// containsID 在节点 ID 列表中查找，避免引入额外依赖。
+func containsID(ids []string, target string) bool {
+	for _, id := range ids {
+		if id == target {
+			return true
+		}
+	}
+	return false
 }
 
 // ============ 时序数据类型 ============

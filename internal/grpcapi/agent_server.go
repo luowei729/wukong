@@ -58,7 +58,8 @@ func (s *AgentServer) Register(ctx context.Context, req *pb.RegisterRequest) (*p
 
 	collectInterval := s.effectiveCollectInterval(agent)
 	pingInterval := s.effectivePingInterval(agent)
-	pingTargets := s.enabledPingTargets()
+	// 按节点作用域过滤：IPv6 目标不会下发给无 IPv6 出口的节点
+	pingTargets := s.enabledPingTargetsFor(agent.ID)
 	targetVersion, _ := s.store.GetSetting("agent_target_version")
 
 	return &pb.RegisterResponse{
@@ -215,7 +216,8 @@ func (s *AgentServer) buildConfigFrame(agentID string) *pb.ServerFrame {
 		CollectInterval: s.effectiveCollectInterval(agent),
 		PingInterval:    s.effectivePingInterval(agent),
 	}
-	for _, target := range s.enabledPingTargets() {
+	// 同样按该节点的作用域过滤，保证下发的列表与注册时一致
+	for _, target := range s.enabledPingTargetsFor(agentID) {
 		cfg.PingTargets = append(cfg.PingTargets, config.PingTargetConfig{
 			Name:    target.Name,
 			IP:      target.Ip,
@@ -378,7 +380,11 @@ func (s *AgentServer) effectivePingInterval(agent *store.Agent) int {
 	return 1
 }
 
-func (s *AgentServer) enabledPingTargets() []*pb.PingTarget {
+// enabledPingTargetsFor 返回指定探针应当探测的启用目标。
+// 原因：目标在后台可按节点设置作用域（全部/仅选中/排除），
+// IPv6 线路下发到无 IPv6 出口的节点会全部失败并产生假丢包，
+// 因此过滤统一在主控下发时做，探针无需升级也不需感知该逻辑。
+func (s *AgentServer) enabledPingTargetsFor(agentID string) []*pb.PingTarget {
 	targets, err := s.store.ListISPTargets()
 	if err != nil {
 		log.Printf("读取 Ping 运营商目标失败: %v", err)
@@ -389,7 +395,10 @@ func (s *AgentServer) enabledPingTargets() []*pb.PingTarget {
 		if target == nil || !target.Enabled {
 			continue
 		}
-		// 只下发启用目标；目标来自 SQLite 配置，不包含任何管理端密钥。
+		// 只下发启用且适用于当前节点的目标；不包含任何管理端密钥。
+		if !target.AppliesTo(agentID) {
+			continue
+		}
 		result = append(result, &pb.PingTarget{
 			Name:    target.Name,
 			Ip:      target.IP,

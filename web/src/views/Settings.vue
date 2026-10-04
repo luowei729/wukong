@@ -159,6 +159,44 @@
           </el-form-item>
         </el-form>
 
+        <!-- 作用域：无公网 IPv6 出口的节点探测 IPv6 目标会全部失败，需要按节点选中/排除 -->
+        <div class="wk-isp-scope">
+          <div class="wk-isp-scope-row">
+            <span class="wk-isp-scope-label">作用域</span>
+            <el-select v-model="ispForm.scope" style="width: 158px">
+              <el-option label="全部节点" value="all" />
+              <el-option label="仅选中节点" value="include" />
+              <el-option label="排除选中节点" value="exclude" />
+            </el-select>
+            <template v-if="ispForm.scope !== 'all'">
+              <el-select
+                v-model="ispForm.agent_ids"
+                multiple
+                collapse-tags
+                collapse-tags-tooltip
+                filterable
+                placeholder="选择节点"
+                style="flex: 1; min-width: 200px"
+              >
+                <el-option
+                  v-for="node in agentOptions"
+                  :key="node.id"
+                  :label="node.label"
+                  :value="node.id"
+                >
+                  <span>{{ node.label }}</span>
+                  <span class="wk-opt-v6">{{ node.ip_v6 ? 'IPv6' : 'IPv4' }}</span>
+                </el-option>
+              </el-select>
+              <!-- IPv6 目标的一键选择：按探针上报的公网出口是否含 IPv6 判定 -->
+              <el-button v-if="isIPv6Target" size="small" @click="pickIPv6Nodes">
+                {{ ispForm.scope === 'include' ? '选中有 IPv6 的' : '选中无 IPv6 的' }}
+              </el-button>
+            </template>
+          </div>
+          <div class="form-tip">{{ scopeHint }}</div>
+        </div>
+
         <el-table v-loading="ispLoading" :data="ispTargets" style="width: 100%">
           <el-table-column prop="name" label="运营商" min-width="130" />
           <el-table-column prop="ip" label="目标" min-width="170">
@@ -174,6 +212,12 @@
           <el-table-column prop="mode" label="模式" width="90">
             <template #default="{ row }">
               <span class="wk-tag">{{ row.mode }}</span>
+            </template>
+          </el-table-column>
+          <!-- 作用域列：一眼看出该线路跑在哪些节点上 -->
+          <el-table-column label="作用域" min-width="150">
+            <template #default="{ row }">
+              <span class="wk-sub">{{ scopeText(row) }}</span>
             </template>
           </el-table-column>
           <el-table-column label="状态" width="90">
@@ -318,7 +362,7 @@
 // 分区由 el-tabs 改为左侧竖排导航，但每个分区调用的接口、字段、校验规则一字未改：
 //   主题 /api/theme ｜ 安装 /api/install-tokens ｜ ISP /api/isp-targets ｜
 //   阈值 /api/alert-settings ｜ Telegram /api/telegram[/test] ｜ 密码 /api/auth/password
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import WkBadge from '@/components/WkBadge.vue'
 import WkCard from '@/components/WkCard.vue'
@@ -408,7 +452,75 @@ const upgradeForm = reactive({ target_version: '', upgrade_url: '' })
 const ispTargets = ref<any[]>([])
 const ispLoading = ref(false)
 const ispSaving = ref(false)
-const ispForm = reactive({ id: 0, name: '', ip: '', port: 80, mode: 'auto', enabled: true })
+const ispForm = reactive({
+  id: 0,
+  name: '',
+  ip: '',
+  port: 80,
+  mode: 'auto',
+  enabled: true,
+  // 作用域：all=全部节点，include=仅选中节点，exclude=排除选中节点
+  scope: 'all',
+  // include/exclude 模式下涉及的节点 ID
+  agent_ids: [] as string[],
+})
+
+// 节点候选列表：只用于作用域选择，带探针自报的公网出口 IP 以便判断能否走 IPv6
+const agentList = ref<any[]>([])
+
+const agentOptions = computed(() =>
+  agentList.value.map((node: any) => ({
+    id: node.id,
+    ip_v6: node.ip_v6 || '',
+    label: node.name || node.hostname || `节点 ${String(node.id).slice(0, 8)}`,
+  }))
+)
+
+// 目标地址含冒号就视为 IPv6，用于给出一键选择与风险提示
+const isIPv6Target = computed(() => ispForm.ip.includes(':'))
+
+// 作用域说明：把“为什么需要排除节点”直接写在表单下
+const scopeHint = computed(() => {
+  const base =
+    ispForm.scope === 'include'
+      ? '仅选中的节点会探测该线路，其余节点不下发。'
+      : ispForm.scope === 'exclude'
+        ? '选中节点不下发该线路，其余节点正常探测。'
+        : '下发给所有探针探测。'
+  if (ispForm.scope !== 'all' && isIPv6Target.value) {
+    return `${base} 无公网 IPv6 出口的节点探测 IPv6 目标会全部失败并显示 100% 丢包。`
+  }
+  return base
+})
+
+// 一键把“有/无公网 IPv6 出口”的节点填进选择框：
+// include 模式选有 IPv6 的节点，exclude 模式选没 IPv6 的节点
+function pickIPv6Nodes() {
+  const withV6 = agentList.value.filter((node: any) => node.ip_v6).map((node: any) => node.id)
+  const withoutV6 = agentList.value.filter((node: any) => !node.ip_v6).map((node: any) => node.id)
+  ispForm.agent_ids = ispForm.scope === 'include' ? withV6 : withoutV6
+}
+
+// 列表里的作用域摘要：把 ID 列表翻译成人能读的文案
+function scopeText(row: any): string {
+  const ids: string[] = Array.isArray(row?.agent_ids) ? row.agent_ids : []
+  if (!row?.scope || row.scope === 'all' || ids.length === 0) return '全部节点'
+  const names = ids.map(
+    (id) => agentList.value.find((node: any) => node.id === id)?.name || String(id).slice(0, 8)
+  )
+  const suffix = row.scope === 'include' ? '仅' : '排除'
+  return `${suffix} ${ids.length} 个：${names.join('、')}`
+}
+
+// 拉取节点列表供作用域选择使用
+async function loadAgentOptions() {
+  try {
+    const res = await http.get(`/api/agents?_=${Date.now()}`)
+    agentList.value = res.data || []
+  } catch {
+    agentList.value = []
+  }
+}
 
 // 左侧分区导航配置：分组标题 + 条目 + 内联图标
 const navGroups = [
@@ -666,6 +778,8 @@ function resetISPForm() {
   ispForm.port = 80
   ispForm.mode = 'auto'
   ispForm.enabled = true
+  ispForm.scope = 'all'
+  ispForm.agent_ids = []
 }
 
 function editISPTarget(row: any) {
@@ -675,6 +789,9 @@ function editISPTarget(row: any) {
   ispForm.port = row.port || 80
   ispForm.mode = row.mode || 'auto'
   ispForm.enabled = Boolean(row.enabled)
+  // 回填作用域；后端旧数据没有 scope 字段时回退为全部节点
+  ispForm.scope = row.scope === 'include' || row.scope === 'exclude' ? row.scope : 'all'
+  ispForm.agent_ids = Array.isArray(row.agent_ids) ? row.agent_ids.slice() : []
 }
 
 async function saveISPTarget() {
@@ -690,6 +807,14 @@ async function saveISPTarget() {
       port: ispForm.port,
       mode: ispForm.mode,
       enabled: ispForm.enabled,
+      scope: ispForm.scope,
+      // all 模式下后端会忽略该列表，这里统一清洗避免残留
+      agent_ids: ispForm.scope === 'all' ? [] : ispForm.agent_ids,
+    }
+    if (ispForm.scope !== 'all' && payload.agent_ids.length === 0) {
+      ispSaving.value = false
+      ElMessage.warning('请先选择至少一个节点')
+      return
     }
     if (ispForm.id) {
       await http.put(`/api/isp-targets/${ispForm.id}`, payload)
@@ -743,7 +868,14 @@ onMounted(async () => {
     theme.setPrimary(themeForm.primary)
   } catch {}
 
-  await Promise.all([loadTelegram(), loadThresholds(), loadISPTargets(), loadUpgradeSettings()])
+  await Promise.all([
+    loadTelegram(),
+    loadThresholds(),
+    loadISPTargets(),
+    loadUpgradeSettings(),
+    // 作用域选择需要节点列表，与其他配置并行拉取
+    loadAgentOptions(),
+  ])
 })
 </script>
 
@@ -949,6 +1081,36 @@ onMounted(async () => {
 /* ISP 内联表单：换行留白 */
 .wk-isp-form {
   margin-bottom: var(--wk-space-2);
+}
+
+/* 作用域区：标签 + 下拉 + 节点多选 + 一键按钮同一行，窄屏自动换行 */
+.wk-isp-scope {
+  padding: var(--wk-space-3) 0 var(--wk-space-1);
+  border-top: 1px dashed var(--wk-border);
+  margin-top: var(--wk-space-2);
+}
+
+.wk-isp-scope-row {
+  display: flex;
+  align-items: center;
+  gap: var(--wk-space-2);
+  flex-wrap: wrap;
+}
+
+.wk-isp-scope-label {
+  font-size: var(--wk-fs-base);
+  font-weight: 500;
+  color: var(--wk-text-secondary);
+  width: 52px;
+  flex-shrink: 0;
+}
+
+/* 下拉选项右侧的 IPv6/IPv4 标记：靠右弱化显示 */
+.wk-opt-v6 {
+  float: right;
+  margin-left: var(--wk-space-3);
+  font-size: var(--wk-fs-xs);
+  color: var(--wk-text-muted);
 }
 
 .wk-isp-form :deep(.el-form-item) {
