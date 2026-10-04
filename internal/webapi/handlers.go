@@ -733,14 +733,25 @@ esac
 # 创建目录
 mkdir -p "$INSTALL_DIR" "$DATA_DIR"
 
+# 先停掉正在运行的旧探针。
+# 原因：直接覆盖一个正在执行的二进制会被内核拒绝（ETXTBSY），
+# curl 表现为 "(23) Failure writing output to destination"，
+# 导致已装过探针的机器重新安装时必然失败。
+systemctl stop wukong-agent 2>/dev/null || true
+
 # 下载探针二进制
 # 已实现公开二进制下载接口，安装脚本会从 BASE_URL 下载当前镜像内置的探针。
+# 先下到 .new 临时文件再 mv 替换：mv 是同目录 rename，即使旧进程未退出也不会撞 ETXTBSY，
+# 同时避免下载中断时把原来可用的二进制写坏。
 echo "下载 wukong 探针..."
-if ! curl -fsSL "$BASE_URL/api/agent/binary/latest/$ARCH" -o "$INSTALL_DIR/wukong-agent"; then
-    echo "探针二进制下载失败，请手动复制 wukong-agent 后重新执行注册命令。"
+TMP_BIN="$INSTALL_DIR/wukong-agent.new"
+if ! curl -fsSL "$BASE_URL/api/agent/binary/latest/$ARCH" -o "$TMP_BIN"; then
+    rm -f "$TMP_BIN"
+    echo "探针二进制下载失败（请检查能否访问 $BASE_URL 与磁盘空间），或手动复制 $INSTALL_DIR/wukong-agent 后重新执行注册命令。"
     exit 1
 fi
-chmod +x "$INSTALL_DIR/wukong-agent"
+chmod +x "$TMP_BIN"
+mv -f "$TMP_BIN" "$INSTALL_DIR/wukong-agent"
 
 # 注册探针
 echo "注册到主控 $SERVER_ADDR ..."
