@@ -2,6 +2,27 @@
 
 所有变更记录使用北京时间（UTC+8）。
 
+## [2026-10-05 06:22] - 列表默认按名称排序 + 统一节点状态口径
+
+### 改动前总结
+1. 公开首页与后台节点列表默认按 CPU 降序，每秒刷新时卡片位置会随负载重排，找机器靠名字反而更难；
+2. ff1法兰克福 在公开页显示离线、后台显示在线。实测：`agents.online=true`、`last_seen_at` 每秒在动（gRPC 流未断），
+   但内存/小时表里它的最新指标停在 22:06（自升级后系统采集没再产出数据）。
+   根因是两端用了两套判定：后台只看 `online`，公开页看指标新鲜度（>5min → stale）。
+
+### 改动后总结
+- `utils/format.ts` 新增 `nodeState()`（四态 online/stale/offline/unknown，阈值 `STALE_SECONDS=300` 与后端
+  `publicStatus` 对齐）、`nodeStateText()`、`nodeStateTone()`；公开接口已返的 `status` 直接沿用，不再前端重算。
+- 后台三处改用统一判定：Dashboard 卡片/列表、Nodes 状态列与“在线/离线”筛选与计数、
+  `useOverview.onlineCount`（顶栏与 KPI 共用），数据延迟的节点不再被当作在线。
+- 默认按名称排序：Nodes 页、公开首页、Dashboard（新增 `sortedNodes`，卡片与列表同序），
+  并用 `localeCompare(..., 'zh-Hans-CN')` 保证中文城市名按本地顺序而非码位。
+- 公开首页：`is-offline` 置灰样式只给 offline/unknown，stale 保留亮度 + 琥珀色灯（之前被归成离线观感）。
+
+### 验证
+- `vue-tsc` 零错误、`vite build` 成功；待部署后核对 ff1 在两端都显示“数据延迟”。
+- ff1 本身需要处理：它自升级后只发空帧（`System=nil`），需在 ff1 上 `systemctl restart wukong-agent` 并看日志（本机无该机器 SSH 权限）。
+
 ## [2026-10-05 06:05] - 修复：改完运营商目标后告警不恢复、新配置不生效
 
 ### 改动前总结

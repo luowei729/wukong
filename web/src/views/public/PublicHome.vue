@@ -150,7 +150,7 @@
         <article
           v-for="server in filteredServers"
           :key="server.id"
-          :class="['wk-node-card', { 'is-offline': server.status !== 'online' }]"
+          :class="['wk-node-card', { 'is-offline': server.status === 'offline' || server.status === 'unknown' }]"
           @click="router.push(`/server/${server.id}`)"
         >
           <div class="wk-node-card-head">
@@ -330,7 +330,8 @@ const ringStyle = computed(() => {
 
 // ---------------- 筛选与排序 ----------------
 const statusFilter = ref<'all' | 'online' | 'offline'>('all')
-const sortKey = ref<'name' | 'cpu' | 'mem' | 'disk'>('cpu')
+// 默认按名称：与后台节点列表/总览保持一致，也避免每秒按 CPU 重排导致卡片位置跳动
+const sortKey = ref<'name' | 'cpu' | 'mem' | 'disk'>('name')
 
 const statusChips = computed(() => [
   { label: '全部', value: 'all' as const, count: servers.value.length },
@@ -354,7 +355,7 @@ const filteredServers = computed(() => {
   })
   const sorted = list.slice()
   if (sortKey.value === 'name') {
-    sorted.sort((a, b) => (a.name || '').localeCompare(b.name || ''))
+    sorted.sort((a, b) => (a.name || '').localeCompare(b.name || '', 'zh-Hans-CN'))
   } else {
     const key = sortKey.value
     sorted.sort((a, b) => (Number(b[key]) || -1) - (Number(a[key]) || -1))

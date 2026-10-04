@@ -121,9 +121,9 @@
         style="padding: 0 var(--wk-space-5) var(--wk-space-5)"
       >
         <article
-          v-for="node in nodes"
+          v-for="node in sortedNodes"
           :key="node.id"
-          :class="['wk-node-card', { 'is-offline': !node.online }]"
+          :class="['wk-node-card', { 'is-offline': nodeState(node) === 'offline' }]"
           @click="goToNode(node.id)"
         >
           <div class="wk-node-card-head">
@@ -131,7 +131,12 @@
               <div class="wk-node-card-name">{{ displayName(node) }}</div>
               <div class="wk-eyebrow" style="margin-top: 3px">{{ nodeMeta(node) }}</div>
             </div>
-            <WkStatusDot :status="node.online ? 'online' : 'offline'" :pulse="node.online" />
+            <!-- 状态灯用统一判定：流在但指标过期时显示琥珀色“数据延迟”，与公开页一致 -->
+            <WkStatusDot
+              :status="dotStatus(node)"
+              :pulse="nodeState(node) === 'online'"
+              :title="nodeStateText(nodeState(node))"
+            />
           </div>
 
           <div class="wk-node-card-meters">
@@ -152,10 +157,14 @@
       </div>
 
       <!-- 列表视图：与节点列表页同一套数值口径，只是更紧凑 -->
-      <el-table v-else :data="nodes" style="width: 100%" :row-class-name="rowClassName">
+      <el-table v-else :data="sortedNodes" style="width: 100%" :row-class-name="rowClassName">
         <el-table-column label="状态" width="72" align="center">
           <template #default="{ row }">
-            <WkStatusDot :status="row.online ? 'online' : 'offline'" :size="6" />
+            <WkStatusDot
+              :status="dotStatus(row)"
+              :size="6"
+              :title="nodeStateText(nodeState(row))"
+            />
           </template>
         </el-table-column>
         <el-table-column label="名称" min-width="180">
@@ -286,8 +295,11 @@ import {
   formatDuration,
   formatRateShort,
   loadLevel,
+  nodeState,
+  nodeStateText,
   relativeTime,
 } from '@/utils/format'
+import type { NodeState } from '@/utils/format'
 
 const router = useRouter()
 
@@ -325,6 +337,23 @@ function setViewMode(mode: 'card' | 'list') {
 // 节点显示名：优先后台自定义名称，其次主机名，最后截断 ID
 function displayName(node: any): string {
   return node.name || node.hostname || `节点 ${String(node.id).slice(0, 8)}`
+}
+
+// 默认按名称排序：卡片网格与列表视图都用同一顺序，前后端（公开页/后台）排列一致，
+// 避免每秒刷新时节点位置随 CPU 跳动导致目不能定位
+const sortedNodes = computed(() =>
+  nodes.value
+    .slice()
+    .sort((a: any, b: any) => displayName(a).localeCompare(displayName(b), 'zh-Hans-CN'))
+)
+
+// 状态灯四态映射：unknown（在线但从未上报）用中性灰，不能伪装成离线
+function dotStatus(node: any) {
+  const state: NodeState = nodeState(node)
+  if (state === 'online') return 'online'
+  if (state === 'stale') return 'stale'
+  if (state === 'offline') return 'offline'
+  return 'muted'
 }
 
 // 节点头部元信息：系统 · 区域 · 架构（与公开页同一口径）

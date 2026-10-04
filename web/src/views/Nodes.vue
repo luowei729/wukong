@@ -30,10 +30,10 @@
       </div>
 
       <el-select v-model="sortKey" size="small" style="width: 148px" aria-label="排序方式">
+        <el-option label="按名称" value="name" />
         <el-option label="按 CPU 降序" value="cpu" />
         <el-option label="按内存降序" value="mem" />
         <el-option label="按磁盘降序" value="disk" />
-        <el-option label="按名称" value="name" />
         <el-option label="按最近上报" value="recent" />
       </el-select>
 
@@ -73,14 +73,14 @@
         style="width: 100%"
         :row-class-name="rowClassName"
       >
-        <!-- 状态 -->
+        <!-- 状态：四态统一判定（在线/数据延迟/离线/待上报），与公开页同一口径 -->
         <el-table-column label="状态" width="48" align="center">
           <template #default="{ row }">
             <WkStatusDot
-              :status="row.online ? 'online' : 'offline'"
+              :status="dotStatus(row)"
               :size="8"
-              :pulse="row.online"
-              :title="row.online ? '在线' : '离线'"
+              :pulse="nodeState(row) === 'online'"
+              :title="nodeStateText(nodeState(row))"
             />
           </template>
         </el-table-column>
@@ -226,8 +226,11 @@ import {
   formatBytesShort,
   formatDateTime,
   formatDuration,
+  nodeState,
+  nodeStateText,
   relativeTime,
 } from '@/utils/format'
+import type { NodeState } from '@/utils/format'
 
 const router = useRouter()
 const { nodes, loading } = useOverview()
@@ -235,22 +238,32 @@ const { nodes, loading } = useOverview()
 // ---------------- 筛选与排序状态 ----------------
 const keyword = ref('')
 const statusFilter = ref<'all' | 'online' | 'offline'>('all')
-const sortKey = ref<'cpu' | 'mem' | 'disk' | 'name' | 'recent'>('cpu')
+// 默认按名称：运维找机器靠名字，而不是靠“谁 CPU 高”这种每秒变动的顺序
+const sortKey = ref<'name' | 'cpu' | 'mem' | 'disk' | 'recent'>('name')
+
+// 状态灯映射：unknown（在线但从未上报）用中性灰，不能假装成离线
+function dotStatus(row: any) {
+  const state: NodeState = nodeState(row)
+  if (state === 'online') return 'online'
+  if (state === 'stale') return 'stale'
+  if (state === 'offline') return 'offline'
+  return 'muted'
+}
 
 // chips 带数量，一眼看出各状态规模（数量来自当前节点集合，不受关键字影响）
-const statusChips = computed(() => [
-  { label: '全部', value: 'all' as const, count: nodes.value.length },
-  {
-    label: '在线',
-    value: 'online' as const,
-    count: nodes.value.filter((n: any) => n.online).length,
-  },
-  {
-    label: '离线',
-    value: 'offline' as const,
-    count: nodes.value.filter((n: any) => !n.online).length,
-  },
-])
+// 统计口径用 nodeState，与状态灯一致：“在线但数据延迟”的不算在线
+const statusChips = computed(() => {
+  const online = nodes.value.filter((node: any) => nodeState(node) === 'online').length
+  return [
+    { label: '全部', value: 'all' as const, count: nodes.value.length },
+    { label: '在线', value: 'online' as const, count: online },
+    {
+      label: '离线',
+      value: 'offline' as const,
+      count: nodes.value.length - online,
+    },
+  ]
+})
 
 // 节点显示名：后台自定义名称 > 主机名 > ID 前缀
 function displayName(node: any): string {
@@ -294,14 +307,19 @@ function matchKeyword(node: any, text: string): boolean {
 // 过滤 + 排序后的列表：数值列缺失时按 -1 参与排序，保证离线节点沉底
 const filteredNodes = computed(() => {
   const list = nodes.value.filter((node: any) => {
-    if (statusFilter.value === 'online' && !node.online) return false
-    if (statusFilter.value === 'offline' && node.online) return false
+    if (statusFilter.value !== 'all') {
+      // “在线”只含数据新鲜的；“离线”包含数据延迟与待上报，与状态灯语义一致
+      const onlineLike = nodeState(node) === 'online'
+      if (statusFilter.value === 'online' && !onlineLike) return false
+      if (statusFilter.value === 'offline' && onlineLike) return false
+    }
     return matchKeyword(node, keyword.value.trim())
   })
 
   const sorted = list.slice()
   if (sortKey.value === 'name') {
-    sorted.sort((a: any, b: any) => displayName(a).localeCompare(displayName(b)))
+    // 中文节点名用本地排序，避免“上海/东京/首尔”按码位排列
+    sorted.sort((a: any, b: any) => displayName(a).localeCompare(displayName(b), 'zh-Hans-CN'))
   } else if (sortKey.value === 'recent') {
     sorted.sort(
       (a: any, b: any) =>

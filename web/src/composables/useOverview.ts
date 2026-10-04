@@ -8,7 +8,7 @@
 // =============================================
 import { computed, onMounted, onUnmounted, ref } from "vue"
 import http from "@/utils/http"
-import { average } from "@/utils/format"
+import { average, nodeState } from "@/utils/format"
 
 // 滚动历史最大采样点：1s 采集 × 600 = 最近 10 分钟，够画 sparkline 与短周期趋势
 const HISTORY_LIMIT = 600
@@ -64,7 +64,7 @@ async function fetchOnce() {
       t: Date.now(),
       cpu: average(metricNodes.map((n: any) => n.cpu)),
       mem: average(metricNodes.map((n: any) => n.mem)),
-      online: nodes.value.filter((n: any) => n.online).length,
+      online: nodes.value.filter((n: any) => nodeState(n) === "online").length,
     })
     if (next.length > HISTORY_LIMIT) next.splice(0, next.length - HISTORY_LIMIT)
     // 整体重新赋值而不是 push：保持数组引用变化，下游 watch(浅比较) 与图表才能感知到新增采样
@@ -124,7 +124,9 @@ export function useOverview() {
     }
   })
 
-  const onlineNodes = computed(() => nodes.value.filter((n: any) => n.online))
+  // 在线节点：统一用 nodeState（连接 + 指标新鲜度），与公开页、节点列表状态灯同一口径；
+  // 不能只看 agents.online，否则“流在但采集已挂”的节点会被顶栏当成在线
+  const onlineNodes = computed(() => nodes.value.filter((n: any) => nodeState(n) === "online"))
 
   // 有实时指标的在线节点（平均值只统计它们，避免用 0 拉低集群均值）
   const metricNodes = computed(() =>

@@ -114,6 +114,55 @@ export function relativeTime(value?: string | number | Date | null): string {
   return `${Math.floor(hours / 24)}天前`
 }
 
+/** 节点状态：与后端 public.go/publicStatus 的 5 分钟口径保持一致。
+ * 背景：后台以前只看 agents.online（gRPC 流在就绿），而公开页看指标新鲜度，
+ * 曾出现“探针自升级后系统采集挂掉 → 后台显示在线、公开页显示离线”的两端不一致。
+ * 统一成四态后，两端都按 连接+数据新鲜度 判定，不会再各说各话。 */
+export type NodeState = "online" | "stale" | "offline" | "unknown"
+
+/** 指标超过该秒数未更新视为“数据延迟”，与后端 publicStatus 的 5 分钟一致 */
+export const STALE_SECONDS = 300
+
+export function nodeState(
+  node?: { online?: boolean; status?: string; updated_at?: string; last_seen_at?: string } | null,
+  staleSeconds: number = STALE_SECONDS
+): NodeState {
+  if (!node) return "unknown"
+  // 公开接口已算好 status，直接沿用，避免前后端两套算法跑偏
+  if (node.status) {
+    if (node.status === "online" || node.status === "stale" || node.status === "offline") {
+      return node.status
+    }
+    return "unknown"
+  }
+  if (!node.online) return "offline"
+  // 在线但从来没有指标 → 待上报，不能当作正常在线
+  const stamp = node.updated_at || node.last_seen_at
+  if (!stamp) return "unknown"
+  const time = new Date(stamp).getTime()
+  if (Number.isNaN(time)) return "unknown"
+  return (Date.now() - time) / 1000 > staleSeconds ? "stale" : "online"
+}
+
+/** 状态中文文案（与 statusText 保持同一术语） */
+export function nodeStateText(state: NodeState): string {
+  const map: Record<NodeState, string> = {
+    online: "在线",
+    stale: "数据延迟",
+    offline: "离线",
+    unknown: "待上报",
+  }
+  return map[state]
+}
+
+/** 状态对应的徽章语气 */
+export function nodeStateTone(state: NodeState): "ok" | "warn" | "fail" | "neutral" {
+  if (state === "online") return "ok"
+  if (state === "stale") return "warn"
+  if (state === "offline") return "fail"
+  return "neutral"
+}
+
 /** 本地日期时间（tooltip 与详情页绝对时间用） */
 export function formatDateTime(value?: string | number | Date | null): string {
   if (value == null || value === "") return "-"

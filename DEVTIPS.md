@@ -64,6 +64,12 @@ canvas **不解析** `var(--x)`。任何 `axisLabel: { color: 'var(--wk-text-mut
 - 负载分级全局统一：`LOAD_WARN = 70`、`LOAD_DANGER = 85`（`loadLevel()`）。旧代码里 60/85 与 70/90 两套阈值已收敛为一套。
 - **丢包率不能套用资源阈值**：任何丢包都应可见，用 `lossTone()`（>0 warn、≥5% fail）这类独立语义。
 - 数字一律 `.wk-num`（等宽 + `font-variant-numeric: tabular-nums`），否则每秒刷新的数值会左右抖动。
+- **节点状态只有一个入口：`nodeState()`（四态 online/stale/offline/unknown）**，阈值 `STALE_SECONDS=300`
+  与后端 `publicStatus` 一致。历史教训：后台只看 `agents.online`（gRPC 流在就绿），公开页看指标新鲜度，
+  探针自升级后采集挂掉时会出现“后台在线 / 公开页离线”。新增展示状态的页面必须用 `nodeState`，
+  不要再写 `row.online ? 'online' : 'offline'`；公开接口的 `status` 字段直接沿用，不在前端重算。
+- **列表默认按名称排序**（`localeCompare(..., 'zh-Hans-CN')`）：按 CPU 等实时值排序会让卡片每秒重排，
+  人眼无法定位；需要排序时用户自己切换。
 
 ### 表格密度（Nodes / Alerts）
 
