@@ -312,12 +312,23 @@
   }
 }
 
-.el-popper {
+// EP 默认 effect="dark" 的 tooltip：背景与文字色是一对（深底浅字），
+// 旧版只把背景改成覆盖层色，没改文字色也没改箭头，导致浅色主题下“白底白字 + 黑箭头”，
+// 看起来像一个空白悬窗。这里把 is-dark / is-light 的背景、文字色、箭头三者统一接管。
+.el-popper,
+.el-popper.is-dark,
+.el-popper.is-light {
   border-radius: var(--wk-radius-md) !important;
   background: var(--wk-elevated) !important;
-  border-color: var(--wk-border-strong) !important;
+  border: 1px solid var(--wk-border-strong) !important;
+  color: var(--wk-text) !important;
   box-shadow: var(--wk-shadow-pop) !important;
   font-size: var(--wk-fs-base) !important;
+
+  .el-popper__arrow::before {
+    background: var(--wk-elevated) !important;
+    border-color: var(--wk-border-strong) !important;
+  }
 }
 
 .el-dropdown-menu__item {

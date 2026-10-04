@@ -37,6 +37,16 @@ web/src/
 
 踩坑：早期版本 `applyTheme()` 只写 `data-theme`，导致"自定义主色"存进了 SQLite 却从未生效。改主题相关代码时，务必确认链路末端真的有 `documentElement.style.setProperty`。
 
+### 覆盖 Element Plus 浮层（重要）
+
+覆盖 `.el-popper` 时，**背景、文字色、箭头三者必须一起接管**。EP 默认 `effect="dark"` 的 tooltip 是
+“深底 + 浅字”一对：只改 background 会把文字留在新背景上，浅色主题下就是**白底白字**，
+用户看到的正是“一个空白悬窗”（箭头也会仍是深色，变成白框黑箭头）。
+
+另外 `.el-popper.is-dark` 的特异度高于 `.el-popper`，必须把 `.is-dark` / `.is-light` 一起写进选择器，
+并用 `!important` 覆盖 `.el-popper__arrow::before`。侧栏导航这类“只是提示菜单名”的场景优先用原生
+`title`（展开态传空串即不显示），不要包 `el-tooltip`，否则折叠/展开两种状态还要额外管弹层。
+
 ### ECharts 与 CSS 变量（重要）
 
 canvas **不解析** `var(--x)`。任何 `axisLabel: { color: 'var(--wk-text-muted)' }` 都会静默退化成默认色。

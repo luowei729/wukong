@@ -137,8 +137,8 @@
           title="暂无 Ping 数据"
           description="已配置运营商目标，但最近 24 小时没有收到探测结果"
         />
-        <!-- 分线路/叠加双模式：每条线路自带 均/最低/最高/丢包 摘要，不再需要单独的列表区 -->
-        <WkPingChart v-else :series="pingSeries" :single-height="'120px'" />
+        <!-- 叠加对比图 + 每线路统计摘要（均/最低/最高/丢包） -->
+        <WkPingChart v-else :series="pingSeries" height="340px" :loading="pingLoading" />
       </template>
     </WkCard>
 
@@ -415,14 +415,21 @@ async function loadISPTargets() {
 
 // 并行拉取每条线路的聚合数据，空线路不参与绘图，避免图例出现无意义项
 async function loadPingAgg() {
-  if (ispTargets.value.length === 0) {
+  // 按节点作用域过滤：/api/isp-targets 已返回 scope / agent_ids，前端自己判断即可。
+  // 不给被排除的线路（如不支持 IPv6 的节点上的 IPv6 线路）白跑一次 ping-agg 查询。
+  const targets = ispTargets.value.filter((isp: any) => {
+    if (isp.scope === 'include') return (isp.agent_ids || []).includes(agentId)
+    if (isp.scope === 'exclude') return !(isp.agent_ids || []).includes(agentId)
+    return true
+  })
+  if (targets.length === 0) {
     pingSeries.value = {}
     return
   }
   pingLoading.value = true
   try {
     const results = await Promise.all(
-      ispTargets.value.map(async (isp: any) => {
+      targets.map(async (isp: any) => {
         const res = await http.get(`/api/agents/${agentId}/ping-agg`, {
           params: { isp: isp.name, _: Date.now() },
         })

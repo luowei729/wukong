@@ -101,27 +101,25 @@
         <nav class="wk-side-nav">
           <div v-for="group in navGroups" :key="group.title" class="wk-nav-group">
             <div class="wk-nav-group-title">{{ group.title }}</div>
-            <el-tooltip
+            <!-- 折叠态下标签被隐藏，用原生 title 提示菜单名：
+                 不用 el-tooltip 是因为它的弹层在展开态会渲染出一个空白气泡（且箭头颜色与主题不一致），
+                 原生 title 为空字符串时完全不显示，展开/折叠两种状态都能正确处理 -->
+            <a
               v-for="item in group.items"
               :key="item.path"
-              :disabled="!sidebarCollapsed"
-              :content="item.label"
-              placement="right"
+              :class="['wk-nav-item', { active: currentPath === item.path }]"
+              role="link"
+              :aria-label="item.label"
+              :title="sidebarCollapsed ? item.label : ''"
+              @click="navigate(item.path)"
             >
-              <a
-                :class="['wk-nav-item', { active: currentPath === item.path }]"
-                role="link"
-                :aria-label="item.label"
-                @click="navigate(item.path)"
-              >
-                <span class="wk-nav-ico" v-html="item.icon"></span>
-                <span class="wk-nav-label">{{ item.label }}</span>
-                <!-- 告警项挂进行中数量，折叠态隐藏 -->
-                <span v-if="item.path === '/alerts' && firingCount > 0" class="wk-nav-count wk-num">
-                  {{ firingCount }}
-                </span>
-              </a>
-            </el-tooltip>
+              <span class="wk-nav-ico" v-html="item.icon"></span>
+              <span class="wk-nav-label">{{ item.label }}</span>
+              <!-- 告警项挂进行中数量，折叠态隐藏 -->
+              <span v-if="item.path === '/alerts' && firingCount > 0" class="wk-nav-count wk-num">
+                {{ firingCount }}
+              </span>
+            </a>
           </div>
         </nav>
 
