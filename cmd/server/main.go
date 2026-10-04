@@ -106,8 +106,11 @@ func main() {
 	httpL := m.Match(cmux.HTTP1Fast())
 
 	// 启动 gRPC server
+	// AgentService 在 goroutine 外注册，以便拿到实例注入 Web API：
+	// 后台修改运营商 Ping 目标/节点采集频率后，需要它主动通知在线探针重拉配置。
+	agentSrv := grpcapi.RegisterService(grpcServer, s, alertEngine, cfg)
+	webHandler.SetConfigInvalidator(agentSrv)
 	go func() {
-		grpcapi.RegisterService(grpcServer, s, alertEngine, cfg)
 		if err := grpcServer.Serve(grpcL); err != nil {
 			log.Printf("gRPC server 退出: %v", err)
 		}

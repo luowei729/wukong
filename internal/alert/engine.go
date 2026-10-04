@@ -196,17 +196,25 @@ func (e *Engine) checkMetric(agent *store.Agent, metric string, value, threshold
 	shouldResolve := false
 
 	e.mu.Lock()
-	// 抑制期检查
+	// 抑制期只用于压制“重复触发/重复通知”，绝不能跳过恢复判断。
+	// 旧实现在抑制期内直接 return，导致改了运营商目标、指标早已回落到 0% 丢包后，
+	// 告警记录仍挂 firing 最长 30 分钟（用户反馈的“改了 IP 还在报警”）。
+	suppressed := false
 	if firedAt, ok := e.suppressed[key]; ok {
 		if time.Since(firedAt) < time.Duration(e.cfg.AlertSuppressMinutes)*time.Minute {
-			e.mu.Unlock()
-			return
+			suppressed = true
+		} else {
+			delete(e.suppressed, key)
 		}
-		delete(e.suppressed, key)
 	}
 
 	// 持续超阈值累计；检查周期是 5 秒，所以每轮只累加实际检查间隔。
 	if value > threshold {
+		if suppressed {
+			// 仍在抑制期：不重复告警，也不累计持续时间，避免解除瞬间误触发
+			e.mu.Unlock()
+			return
+		}
 		e.exceedDuration[key] += alertCheckInterval
 		if e.exceedDuration[key] >= time.Duration(durationSec)*time.Second {
 			shouldFire = true

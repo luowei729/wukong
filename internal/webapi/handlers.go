@@ -271,8 +271,10 @@ func (h *Handler) handleUpdateAgent(w http.ResponseWriter, r *http.Request) {
 		existing.CollectIntv = agent.CollectIntv
 	}
 	if agent.PingIntv != nil {
-		if *agent.PingIntv < 5 || *agent.PingIntv > 3600 {
-			writeError(w, http.StatusBadRequest, "Ping 频率必须在 5-3600 秒之间")
+		// 下限从 5 秒改为 1 秒：架构决策 #9/#25 已把默认 Ping 频率定为 1 秒，
+		// 节点详情页也允许填 1，旧校验会直接 400 拒掉“保存服务器配置”。
+		if *agent.PingIntv < 1 || *agent.PingIntv > 3600 {
+			writeError(w, http.StatusBadRequest, "Ping 频率必须在 1-3600 秒之间")
 			return
 		}
 		existing.PingIntv = agent.PingIntv
@@ -282,6 +284,8 @@ func (h *Handler) handleUpdateAgent(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("更新探针失败: %v", err))
 		return
 	}
+	// 节点级采集/Ping 频率变更也要重发配置，否则要等探针重连才生效
+	h.notifyAgentConfigChange()
 	writeJSON(w, http.StatusOK, existing)
 }
 
@@ -408,6 +412,8 @@ func (h *Handler) handleCreateISPTarget(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("创建 ISP 目标失败: %v", err))
 		return
 	}
+	// 新增目标后立即通知在线探针重拉配置，否则要等探针下次重连才生效
+	h.notifyAgentConfigChange()
 	writeJSON(w, http.StatusCreated, map[string]int64{"id": id})
 }
 
@@ -432,6 +438,8 @@ func (h *Handler) handleUpdateISPTarget(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("更新 ISP 目标失败: %v", err))
 		return
 	}
+	// 关键修复：改了目标 IP 后如果不重发配置，已连接的探针会继续测旧地址并持续产生丢包告警
+	h.notifyAgentConfigChange()
 	writeJSON(w, http.StatusOK, target)
 }
 
@@ -446,6 +454,8 @@ func (h *Handler) handleDeleteISPTarget(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("删除 ISP 目标失败: %v", err))
 		return
 	}
+	// 删除/停用同样需要下发最新列表，否则探针本地仍保留该目标继续探测
+	h.notifyAgentConfigChange()
 	writeJSON(w, http.StatusOK, map[string]string{"message": "已删除"})
 }
 

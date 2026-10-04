@@ -31,17 +31,47 @@ type AgentServer struct {
 	// 在线探针映射（agentID -> 最近心跳时间）
 	onlineAgents map[string]time.Time
 	onlineMu     sync.RWMutex // 保护 onlineAgents 并发读写
+	// configDirty：后台配置变更后待重发标记，与 onlineAgents 共用 onlineMu 保护
+	configDirty map[string]bool
 }
 
-func RegisterService(grpcServer *grpc.Server, s store.MetricsStore, alert interface{}, cfg *config.ServerConfig) {
+func RegisterService(grpcServer *grpc.Server, s store.MetricsStore, alert interface{}, cfg *config.ServerConfig) *AgentServer {
 	server := &AgentServer{
 		store:        s,
 		alertEngine:  alert,
 		cfg:          cfg,
 		onlineAgents: make(map[string]time.Time),
+		// configDirty 记录哪些在线探针需要在下一轮心跳时重新下发配置。
+		// 原因：后台改完运营商 Ping 目标/采集频率后，已连接的探针仍按本地旧配置探测，
+		// 曾导致“改了移动目标 IP 但仍在报旧线路丢包”。
+		configDirty: make(map[string]bool),
 	}
 	pb.RegisterAgentServiceServer(grpcServer, server)
 	log.Println("gRPC AgentService 已注册")
+	return server
+}
+
+// InvalidateAgentConfigs 标记所有在线探针需要重新下发配置。
+// 由 Web API 在运营商目标或节点配置变更后调用；实际发送仍在各自的 stream goroutine 里完成，
+// 因为 gRPC stream 的 SendMsg 不允许并发调用。
+func (s *AgentServer) InvalidateAgentConfigs() {
+	s.onlineMu.Lock()
+	defer s.onlineMu.Unlock()
+	for id := range s.onlineAgents {
+		s.configDirty[id] = true
+	}
+	log.Printf("已标记 %d 个在线探针待重新下发配置", len(s.onlineAgents))
+}
+
+// takeConfigDirty 取出并清除该探针的配置变更标记。
+func (s *AgentServer) takeConfigDirty(agentID string) bool {
+	s.onlineMu.Lock()
+	defer s.onlineMu.Unlock()
+	dirty := s.configDirty[agentID]
+	if dirty {
+		delete(s.configDirty, agentID)
+	}
+	return dirty
 }
 
 // Register 探针一次性 token 注册
@@ -127,6 +157,8 @@ func (s *AgentServer) ReportStream(stream pb.AgentService_ReportStreamServer) er
 	defer func() {
 		s.onlineMu.Lock()
 		delete(s.onlineAgents, agentID)
+		// 断线时一并清除待下发标记，避免探针频繁重连时 map 无限增长
+		delete(s.configDirty, agentID)
 		s.onlineMu.Unlock()
 		s.store.SetAgentOnline(agentID, false, time.Now())
 		log.Printf("探针 %s 已断开", agentID)
@@ -173,6 +205,15 @@ func (s *AgentServer) ReportStream(stream pb.AgentService_ReportStreamServer) er
 		case err := <-done:
 			return err
 		case <-ticker.C:
+			// 后台改过运营商目标/采集配置时，不等重连，下一轮心跳（≤15s）直接重发一次配置。
+			if s.takeConfigDirty(agentID) {
+				if frame := s.buildConfigFrame(agentID); frame != nil {
+					if err := stream.Send(frame); err != nil {
+						return err
+					}
+					continue
+				}
+			}
 			// 每次连接先下发一次最新配置，确保旧探针本地 ping_interval=60 会被同步为 1 秒。
 			if !configSent {
 				if frame := s.buildConfigFrame(agentID); frame != nil {

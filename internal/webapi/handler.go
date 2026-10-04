@@ -20,6 +20,12 @@ import (
 //go:embed all:dist
 var distFS embed.FS
 
+// ConfigInvalidator 由 main.go 注入 gRPC 服务，用于后台配置变更后主动通知在线探针重拉配置。
+// 用接口而不是直接引用 grpcapi：避免 webapi 依赖 gRPC 包、也便于单测时传 nil。
+type ConfigInvalidator interface {
+	InvalidateAgentConfigs()
+}
+
 type Handler struct {
 	store       store.MetricsStore
 	authSvc     *auth.Service
@@ -27,6 +33,22 @@ type Handler struct {
 	notifier    *notify.Manager
 	cfg         *config.ServerConfig
 	mux         *http.ServeMux
+	// configInvalidator：可为 nil（未注入时仅影响下发时效，不影响功能正确性）
+	configInvalidator ConfigInvalidator
+}
+
+// SetConfigInvalidator 注入配置失效通知器。
+// 原因：探针只在建连时收到一次 COMMAND_UPDATE_CONFIG，
+// 改完运营商目标不注入就会继续按旧 IP 探测并产生误告警。
+func (h *Handler) SetConfigInvalidator(ci ConfigInvalidator) {
+	h.configInvalidator = ci
+}
+
+// notifyAgentConfigChange 安全地标记在线探针待重发配置。
+func (h *Handler) notifyAgentConfigChange() {
+	if h.configInvalidator != nil {
+		h.configInvalidator.InvalidateAgentConfigs()
+	}
 }
 
 func NewHandler(s store.MetricsStore, a *auth.Service, ae *alert.Engine, n *notify.Manager, cfg *config.ServerConfig) *Handler {
