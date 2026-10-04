@@ -1,0 +1,353 @@
+// =============================================
+// Element Plus 覆盖层
+// 原则：优先通过 EP 自带的 --el-* CSS 变量映射到设计令牌（在 variables.scss 完成），
+//       这里只补 EP 没有暴露变量的细节（圆角、控件高度、表格 hairline、按钮字重）
+// =============================================
+@use "./variables.scss" as *;
+
+// ---- 按钮：更紧的圆角 + 中等字重，去掉默认阴影 ----
+.el-button {
+  border-radius: var(--wk-radius-sm);
+  font-weight: var(--wk-fw-medium);
+  box-shadow: none !important;
+
+  &:active {
+    transform: none;
+  }
+
+  &.el-button--small {
+    height: var(--wk-ctl-sm);
+    font-size: var(--wk-fs-sm);
+  }
+
+  &.el-button--large {
+    height: var(--wk-ctl-lg);
+    border-radius: var(--wk-radius-md);
+  }
+}
+
+// 链接型按钮（表格行内操作）去掉多余内边距
+.el-button.is-link,
+.el-button.is-text {
+  font-weight: var(--wk-fw-medium);
+}
+
+// ---- 输入框 / 选择器：统一高度与 hairline 边框 ----
+.el-input__wrapper,
+.el-textarea__inner,
+.el-select__wrapper {
+  border-radius: var(--wk-radius-sm) !important;
+  box-shadow: 0 0 0 1px var(--wk-border) inset !important;
+  background-color: var(--wk-bg-recess) !important;
+  transition: box-shadow var(--wk-dur-fast) var(--wk-ease),
+    background-color var(--wk-dur-fast) var(--wk-ease);
+
+  &.is-hovering {
+    box-shadow: 0 0 0 1px var(--wk-border-strong) inset !important;
+  }
+
+  &.is-focus {
+    box-shadow: 0 0 0 1px var(--wk-primary) inset,
+      var(--wk-ring) !important;
+    background-color: var(--wk-panel) !important;
+  }
+}
+
+// 数字输入框的加减按钮贴合令牌底色
+.el-input-number {
+  .el-input-number__decrease,
+  .el-input-number__increase {
+    background: var(--wk-bg-soft);
+    border-color: var(--wk-border) !important;
+  }
+}
+
+// ---- 表单：label 用次要色小字，避免与输入值抢层次 ----
+.el-form-item__label {
+  font-size: var(--wk-fs-base) !important;
+  font-weight: var(--wk-fw-medium) !important;
+  color: var(--wk-text-secondary) !important;
+  letter-spacing: -0.005em;
+}
+
+.el-form--label-top .el-form-item__label {
+  padding-bottom: 4px !important;
+}
+
+// ---- 表格：Stripe 式 table-first ----
+.el-table {
+  --el-table-border-color: var(--wk-border);
+  --el-table-bg-color: transparent;
+  --el-table-tr-bg-color: transparent;
+  --el-table-header-bg-color: var(--wk-bg-soft);
+  --el-table-row-hover-bg-color: var(--wk-bg-soft);
+  --el-table-text-color: var(--wk-text);
+  --el-table-header-text-color: var(--wk-text-muted);
+
+  background: transparent !important;
+  font-size: var(--wk-fs-base);
+
+  // 表头：大写极小标签 + 字距，取代原本"和普通单元格一样"的表头
+  th.el-table__cell {
+    background: var(--wk-bg-soft) !important;
+    font-weight: var(--wk-fw-semibold);
+    border-bottom: 1px solid var(--wk-border) !important;
+
+    .cell {
+      font-size: var(--wk-fs-xs);
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      color: var(--wk-text-muted);
+    }
+  }
+
+  td.el-table__cell {
+    border-bottom: 1px solid var(--wk-border);
+    padding: 9px 0;
+  }
+
+  .cell {
+    padding: 0 12px;
+  }
+
+  // 去掉 EP 默认的整块外框，由外层卡片负责描边
+  &::before,
+  .el-table__inner-wrapper::before {
+    display: none;
+  }
+
+  .el-table__body tr.hover-row > td.el-table__cell,
+  .el-table__body tr:hover > td.el-table__cell {
+    background: var(--wk-bg-soft) !important;
+  }
+
+  // 离线行的弱化：只降文本对比，不整体半透明导致数值不可读
+  .row-offline {
+    td.el-table__cell {
+      color: var(--wk-text-muted);
+    }
+    .wk-node-name {
+      color: var(--wk-text-secondary);
+    }
+  }
+}
+
+.el-table__empty-block {
+  background: transparent !important;
+}
+
+// ---- 标签页（Settings 左导航仍保留 EP tab 结构时使用） ----
+.el-tabs {
+  --el-tab-pane-bg: transparent;
+
+  .el-tabs__header {
+    margin-bottom: var(--wk-space-4);
+  }
+
+  .el-tabs__item {
+    font-weight: var(--wk-fw-medium);
+    font-size: var(--wk-fs-base);
+    color: var(--wk-text-muted);
+
+    &.is-active {
+      color: var(--wk-primary);
+      font-weight: var(--wk-fw-semibold);
+    }
+  }
+
+  .el-tabs__active-bar {
+    background-color: var(--wk-primary);
+    height: 2px;
+    border-radius: var(--wk-radius-pill);
+  }
+
+  .el-tabs__nav-wrap::after {
+    background-color: var(--wk-border);
+    height: 1px;
+  }
+
+  // 左侧竖排 tab（Settings 分区导航）
+  &.el-tabs--left .el-tabs__item.is-active {
+    background: var(--wk-primary-soft);
+    border-radius: var(--wk-radius-sm);
+  }
+}
+
+// ---- 进度条：极细 + 圆药丸 ----
+.el-progress {
+  .el-progress-bar__outer {
+    background: color-mix(in srgb, var(--wk-text) 9%, transparent);
+    border-radius: var(--wk-radius-pill);
+  }
+
+  .el-progress-bar__inner {
+    border-radius: var(--wk-radius-pill);
+    transition: width 320ms var(--wk-ease);
+  }
+}
+
+// ---- 开关 / 滑杆：主色联动 ----
+.el-switch.is-checked .el-switch__core {
+  background: var(--wk-primary);
+  border-color: var(--wk-primary);
+}
+
+.el-slider {
+  --el-slider-main-bg-color: var(--wk-primary);
+
+  .el-slider__runway {
+    background: color-mix(in srgb, var(--wk-text) 10%, transparent);
+  }
+}
+
+// ---- 单选组做成卡片选择器（主题预设） ----
+.el-radio-group {
+  display: flex;
+  gap: var(--wk-space-3);
+  flex-wrap: wrap;
+}
+
+.el-radio {
+  --el-radio-font-size: var(--wk-fs-base);
+
+  &.is-checked .el-radio__label {
+    color: var(--wk-text);
+    font-weight: var(--wk-fw-semibold);
+  }
+}
+
+// ---- 颜色选择器：与输入框同高同圆角 ----
+.el-color-picker__trigger {
+  border: 1px solid var(--wk-border);
+  border-radius: var(--wk-radius-sm);
+}
+
+// ---- 提示条：卡片化，去掉大面积警示底色 ----
+.el-alert {
+  border-radius: var(--wk-radius-md);
+  border: 1px solid var(--wk-border);
+  padding: 10px var(--wk-space-3);
+
+  .el-alert__title {
+    font-size: var(--wk-fs-base);
+    font-weight: var(--wk-fw-medium);
+    line-height: 1.55;
+  }
+
+  &.el-alert--info.is-light {
+    background: var(--wk-bg-soft);
+    color: var(--wk-text-secondary);
+  }
+
+  &.el-alert--success.is-light {
+    background: var(--wk-success-soft);
+    color: var(--wk-success-text);
+    border-color: color-mix(in srgb, var(--wk-success) 26%, transparent);
+  }
+
+  &.el-alert--warning.is-light {
+    background: var(--wk-warning-soft);
+    color: var(--wk-warning-text);
+    border-color: color-mix(in srgb, var(--wk-warning) 26%, transparent);
+  }
+
+  &.el-alert--error.is-light {
+    background: var(--wk-danger-soft);
+    color: var(--wk-danger-text);
+    border-color: color-mix(in srgb, var(--wk-danger) 26%, transparent);
+  }
+}
+
+// ---- 描述列表 / 空状态 / 骨架 ----
+.el-descriptions {
+  --el-description-label-color: var(--wk-text-muted);
+  --el-description-bordered-bg: var(--wk-bg-soft);
+  --el-description-bordered-border-color: var(--wk-border);
+
+  .el-descriptions__cell {
+    font-size: var(--wk-fs-base);
+  }
+}
+
+.el-empty {
+  --el-empty-text-color: var(--wk-text-muted);
+
+  .el-empty__description p {
+    font-size: var(--wk-fs-base);
+  }
+}
+
+.el-skeleton {
+  --el-skeleton-color: var(--wk-skeleton-base);
+  --el-skeleton-to-color: var(--wk-skeleton-highlight);
+}
+
+// ---- 弹层：对话框 / 气泡 / 下拉 / 消息 ----
+.el-dialog {
+  border-radius: var(--wk-radius-xl);
+  background: var(--wk-elevated);
+  box-shadow: var(--wk-shadow-pop);
+
+  .el-dialog__title {
+    font-size: var(--wk-fs-lg);
+    font-weight: var(--wk-fw-semibold);
+    letter-spacing: -0.015em;
+  }
+
+  .el-dialog__body {
+    font-size: var(--wk-fs-base);
+    color: var(--wk-text-secondary);
+  }
+}
+
+.el-message-box {
+  border-radius: var(--wk-radius-xl);
+  background: var(--wk-elevated);
+  border-color: var(--wk-border);
+  padding: var(--wk-space-5);
+
+  .el-message-box__title {
+    font-size: var(--wk-fs-md);
+    font-weight: var(--wk-fw-semibold);
+  }
+}
+
+.el-popper {
+  border-radius: var(--wk-radius-md) !important;
+  background: var(--wk-elevated) !important;
+  border-color: var(--wk-border-strong) !important;
+  box-shadow: var(--wk-shadow-pop) !important;
+  font-size: var(--wk-fs-base) !important;
+}
+
+.el-dropdown-menu__item {
+  font-size: var(--wk-fs-base);
+
+  &:not(.is-disabled):hover {
+    background: var(--wk-bg-soft);
+    color: var(--wk-text);
+  }
+}
+
+.el-message {
+  border-radius: var(--wk-radius-md);
+  background: var(--wk-elevated) !important;
+  border-color: var(--wk-border-strong) !important;
+  box-shadow: var(--wk-shadow-pop);
+  min-width: 280px;
+
+  .el-message__content {
+    font-size: var(--wk-fs-base) !important;
+    color: var(--wk-text) !important;
+  }
+}
+
+// ---- 分页 / 遮罩 基础对齐 ----
+.el-loading-mask {
+  background-color: color-mix(in srgb, var(--wk-bg) 68%, transparent);
+  backdrop-filter: blur(1px);
+}
+
+.el-tooltip__popper {
+  font-size: var(--wk-fs-sm);
+}

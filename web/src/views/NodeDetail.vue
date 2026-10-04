@@ -1,122 +1,588 @@
 <template>
-  <!-- ===== 节点详情页 ===== -->
-  <div class="node-detail">
-    <!-- 顶部：返回按钮 + 节点标题 + 状态灯 -->
-    <div class="detail-header">
-      <el-button text class="back-btn" @click="$router.back()">
-        <el-icon><ArrowLeft /></el-icon>
-        返回
-      </el-button>
-    </div>
+  <!-- ============ 节点详情页 ============ -->
+  <!-- 与公开详情页同源同口径，但这里额外提供采集配置与出口 IP 等后台专属信息 -->
+  <div class="wk-stack">
+    <!-- ---------------- Hero 行 ---------------- -->
+    <div class="wk-detail-hero">
+      <button type="button" class="wk-back-btn" aria-label="返回节点列表" @click="router.push('/nodes')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M15 18l-6-6 6-6" />
+        </svg>
+        节点列表
+      </button>
 
-    <!-- 节点标题行：状态灯 + 节点名称 + 修改名称按钮 -->
-    <div class="title-row">
-      <span :class="['wk-status-dot', node?.online ? 'online' : 'offline']" />
-      <h2 class="node-title">{{ nodeName }}</h2>
-      <el-button size="small" type="primary" plain @click="openRename">修改名称</el-button>
-    </div>
-
-    <!-- ===== 服务器配置区域 ===== -->
-    <div class="wk-card-solid config-card">
-      <h3>服务器配置</h3>
-      <!-- 配置说明提示 -->
-      <el-alert
-        title="采集频率和 Ping 频率会写入 SQLite 固化；已安装探针重启后生效，后续会接入签名热更新。"
-        type="info"
-        :closable="false"
-        class="config-alert"
-      />
-      <!-- 配置表单：节点名称、采集频率、Ping 频率、保存按钮 -->
-      <el-form :inline="true" class="config-form">
-        <el-form-item label="节点名称">
-          <el-input v-model="configForm.name" placeholder="自定义节点名称" style="width: 180px;" />
-        </el-form-item>
-        <el-form-item label="采集频率（秒）">
-          <el-input-number v-model="configForm.collect_intv" :min="1" :max="3600" :step="1" />
-        </el-form-item>
-        <el-form-item label="Ping 频率（秒）">
-          <el-input-number v-model="configForm.ping_intv" :min="1" :max="3600" :step="1" />
-        </el-form-item>
-        <el-form-item>
-          <el-button type="primary" :loading="savingConfig" @click="saveConfig">保存配置</el-button>
-        </el-form-item>
-      </el-form>
-    </div>
-
-    <!-- ===== 24h Ping K线图区域 ===== -->
-    <div class="wk-card-solid chart-card">
-      <!-- 图表标题行 -->
-      <div class="chart-header">
-        <h3>网络延时 - 最近 24 小时</h3>
-        <span class="chart-sub">所有启用运营商线路</span>
+      <div class="wk-hero-main">
+        <div class="wk-hero-title">
+          <span :class="['wk-status-pill', node?.online ? 'online' : 'offline']">
+            <WkStatusDot :status="node?.online ? 'online' : 'offline'" :size="8" :pulse="node?.online" />
+            {{ node?.online ? '在线' : '离线' }}
+          </span>
+          <h1 class="wk-hero-name">{{ nodeName }}</h1>
+          <button type="button" class="wk-row-action" title="修改名称" aria-label="修改名称" @click="openRename">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 20h9" />
+              <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z" />
+            </svg>
+          </button>
+        </div>
+        <!-- eyebrow 一行交代来源与身份：系统 · 区域 · 架构 · 探针版本 -->
+        <div class="wk-eyebrow">{{ heroMeta }}</div>
       </div>
-      <!-- 无 ISP 目标时显示空状态提示 -->
-      <el-empty v-if="ispTargets.length === 0" description="请先在设置页配置并启用 Ping 运营商目标" />
-      <!-- 无 Ping 数据时显示空状态提示 -->
-      <el-empty v-else-if="Object.keys(pingSeries).length === 0 && !pingLoading" description="暂无真实 Ping 数据" />
-      <!-- ECharts 图表容器 -->
-      <div v-loading="pingLoading" ref="chartRef" :style="{ height: ispTargets.length ? '360px' : '0' }"></div>
+
+      <div class="wk-hero-side">
+        <div class="wk-sub">最近上报</div>
+        <div class="wk-num wk-hero-time">{{ relativeTime(node?.last_seen_at || node?.updated_at) }}</div>
+      </div>
+    </div>
+
+    <!-- ---------------- 实时指标 KPI ---------------- -->
+    <div class="wk-grid-4">
+      <WkMetric
+        label="CPU 使用率"
+        :value="formatOneDecimal(node?.cpu)"
+        unit="%"
+        :tone="toneOf(node?.cpu)"
+        :hint="node?.cpu_cores ? `${node.cpu_cores} 核 · ${formatLoad(node?.load1)} 负载(1m)` : '核心数待上报'"
+      />
+      <WkMetric
+        label="内存使用率"
+        :value="formatOneDecimal(node?.mem)"
+        unit="%"
+        :tone="toneOf(node?.mem)"
+        :hint="memTotalText"
+      />
+      <WkMetric
+        label="磁盘使用率"
+        :value="formatOneDecimal(node?.disk)"
+        unit="%"
+        :tone="toneOf(node?.disk)"
+        :hint="diskTotalText"
+      />
+      <WkMetric
+        label="运行时长"
+        :value="formatDuration(node?.uptime_seconds)"
+        :hint="node?.boot_time ? `${formatDateTime(node.boot_time * 1000)} 启动` : '启动时间待上报'"
+      />
+      <WkMetric
+        label="上行速率"
+        :value="formatRate(node?.net_up)"
+        tone="primary"
+        :hint="`累计 ${formatBytes(node?.net_up_total_bytes)}`"
+      />
+      <WkMetric
+        label="下行速率"
+        :value="formatRate(node?.net_down)"
+        tone="primary"
+        :hint="`累计 ${formatBytes(node?.net_down_total_bytes)}`"
+      />
+      <WkMetric label="负载 1/5/15 分钟" :value="loadText(node)" hint="1 分钟负载接近核心数即视为满载" />
+      <WkMetric
+        label="累计流量"
+        :value="formatBytes(totalTraffic)"
+        hint="上行之和 + 下行之和（探针启动以来）"
+      />
+    </div>
+
+    <!-- ---------------- 资源趋势 ---------------- -->
+    <WkCard title="资源趋势" :subtitle="`${rangeLabel}内的 CPU / 内存 / 磁盘与网络速率`">
+      <template #actions>
+        <div class="wk-chips">
+          <button
+            v-for="option in rangeOptions"
+            :key="option.value"
+            type="button"
+            :class="['wk-chip', { active: range === option.value }]"
+            @click="setRange(option.value)"
+          >
+            {{ option.label }}
+          </button>
+        </div>
+      </template>
+
+      <WkChart
+        :builder="buildResourceOption"
+        :deps="metricPoints"
+        height="300px"
+        :loading="metricsLoading"
+      />
+      <WkEmptyState
+        v-if="!metricsLoading && metricPoints.length === 0"
+        icon="box"
+        title="暂无历史指标"
+        description="该时间窗内没有查询到采集数据，可能是探针刚接入或采集频率较低"
+      />
+    </WkCard>
+
+    <!-- ---------------- 网络质量（Ping K 线） ---------------- -->
+    <WkCard title="网络质量" subtitle="最近 24 小时运营商线路延时与丢包（秒级原始数据聚合）">
+      <template #actions>
+        <el-button text size="small" @click="router.push('/settings')">配置运营商</el-button>
+      </template>
+
+      <WkEmptyState
+        v-if="ispTargets.length === 0"
+        icon="search"
+        title="尚未配置运营商 Ping 目标"
+        description="到「系统设置 → Ping 运营商」新增并启用目标，探针会自动开始探测"
+      >
+        <template #action>
+          <el-button type="primary" @click="router.push('/settings')">去配置</el-button>
+        </template>
+      </WkEmptyState>
+
+      <template v-else>
+        <!-- 线路摘要：丢包不能套用 70/85 的资源阈值，改用独立语气徽章 -->
+        <div class="wk-isp-summary">
+          <div v-for="item in ispSummary" :key="item.name" class="wk-isp-row">
+            <span class="wk-isp-name" :style="{ color: item.color }">{{ item.name }}</span>
+            <WkBadge :tone="lossTone(item.loss)">丢包 {{ item.loss.toFixed(1) }}%</WkBadge>
+            <span class="wk-num wk-isp-stat">平均 {{ formatOneDecimal(item.avg) }} ms</span>
+            <span class="wk-sub wk-isp-stat">
+              最低 {{ formatOneDecimal(item.min) }} / 最高 {{ formatOneDecimal(item.max) }}
+            </span>
+          </div>
+        </div>
+
+        <WkEmptyState
+          v-if="Object.keys(pingSeries).length === 0 && !pingLoading"
+          icon="search"
+          title="暂无 Ping 数据"
+          description="已配置运营商目标，但最近 24 小时没有收到探测结果"
+        />
+        <WkChart
+          v-else
+          :builder="buildPingOption"
+          :deps="pingSeries"
+          height="340px"
+          :loading="pingLoading"
+        />
+      </template>
+    </WkCard>
+
+    <!-- ---------------- 服务器配置 + 系统信息 ---------------- -->
+    <div class="wk-detail-cols">
+      <WkCard title="采集配置" subtitle="写入 SQLite 固化，已安装探针重启后生效">
+        <el-form label-position="top" class="wk-config-form" @submit.prevent="saveConfig">
+          <el-form-item label="节点名称">
+            <el-input v-model="configForm.name" placeholder="自定义节点名称" />
+          </el-form-item>
+          <el-form-item label="采集频率（秒）">
+            <el-input-number v-model="configForm.collect_intv" :min="1" :max="3600" :step="1" />
+          </el-form-item>
+          <el-form-item label="Ping 频率（秒）">
+            <el-input-number v-model="configForm.ping_intv" :min="1" :max="3600" :step="1" />
+          </el-form-item>
+          <el-form-item class="wk-config-actions">
+            <el-button type="primary" :loading="savingConfig" @click="saveConfig">保存配置</el-button>
+          </el-form-item>
+        </el-form>
+      </WkCard>
+
+      <WkCard title="系统信息" subtitle="探针注册与上报的原始字段（仅后台可见）">
+        <dl class="wk-kv">
+          <div v-for="item in systemInfo" :key="item.label" class="wk-kv-item">
+            <dt>{{ item.label }}</dt>
+            <dd :class="item.mono ? 'wk-num' : ''">{{ item.value }}</dd>
+          </div>
+        </dl>
+      </WkCard>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-// ===== 节点详情页逻辑 =====
-import { ref, reactive, onMounted, onUnmounted, nextTick } from 'vue'
-import { useRoute } from 'vue-router'
-import { ArrowLeft } from '@element-plus/icons-vue'
+// ============ 节点详情页逻辑 ============
+// 数据来源：
+//   实时指标   → useOverview() 共享单例（每秒刷新，无需本页单独轮询）
+//   历史趋势   → GET /api/agents/{id}/metrics?since=&until=（60s 刷新）
+//   网络质量   → GET /api/agents/{id}/ping-agg?isp=（60s 刷新）
+//   配置保存   → PUT /api/agents/{id}（沿用原接口与字段）
+import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import WkCard from '@/components/WkCard.vue'
+import WkChart from '@/components/WkChart.vue'
+import WkEmptyState from '@/components/WkEmptyState.vue'
+import WkMetric from '@/components/WkMetric.vue'
+import WkBadge from '@/components/WkBadge.vue'
+import WkStatusDot from '@/components/WkStatusDot.vue'
 import http from '@/utils/http'
-import * as echarts from 'echarts'
+import { refreshOverview, useOverview } from '@/composables/useOverview'
+import { usePolling } from '@/composables/usePolling'
+import {
+  baseCategoryAxis,
+  baseDataZoom,
+  baseGrid,
+  baseLegend,
+  baseTooltip,
+  baseValueAxis,
+  buildLineSeries,
+  readChartTokens,
+  seriesColor,
+  tooltipRow,
+} from '@/utils/charts'
+import {
+  archText,
+  average,
+  formatBytes,
+  formatBytesShort,
+  formatClock,
+  formatDateTime,
+  formatDuration,
+  formatHourMinute,
+  formatLoad,
+  formatRate,
+  loadLevel,
+  loadText,
+  lossPercent,
+  relativeTime,
+} from '@/utils/format'
 
 const route = useRoute()
-// 从路由参数获取节点 ID
+const router = useRouter()
 const agentId = route.params.id as string
-// 节点详情数据
-const node = ref<any | null>(null)
-// 节点显示名称
-const nodeName = ref('节点详情')
-// ECharts 图表容器引用
-const chartRef = ref<HTMLDivElement>()
-// ISP 目标列表（仅启用的）
-const ispTargets = ref<any[]>([])
-// Ping 聚合数据，按 ISP 名称分组
-const pingSeries = ref<Record<string, any[]>>({})
-// Ping 数据加载状态
-const pingLoading = ref(false)
-// 配置保存中状态
-const savingConfig = ref(false)
-// 配置表单数据
-const configForm = reactive({
-  name: '',           // 节点名称
-  collect_intv: 1,    // 采集频率（秒）
-  ping_intv: 1,       // Ping 频率（秒）
+
+// 复用共享概览：详情页的实时卡片区不再单独发请求
+const { nodes } = useOverview()
+
+// 当前节点 = 共享数据里 id 匹配的合并对象（Agent 元数据 + LatestMetric 实时值）
+const node = computed<any | null>(
+  () => nodes.value.find((item: any) => item.id === agentId) || null
+)
+
+const nodeName = computed(() => {
+  const current = node.value
+  if (current) return current.name || current.hostname || `节点 ${agentId.slice(0, 8)}`
+  return '节点详情'
 })
-// ECharts 实例
-let chart: echarts.ECharts | null = null
-// Ping 数据定时刷新定时器
-let pingTimer: number | null = null
 
-// 新主题 ECharts 配色方案：蓝色主色调 + 多彩辅助色
-const chartColors = ['#3b82f6', '#34d399', '#fbbf24', '#f87171', '#8b5cf6', '#14b8a6', '#ec4899']
+// Hero  eyebrow：系统 · 区域 · 架构 · 探针版本
+const heroMeta = computed(() => {
+  const current = node.value
+  if (!current) return '等待节点数据'
+  const parts: string[] = []
+  const os = current.platform || current.os_version
+  if (os) parts.push(os)
+  if (current.region) parts.push(current.region)
+  if (current.arch) parts.push(archText(current.arch))
+  if (current.agent_ver) parts.push(`探针 ${current.agent_ver}`)
+  return parts.length ? parts.join(' · ') : '系统信息待上报'
+})
 
-// 获取节点详情：请求 /api/agents/:id
-async function fetchNode() {
+// ---------------- 展示辅助 ----------------
+function formatOneDecimal(value?: number | null): string {
+  return typeof value === 'number' ? value.toFixed(1) : '-'
+}
+
+function toneOf(value?: number | null): 'default' | 'warning' | 'danger' {
+  const level = loadLevel(value ?? undefined)
+  if (level === 'danger') return 'danger'
+  if (level === 'warning') return 'warning'
+  return 'default'
+}
+
+// 内存/磁盘总量提示：使用率旁边给出绝对量，运维才能判断"80% 是 8G 还是 512G"
+const memTotalText = computed(() => {
+  const total = node.value?.mem_total_bytes
+  const used = typeof node.value?.mem === 'number' && total ? (node.value.mem / 100) * total : null
+  return used ? `已用 ${formatBytes(used)} / 共 ${formatBytes(total)}` : '总内存待上报'
+})
+
+const diskTotalText = computed(() => {
+  const total = node.value?.disk_total_bytes
+  const used = typeof node.value?.disk === 'number' && total ? (node.value.disk / 100) * total : null
+  return used ? `已用 ${formatBytes(used)} / 共 ${formatBytes(total)}` : '总磁盘待上报'
+})
+
+// 累计上下行总量
+const totalTraffic = computed(() => {
+  const up = node.value?.net_up_total_bytes || 0
+  const down = node.value?.net_down_total_bytes || 0
+  return up + down
+})
+
+// 系统信息定义列表：把后端已有但过去未展示的字段全部摊开
+const systemInfo = computed(() => {
+  const current = node.value || {}
+  return [
+    { label: '主机名', value: current.hostname || '-', mono: false },
+    { label: '节点 ID', value: agentId, mono: true },
+    { label: '操作系统', value: current.platform || current.os_version || '-', mono: false },
+    { label: '架构', value: current.arch ? archText(current.arch) : '-', mono: true },
+    { label: 'CPU 型号', value: current.cpu_model || '-', mono: false },
+    { label: 'CPU 核数', value: current.cpu_cores ? String(current.cpu_cores) : '-', mono: true },
+    { label: '总内存', value: formatBytes(current.mem_total_bytes), mono: true },
+    { label: '总磁盘', value: formatBytes(current.disk_total_bytes), mono: true },
+    { label: '区域', value: current.region || '-', mono: false },
+    { label: '探针版本', value: current.agent_ver || '-', mono: true },
+    { label: '出口 IPv4', value: current.ip_v4 || '-', mono: true },
+    { label: '出口 IPv6', value: current.ip_v6 || '-', mono: true },
+    { label: '启动时间', value: current.boot_time ? formatDateTime(current.boot_time * 1000) : '-', mono: false },
+    { label: '注册时间', value: current.created_at ? formatDateTime(current.created_at) : '-', mono: false },
+  ]
+})
+
+// ---------------- 历史趋势 ----------------
+// 时间窗用现有接口的 since/until 参数实现，不新增后端能力
+const rangeOptions = [
+  { label: '1 小时', value: '1h' as const, hours: 1 },
+  { label: '6 小时', value: '6h' as const, hours: 6 },
+  { label: '24 小时', value: '24h' as const, hours: 24 },
+]
+
+const range = ref<'1h' | '6h' | '24h'>('1h')
+const metricPoints = ref<any[]>([])
+const metricsLoading = ref(false)
+
+const rangeLabel = computed(
+  () => rangeOptions.find((item) => item.value === range.value)?.label || ''
+)
+
+function setRange(value: '1h' | '6h' | '24h') {
+  range.value = value
+  loadMetrics()
+}
+
+// 拉取历史指标：since/until 为 RFC3339，与后端 time.Parse(time.RFC3339) 对齐
+async function loadMetrics() {
+  metricsLoading.value = true
   try {
-    const res = await http.get(`/api/agents/${agentId}?_=${Date.now()}`)
-    node.value = res.data
-    // 设置节点显示名称：优先自定义名称，其次主机名，最后截断 ID
-    nodeName.value = res.data.name || res.data.hostname || `节点 ${agentId.slice(0, 8)}`
-    // 同步配置表单数据
-    configForm.name = nodeName.value
-    configForm.collect_intv = res.data.collect_intv || 1
-    configForm.ping_intv = res.data.ping_intv || 1
-  } catch (e) {
-    console.error('获取节点详情失败', e)
+    const hours = rangeOptions.find((item) => item.value === range.value)?.hours || 1
+    const until = new Date()
+    const since = new Date(until.getTime() - hours * 3600 * 1000)
+    const res = await http.get(`/api/agents/${agentId}/metrics`, {
+      params: { since: since.toISOString(), until: until.toISOString(), _: Date.now() },
+    })
+    metricPoints.value = Array.isArray(res.data) ? res.data : []
+  } catch (error: any) {
+    ElMessage.error(error?.response?.data?.error || '加载历史指标失败')
+    metricPoints.value = []
+  } finally {
+    metricsLoading.value = false
   }
 }
 
-// 修改节点名称：弹出输入框，调用 PUT /api/agents/:id 更新
+// 资源趋势图：三条使用率线（左轴 %）+ 上下行速率（右轴 字节/秒）
+function buildResourceOption() {
+  const tokens = readChartTokens()
+  const points = metricPoints.value
+  // 短窗口用秒级标签，长窗口用分钟标签，避免轴标签重叠
+  const labeler = range.value === '1h' ? formatClock : formatHourMinute
+  const labels = points.map((item) => labeler(item.timestamp))
+
+  const netFormatter = (value: number) => formatBytesShort(value)
+
+  return {
+    animation: false,
+    grid: baseGrid(),
+    tooltip: {
+      ...baseTooltip(tokens),
+      formatter: (params: any) => {
+        if (!Array.isArray(params) || params.length === 0) return ''
+        let html = `<div style="font-size:11px;opacity:.7;margin-bottom:6px;font-weight:600">${params[0].axisValue}</div>`
+        params.forEach((param: any) => {
+          if (param.value === null || param.value === undefined) return
+          // 速率系列带单位，使用率系列带百分号
+          const isNet = param.seriesName.includes('行')
+          const text = isNet ? `${netFormatter(param.value)}/s` : `${Number(param.value).toFixed(1)}%`
+          html += tooltipRow(param.color, param.seriesName, text)
+        })
+        return html
+      },
+    },
+    legend: baseLegend(tokens),
+    xAxis: baseCategoryAxis(tokens, labels),
+    yAxis: [
+      baseValueAxis(tokens, { max: 100, formatter: '{value}%' }),
+      {
+        ...baseValueAxis(tokens, { name: '速率', formatter: (value: number) => netFormatter(value) }),
+        splitLine: { show: false },
+      },
+    ],
+    dataZoom: baseDataZoom(tokens),
+    series: [
+      buildLineSeries('CPU', points.map((item) => item.cpu), tokens.palette[0], { area: true }),
+      // 内存用粉、下行用紫：两者与主色（蓝紫系）都能拉开色相
+      buildLineSeries('内存', points.map((item) => item.mem), tokens.palette[6]),
+      buildLineSeries('磁盘', points.map((item) => item.disk), tokens.palette[2]),
+      buildLineSeries('上行', points.map((item) => item.net_up), tokens.palette[4], {
+        width: 1.2,
+        yAxisIndex: 1,
+      }),
+      buildLineSeries('下行', points.map((item) => item.net_down), tokens.palette[5], {
+        width: 1.2,
+        yAxisIndex: 1,
+      }),
+    ],
+  }
+}
+
+// ---------------- 网络质量 ----------------
+const ispTargets = ref<any[]>([])
+const pingSeries = ref<Record<string, any[]>>({})
+const pingLoading = ref(false)
+
+// 拉取启用中的运营商目标
+async function loadISPTargets() {
+  try {
+    const res = await http.get(`/api/isp-targets?_=${Date.now()}`)
+    ispTargets.value = (res.data || []).filter((item: any) => item.enabled)
+  } catch (error) {
+    console.error('加载 ISP 目标失败', error)
+    ispTargets.value = []
+  }
+}
+
+// 并行拉取每条线路的聚合数据，空线路不参与绘图，避免图例出现无意义项
+async function loadPingAgg() {
+  if (ispTargets.value.length === 0) {
+    pingSeries.value = {}
+    return
+  }
+  pingLoading.value = true
+  try {
+    const results = await Promise.all(
+      ispTargets.value.map(async (isp: any) => {
+        const res = await http.get(`/api/agents/${agentId}/ping-agg`, {
+          params: { isp: isp.name, _: Date.now() },
+        })
+        return [isp.name, Array.isArray(res.data) ? res.data : []] as const
+      })
+    )
+    pingSeries.value = Object.fromEntries(results.filter(([, points]) => points.length > 0))
+  } catch (error: any) {
+    ElMessage.error(error?.response?.data?.error || '加载 Ping 数据失败')
+  } finally {
+    pingLoading.value = false
+  }
+}
+
+// 丢包语气色：有任何丢包就进入警告，超过 5% 视为危险（与资源负载阈值无关）
+function lossTone(loss: number): 'ok' | 'warn' | 'fail' {
+  if (loss >= 5) return 'fail'
+  if (loss > 0) return 'warn'
+  return 'ok'
+}
+
+// 线路摘要：平均值/最小/最大/丢包，直接摊在图表上方
+const ispSummary = computed(() => {
+  const tokens = readChartTokens()
+  return Object.entries(pingSeries.value).map(([name, points], index) => {
+    const lats = points.map((item: any) => Number(item.avg_lat || 0))
+    const mins = points.map((item: any) => Number(item.min_lat || 0))
+    const maxs = points.map((item: any) => Number(item.max_lat || 0))
+    const losses = points.map((item: any) => lossPercent(Number(item.loss_rate || 0)))
+    return {
+      name,
+      color: seriesColor(tokens, index),
+      avg: average(lats) ?? 0,
+      min: mins.length ? Math.min(...mins) : 0,
+      max: maxs.length ? Math.max(...maxs) : 0,
+      loss: average(losses) ?? 0,
+    }
+  })
+})
+
+// Ping 延时图：与旧版同样的多线路口径，颜色改为随主题解析
+function buildPingOption() {
+  const tokens = readChartTokens()
+  const entries = Object.entries(pingSeries.value)
+  // 时间点取并集后排序，保证多条线路在同一个 x 位置上对齐
+  const allTimes = Array.from(
+    new Set(entries.flatMap(([, points]) => points.map((item: any) => item.bucket_min)))
+  ).sort()
+  const labels = allTimes.map((time) => formatClock(time))
+
+  // 每条线路建立"时间 → 延时/丢包"的索引，tooltip 才能同时给出两个指标
+  const lossIndex = new Map<string, Map<string, number>>()
+  const series = entries.map(([isp, points], index) => {
+    const latMap = new Map<string, number>()
+    const lossMap = new Map<string, number>()
+    for (const point of points) {
+      latMap.set(point.bucket_min, Number(point.avg_lat || 0))
+      lossMap.set(point.bucket_min, lossPercent(Number(point.loss_rate || 0)))
+    }
+    lossIndex.set(isp, lossMap)
+    return {
+      ...buildLineSeries(
+        isp,
+        allTimes.map((time) => (latMap.has(time as string) ? latMap.get(time as string)! : null)),
+        seriesColor(tokens, index)
+      ),
+      _ispName: isp,
+    }
+  })
+
+  return {
+    animation: false,
+    grid: baseGrid(),
+    tooltip: {
+      ...baseTooltip(tokens),
+      axisPointer: { type: 'cross', lineStyle: { color: tokens.axis }, crossStyle: { color: tokens.axis } },
+      formatter: (params: any) => {
+        if (!Array.isArray(params) || params.length === 0) return ''
+        let html = `<div style="font-size:11px;opacity:.7;margin-bottom:6px;font-weight:600">${params[0].axisValue}</div>`
+        params.forEach((param: any, order: number) => {
+          if (param.value === null || param.value === undefined) return
+          const isp = param.seriesName
+          const lossMap = lossIndex.get(isp)
+          const lossPct = lossMap?.get(allTimes[param.dataIndex])?.toFixed(1) ?? '0.0'
+          html += tooltipRow(
+            seriesColor(tokens, order),
+            isp,
+            `${Number(param.value).toFixed(2)} ms`,
+            `${lossPct}% loss`
+          )
+        })
+        return html
+      },
+    },
+    legend: baseLegend(tokens),
+    xAxis: baseCategoryAxis(tokens, labels),
+    yAxis: baseValueAxis(tokens, { name: 'ms' }),
+    dataZoom: baseDataZoom(tokens),
+    series,
+  }
+}
+
+// ---------------- 采集配置 ----------------
+const configForm = reactive({ name: '', collect_intv: 1, ping_intv: 1 })
+const savingConfig = ref(false)
+const configSynced = ref(false)
+
+// 共享数据首次到位后，把当前节点配置回填到表单（只做一次，避免每秒覆盖用户输入）
+function syncConfigForm() {
+  if (configSynced.value || !node.value) return
+  configForm.name = nodeName.value
+  configForm.collect_intv = node.value.collect_intv || 1
+  configForm.ping_intv = node.value.ping_intv || 1
+  configSynced.value = true
+}
+
+// 保存：接口与字段保持不变（name / collect_intv / ping_intv）
+async function saveConfig() {
+  if (!configForm.name.trim()) {
+    ElMessage.warning('节点名称不能为空')
+    return
+  }
+  savingConfig.value = true
+  try {
+    await http.put(`/api/agents/${agentId}`, {
+      name: configForm.name.trim(),
+      collect_intv: configForm.collect_intv,
+      ping_intv: configForm.ping_intv,
+    })
+    ElMessage.success('服务器配置已保存')
+    // 立即刷新共享数据，顶栏与本页名称/频率同步最新值
+    await refreshOverview()
+  } catch (error: any) {
+    ElMessage.error(error?.response?.data?.error || '保存服务器配置失败')
+  } finally {
+    savingConfig.value = false
+  }
+}
+
+// 改名：沿用原交互，保存后同步表单
 async function openRename() {
   try {
     const { value } = await ElMessageBox.prompt('请输入新的服务器节点名称', '修改节点名称', {
@@ -126,297 +592,213 @@ async function openRename() {
       inputPattern: /^.{1,64}$/,
       inputErrorMessage: '节点名称长度必须为 1-64 个字符',
     })
-    // 调用后端更新节点名称
     await http.put(`/api/agents/${agentId}`, { name: value })
     ElMessage.success('节点名称已保存')
-    // 刷新节点详情显示新名称
-    await fetchNode()
-  } catch (e: any) {
-    // 用户点取消不报错，其他错误显示后端返回的错误信息
-    if (e !== 'cancel') {
-      ElMessage.error(e.response?.data?.error || '修改节点名称失败')
+    configForm.name = value
+    await refreshOverview()
+  } catch (error: any) {
+    if (error !== 'cancel') {
+      ElMessage.error(error?.response?.data?.error || '修改节点名称失败')
     }
   }
 }
 
-// 保存服务器配置：更新节点名称、采集频率、Ping 频率
-async function saveConfig() {
-  // 校验节点名称不能为空
-  if (!configForm.name.trim()) {
-    ElMessage.warning('节点名称不能为空')
-    return
-  }
-  savingConfig.value = true
-  try {
-    // 调用后端保存配置
-    await http.put(`/api/agents/${agentId}`, {
-      name: configForm.name.trim(),
-      collect_intv: configForm.collect_intv,
-      ping_intv: configForm.ping_intv,
-    })
-    ElMessage.success('服务器配置已保存')
-    // 刷新节点详情显示最新配置
-    await fetchNode()
-  } catch (e: any) {
-    ElMessage.error(e.response?.data?.error || '保存服务器配置失败')
-  } finally {
-    savingConfig.value = false
-  }
-}
-
-// 加载 ISP 目标列表：请求 /api/isp-targets，只保留启用的目标
-async function loadISPTargets() {
-  try {
-    const res = await http.get(`/api/isp-targets?_=${Date.now()}`)
-    // 过滤出已启用的 ISP 目标
-    ispTargets.value = (res.data || []).filter((item: any) => item.enabled)
-  } catch (e) {
-    console.error('加载 ISP 目标失败', e)
-  }
-}
-
-// 加载 Ping 聚合数据：为每个 ISP 目标请求 /api/agents/:id/ping-agg
-async function loadPingAgg() {
-  // 没有 ISP 目标时清空数据直接返回
-  if (ispTargets.value.length === 0) {
-    pingSeries.value = {}
-    return
-  }
-  pingLoading.value = true
-  try {
-    // 并行请求所有 ISP 的 Ping 聚合数据
-    const results = await Promise.all(ispTargets.value.map(async (isp: any) => {
-      const res = await http.get(`/api/agents/${agentId}/ping-agg`, {
-        params: { isp: isp.name, _: Date.now() },
-      })
-      return [isp.name, res.data || []] as const
-    }))
-    // 过滤掉没有数据的 ISP，构建 pingSeries 映射
-    pingSeries.value = Object.fromEntries(results.filter(([, points]) => points.length > 0))
-    // 等待 DOM 更新后渲染图表
-    await nextTick()
-    renderChart()
-  } catch (e: any) {
-    ElMessage.error(e.response?.data?.error || '加载 Ping 数据失败')
-  } finally {
-    pingLoading.value = false
-  }
-}
-
-// ECharts 渲染延时图：按 ISP 分组展示延时和丢包率
-function renderChart() {
-  // 图表容器不存在或无数据时不渲染
-  if (!chartRef.value || Object.keys(pingSeries.value).length === 0) return
-  // 初始化 ECharts 实例（仅首次创建）
-  if (!chart) chart = echarts.init(chartRef.value, 'dark')
-
-  // 收集所有时间点（bucket_min），去重排序
-  const allBuckets = Array.from(new Set(
-    Object.values(pingSeries.value).flatMap(points => points.map(point => point.bucket_min))
-  )).sort()
-  // 格式化时间轴标签
-  const labels = allBuckets.map(point => formatTime(point))
-
-  // 构建每个 ISP 的延时和丢包率时间映射
-  // 关键修复：data 必须是数字类型，不能用 .toFixed() 转成字符串，
-  // 否则 ECharts trigger:'axis' 的 tooltip 无法正确聚合多个 series。
-  // loss_rate 来自 ping -c 3 的单次探测丢包率（0/0.33/0.67/1.0），按秒级展示
-  const ispLossByTime = new Map<string, Map<string, number>>()
-  const series = Object.entries(pingSeries.value).map(([isp, points], index) => {
-    // 延时映射：bucket_min -> avg_lat
-    const byTime = new Map<string, number>()
-    // 丢包率映射：bucket_min -> loss_rate * 100
-    const lossMap = new Map<string, number>()
-    for (const point of points) {
-      byTime.set(point.bucket_min, Number(point.avg_lat || 0))
-      lossMap.set(point.bucket_min, Number(point.loss_rate || 0) * 100)
-    }
-    ispLossByTime.set(isp, lossMap)
-    // 图例名称显示最新丢包率概览
-    const lastPoint = points.length > 0 ? points[points.length - 1] : null
-    const lossPercent = lastPoint ? (Number(lastPoint.loss_rate || 0) * 100).toFixed(1) : '0.0'
-    return {
-      name: `${isp} ${lossPercent}%loss`,
-      type: 'line',
-      // 按时间轴对齐数据，缺失的点用 null 表示
-      data: allBuckets.map(bucket => byTime.has(bucket) ? byTime.get(bucket)! : null),
-      smooth: false,
-      sampling: 'lttb',
-      symbol: 'none',
-      connectNulls: true,
-      // 使用新主题配色
-      lineStyle: { color: chartColors[index % chartColors.length], width: 1.8 },
-      _ispName: isp,
-    }
-  })
-
-  // 设置 ECharts 配置项
-  chart.setOption({
-    animation: false,
-    // tooltip：背景色和边框色使用新主题配色
-    tooltip: {
-      trigger: 'axis',
-      confine: true,
-      transitionDuration: 0,
-      backgroundColor: 'rgba(38, 38, 38, 0.92)',
-      borderColor: 'rgba(59, 130, 246, 0.3)',
-      axisPointer: { type: 'cross', lineStyle: { color: 'rgba(59, 130, 246, 0.3)' } },
-      // 自定义 tooltip：显示同一时间点所有运营商的延时和丢包率
-      formatter: (params: any) => {
-        if (!Array.isArray(params) || params.length === 0) return ''
-        let html = `<div style="font-size:12px;color:#a3a3a3;margin-bottom:6px;font-weight:600">${params[0].axisValue}</div>`
-        params.forEach((p: any) => {
-          if (p.value === null || p.value === undefined) return
-          const color = p.color || chartColors[0]
-          const ispName = p.series?._ispName || p.seriesName
-          // 从 ispLossByTime 中获取该时间点的实际丢包率
-          const lossMap = ispLossByTime.get(ispName)
-          const bucketKey = allBuckets[p.dataIndex]
-          const lossPct = lossMap?.get(bucketKey)?.toFixed(1) ?? '0.0'
-          const lat = typeof p.value === 'number' ? `${p.value.toFixed(2)} ms` : `${p.value} ms`
-          html += `<div style="display:flex;align-items:center;gap:8px;font-size:12px;line-height:22px">
-            <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${color};flex-shrink:0"></span>
-            <span style="color:#f5f5f5;min-width:80px">${ispName}</span>
-            <span style="color:#3b82f6;font-weight:600;min-width:70px;text-align:right">${lat}</span>
-            <span style="color:#fbbf24;font-size:11px;min-width:55px;text-align:right">${lossPct}% loss</span>
-          </div>`
-        })
-        return html
-      },
-    },
-    // 图例：可滚动
-    legend: { type: 'scroll', textStyle: { color: '#a3a3a3' } },
-    // 网格布局
-    grid: { left: '3%', right: '4%', bottom: '8%', containLabel: true },
-    // X 轴：时间类别轴
-    xAxis: {
-      type: 'category',
-      data: labels,
-      axisLine: { lineStyle: { color: 'rgba(255, 255, 255, 0.08)' } },
-      axisLabel: { color: '#a3a3a3', fontSize: 11 },
-    },
-    // Y 轴：延时数值轴
-    yAxis: {
-      type: 'value',
-      name: '延时 (ms)',
-      nameTextStyle: { color: '#a3a3a3' },
-      splitLine: { lineStyle: { color: 'rgba(255, 255, 255, 0.08)' } },
-    },
-    // 数据缩放：支持区域缩放和滑块缩放
-    dataZoom: [
-      { type: 'inside', start: 0, end: 100, throttle: 80 },
-      { type: 'slider', start: 0, end: 100, height: 20, bottom: 0 },
-    ],
-    series,
-  }, { notMerge: true, lazyUpdate: true })
-}
-
-// 格式化时间：将 ISO 时间字符串转为 HH:MM:SS 格式
-function formatTime(value: string) {
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return value
-  return `${date.getHours().toString().padStart(2, '0')}:${date.getMinutes().toString().padStart(2, '0')}:${date.getSeconds().toString().padStart(2, '0')}`
-}
-
-// 组件挂载：依次获取节点详情、ISP 目标、Ping 数据，并启动定时刷新
+// ---------------- 生命周期 ----------------
 onMounted(async () => {
-  await fetchNode()          // 获取节点详情
-  await loadISPTargets()     // 加载 ISP 目标列表
-  await nextTick()           // 等待 DOM 更新
-  await loadPingAgg()        // 加载 Ping 聚合数据并渲染图表
-  // 每 60 秒刷新一次 Ping 数据
-  pingTimer = window.setInterval(loadPingAgg, 60_000)
+  syncConfigForm()
+  await Promise.all([loadMetrics(), loadISPTargets()])
+  await loadPingAgg()
 })
 
-// 组件卸载：清除定时器并销毁 ECharts 实例，避免内存泄漏
-onUnmounted(() => {
-  if (pingTimer) window.clearInterval(pingTimer)
-  chart?.dispose()
-})
+// 历史趋势与 Ping 每分钟刷新一次即可，实时区由共享单例每秒更新
+usePolling(loadMetrics, 60_000, { immediate: false })
+usePolling(loadPingAgg, 60_000, { immediate: false })
+
+// 共享数据到位后回填一次配置表单（节点对象首次出现时触发）
+watch(
+  () => node.value,
+  () => syncConfigForm(),
+  { immediate: true }
+)
 </script>
 
 <style scoped>
-/* 节点详情页容器 */
-.node-detail {
-  width: 100%;
-}
-
-/* 返回按钮区域 */
-.detail-header {
-  margin-bottom: 8px;
-}
-
-.back-btn {
-  color: var(--wk-text-muted);
-  font-size: 13px;
-  padding: 4px 0;
-}
-
-/* 节点标题行：状态灯 + 标题 + 改名按钮 */
-.title-row {
+/* Hero 区 */
+.wk-detail-hero {
   display: flex;
-  align-items: center;
-  gap: 12px;
-  margin: 8px 0 20px;
+  align-items: flex-start;
+  gap: var(--wk-space-4);
+  padding: var(--wk-space-4) 0 var(--wk-space-2);
 }
 
-/* 节点标题 */
-.node-title {
-  font-size: 20px;
-  font-weight: 700;
+.wk-back-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: var(--wk-ctl-md);
+  padding: 0 10px 0 6px;
+  margin-left: -6px;
+  border: none;
+  border-radius: var(--wk-radius-sm);
+  background: transparent;
+  color: var(--wk-text-muted);
+  font-size: var(--wk-fs-base);
+  transition: color var(--wk-dur-fast) var(--wk-ease),
+    background var(--wk-dur-fast) var(--wk-ease);
+}
+
+.wk-back-btn:hover {
   color: var(--wk-text);
+  background: var(--wk-bg-soft);
 }
 
-/* 服务器配置卡片 */
-.config-card {
-  padding: 20px;
-  margin-bottom: 20px;
+.wk-back-btn svg {
+  width: 16px;
+  height: 16px;
 }
 
-/* 配置说明提示框 */
-.config-alert {
-  margin-bottom: 16px;
+.wk-hero-main {
+  flex: 1;
+  min-width: 0;
 }
 
-/* 配置表单 */
-.config-form {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0;
-}
-
-/* Ping 图表卡片 */
-.chart-card {
-  padding: 20px;
-  margin-bottom: 20px;
-}
-
-/* 图表标题行：标题 + 副标题 */
-.chart-header {
+.wk-hero-title {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 16px;
+  gap: var(--wk-space-3);
+  flex-wrap: wrap;
 }
 
-.chart-header h3 {
+.wk-hero-name {
+  font-size: var(--wk-fs-2xl);
+  font-weight: 600;
+  letter-spacing: -0.025em;
+  line-height: 1.2;
   margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 60vw;
 }
 
-/* 图表副标题 */
-.chart-sub {
-  color: var(--wk-text-muted);
-  font-size: 12px;
+.wk-hero-side {
+  text-align: right;
+  flex-shrink: 0;
 }
 
-/* 响应式：小屏幕下表单换行 */
+.wk-hero-time {
+  font-size: var(--wk-fs-md);
+  color: var(--wk-text-secondary);
+  margin-top: 2px;
+}
+
+/* ISP 摘要行 */
+.wk-isp-summary {
+  display: flex;
+  flex-direction: column;
+  gap: var(--wk-space-2);
+  margin-bottom: var(--wk-space-4);
+}
+
+.wk-isp-row {
+  display: flex;
+  align-items: center;
+  gap: var(--wk-space-3);
+  padding: 6px 0;
+  border-bottom: 1px dashed var(--wk-border);
+}
+
+.wk-isp-row:last-child {
+  border-bottom: none;
+}
+
+.wk-isp-name {
+  width: 104px;
+  flex-shrink: 0;
+  font-size: var(--wk-fs-base);
+  font-weight: 600;
+}
+
+/* 丢包徽章与统计文本的行内排列 */
+.wk-isp-stat {
+  font-size: var(--wk-fs-sm);
+}
+
+.wk-isp-stat:last-child {
+  margin-left: auto;
+}
+
+/* 配置表单：三列栅格 + 保存按钮同行，比 inline form 更整齐 */
+.wk-config-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 var(--wk-space-4);
+}
+
+.wk-config-form :deep(.el-form-item) {
+  margin-bottom: var(--wk-space-4);
+}
+
+.wk-config-actions {
+  grid-column: 1 / -1;
+}
+
+/* 双列区域：配置与系统信息并排，窄屏单列 */
+.wk-detail-cols {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr);
+  gap: var(--wk-gap-card);
+  align-items: start;
+}
+
+@media (max-width: 1100px) {
+  .wk-detail-cols {
+    grid-template-columns: 1fr;
+  }
+}
+
 @media (max-width: 860px) {
-  .config-form {
-    flex-direction: column;
+  .wk-detail-hero {
+    flex-wrap: wrap;
   }
-  .config-form :deep(.el-form-item) {
-    margin-bottom: 12px;
+
+  .wk-hero-side {
+    text-align: left;
   }
+
+  /* 窄屏下摘要行换行，统计文本不再靠右对齐 */
+  .wk-isp-row {
+    flex-wrap: wrap;
+  }
+
+  .wk-isp-stat:last-child {
+    margin-left: 0;
+  }
+}
+
+/* 行内图标按钮（改名） */
+.wk-row-action {
+  width: 26px;
+  height: 26px;
+  border: none;
+  border-radius: var(--wk-radius-xs);
+  background: transparent;
+  color: var(--wk-text-muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0.7;
+  transition: all var(--wk-dur-fast) var(--wk-ease);
+}
+
+.wk-row-action svg {
+  width: 15px;
+  height: 15px;
+}
+
+.wk-row-action:hover {
+  opacity: 1;
+  background: var(--wk-bg-soft);
+  color: var(--wk-text);
 }
 </style>

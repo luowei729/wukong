@@ -1,302 +1,362 @@
 <template>
-  <!-- ===== 告警中心页面 ===== -->
-  <div class="alerts-page">
-    <!-- 页面头部：标题 + 进行中/已恢复告警统计 -->
-    <header class="wk-page-header">
-      <h2>告警中心</h2>
-      <div class="wk-stat-row" style="grid-template-columns: repeat(2, minmax(0, 1fr));">
-        <!-- 进行中告警数（firing 状态） -->
-        <div class="wk-metric">
-          <div class="label">进行中告警</div>
-          <div class="value red">{{ firingCount }}</div>
-          <div class="sub">需要关注处理</div>
-        </div>
-        <!-- 已恢复告警数（resolved 状态） -->
-        <div class="wk-metric">
-          <div class="label">已恢复告警</div>
-          <div class="value green">{{ resolvedCount }}</div>
-          <div class="sub">历史告警记录</div>
-        </div>
+  <!-- ============ 告警中心 ============ -->
+  <div class="wk-stack">
+    <!-- ---------------- 概览计数 ---------------- -->
+    <div class="wk-grid-4">
+      <WkMetric
+        label="进行中告警"
+        :value="firingCount"
+        unit="条"
+        :tone="firingCount > 0 ? 'danger' : 'success'"
+        :hint="firingCount > 0 ? '需要关注处理' : '当前没有触发中的告警'"
+      />
+      <WkMetric label="已恢复告警" :value="resolvedCount" unit="条" hint="历史告警记录" />
+      <WkMetric label="今日新增" :value="todayAlerts.length" unit="条" hint="按触发时间统计（本地日期）" />
+      <WkMetric
+        label="涉及节点"
+        :value="alertNodeCount"
+        unit="个"
+        :tone="alertNodeCount > 0 ? 'warning' : 'default'"
+        :hint="`共 ${totalCount} 个节点`"
+      />
+    </div>
+
+    <!-- ---------------- 筛选工具栏 ---------------- -->
+    <div class="wk-toolbar">
+      <div class="wk-segment" role="group" aria-label="状态筛选">
+        <button
+          v-for="option in statusOptions"
+          :key="option.value"
+          type="button"
+          :class="['wk-segment-item', { active: statusFilter === option.value }]"
+          @click="statusFilter = option.value"
+        >
+          {{ option.label }}
+          <span class="wk-num">{{ option.count }}</span>
+        </button>
       </div>
-    </header>
 
-    <!-- 告警列表卡片：包裹 el-table -->
-    <div class="wk-card-solid alert-table-card">
-      <!-- 使用 Element Plus 表格展示告警列表 -->
-      <el-table
-        :data="alertList"
-        v-loading="loading"
-        style="width: 100%"
-        :empty-text="'暂无告警记录'"
-        row-key="id"
+      <el-select v-model="metricFilter" size="small" style="width: 148px" aria-label="指标筛选">
+        <el-option label="全部指标" value="all" />
+        <el-option v-for="item in metricOptions" :key="item.value" :label="item.label" :value="item.value" />
+      </el-select>
+
+      <div class="wk-search">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round">
+          <circle cx="11" cy="11" r="7" />
+          <path d="M20 20l-3.5-3.5" />
+        </svg>
+        <input v-model="keyword" type="search" placeholder="搜索节点名称" aria-label="搜索节点" />
+      </div>
+
+      <span class="wk-sub" style="margin-left: auto">
+        显示 {{ filteredAlerts.length }} / {{ alerts.length }} 条
+      </span>
+    </div>
+
+    <!-- ---------------- 告警列表 ---------------- -->
+    <WkCard padding="none">
+      <div v-if="loading" style="padding: var(--wk-space-5)">
+        <WkSkeleton v-for="i in 5" :key="i" height="18px" style="margin-bottom: 12px" />
+      </div>
+
+      <WkEmptyState
+        v-else-if="alerts.length === 0"
+        icon="shield"
+        ok
+        title="暂无告警"
+        description="所有节点指标都在阈值范围内；阈值与持续时间可在「系统设置 → 告警阈值」调整"
       >
-        <!-- 状态列：用 wk-badge 显示 firing/resolved -->
-        <el-table-column label="状态" width="110" align="center">
+        <template #action>
+          <el-button @click="router.push('/settings')">调整告警阈值</el-button>
+        </template>
+      </WkEmptyState>
+
+      <WkEmptyState
+        v-else-if="filteredAlerts.length === 0"
+        icon="search"
+        title="没有匹配的告警"
+        description="调整状态、指标或节点搜索条件试试"
+      />
+
+      <el-table v-else :data="filteredAlerts" style="width: 100%" @row-click="goToNode">
+        <!-- 状态 + 左侧 severity 色条：一眼区分进行中/已恢复 -->
+        <el-table-column label="状态" width="112">
           <template #default="{ row }">
-            <!-- firing=红色徽章，resolved=绿色徽章 -->
-            <span
-              :class="['wk-badge', row.status === 'firing' ? 'fail' : 'ok']"
-            >
-              <span
-                class="wk-status-dot"
-                :class="row.status === 'firing' ? 'alert' : 'online'"
-                style="margin-right: 5px;"
-              />
-              {{ row.status === 'firing' ? '进行中' : '已恢复' }}
+            <span :class="['wk-severity', row.status === 'firing' ? 'is-firing' : 'is-resolved']">
+              <WkBadge :tone="row.status === 'firing' ? 'fail' : 'ok'" dot>
+                {{ row.status === 'firing' ? '进行中' : '已恢复' }}
+              </WkBadge>
             </span>
           </template>
         </el-table-column>
 
-        <!-- 指标列：metricText 中文映射 -->
-        <el-table-column label="指标" width="130">
+        <el-table-column label="指标" width="104">
           <template #default="{ row }">
-            <span class="metric-cell">{{ metricText(row.metric) }}</span>
+            <span class="wk-metric-name">{{ metricText(row.metric) }}</span>
           </template>
         </el-table-column>
 
-        <!-- 阈值列：formatValue 格式化 -->
-        <el-table-column label="阈值" width="110" align="right">
+        <el-table-column label="节点" min-width="160">
           <template #default="{ row }">
-            <span class="threshold-cell">{{ formatValue(row.metric, row.threshold) }}</span>
-          </template>
-        </el-table-column>
-
-        <!-- 当前值列：超过阈值时高亮红色 -->
-        <el-table-column label="当前值" width="110" align="right">
-          <template #default="{ row }">
-            <span
-              :class="['value-cell', isOverThreshold(row) ? 'red' : '']"
-            >
-              {{ formatValue(row.metric, row.value) }}
-            </span>
-          </template>
-        </el-table-column>
-
-        <!-- 触发时间列 -->
-        <el-table-column label="触发时间" min-width="180">
-          <template #default="{ row }">
-            <span class="time-cell">{{ formatTime(row.fired_at) }}</span>
-          </template>
-        </el-table-column>
-
-        <!-- 恢复时间列 -->
-        <el-table-column label="恢复时间" min-width="180">
-          <template #default="{ row }">
-            <span class="time-cell">{{ formatTime(row.resolved_at) }}</span>
-          </template>
-        </el-table-column>
-
-        <!-- 节点列：显示节点名称 + ID 缩写 -->
-        <el-table-column label="节点" min-width="220">
-          <template #default="{ row }">
-            <div class="node-cell">
-              <span class="node-name">{{ row.agent_name || row.agent_id }}</span>
-              <!-- 有名称且与 ID 不同时，附加显示 ID 前 8 位 -->
-              <span
-                v-if="row.agent_name && row.agent_name !== row.agent_id"
-                class="node-id"
-              >
+            <div class="wk-node-cell">
+              <span class="wk-node-link">{{ row.agent_name || row.agent_id }}</span>
+              <!-- 有自定义名称时附带 ID 前缀，便于和探针日志对齐 -->
+              <span v-if="row.agent_name && row.agent_name !== row.agent_id" class="wk-num wk-node-id">
                 {{ String(row.agent_id).slice(0, 8) }}
               </span>
             </div>
           </template>
         </el-table-column>
-      </el-table>
 
-      <!-- 空状态：美观的居中提示（非加载中且无数据时显示） -->
-      <div v-if="!loading && alertList.length === 0" class="alert-empty">
-        <div class="empty-icon">
-          <!-- 盾牌图标，表示无告警的安全状态 -->
-          <svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.5">
-            <path d="M12 2L4 6v6c0 5 3.5 9.5 8 10 4.5-.5 8-5 8-10V6l-8-4z" />
-            <path d="M9 12l2 2 4-4" stroke-linecap="round" stroke-linejoin="round" />
-          </svg>
-        </div>
-        <div class="empty-title">暂无告警</div>
-        <div class="empty-sub">所有节点运行正常，无触发告警</div>
-      </div>
-    </div>
+        <el-table-column label="阈值" width="96" align="right">
+          <template #default="{ row }">
+            <span class="wk-num wk-sub">{{ formatValue(row.metric, row.threshold) }}</span>
+          </template>
+        </el-table-column>
+
+        <!-- 当前值 + 超阈程度条：达到阈值为半格，超得越多越满 -->
+        <el-table-column label="当前值 / 超阈程度" min-width="180">
+          <template #default="{ row }">
+            <div class="wk-value-cell">
+              <span :class="['wk-num', isOver(row) ? 'red' : '']">
+                {{ formatValue(row.metric, row.value) }}
+              </span>
+              <div class="wk-over-track">
+                <div
+                  :class="['wk-over-fill', isOver(row) ? 'is-over' : '']"
+                  :style="{ width: `${overRatio(row)}%` }"
+                />
+              </div>
+            </div>
+          </template>
+        </el-table-column>
+
+        <el-table-column label="触发时间" width="118">
+          <template #default="{ row }">
+            <span class="wk-num wk-sub" :title="formatDateTime(row.fired_at)">
+              {{ relativeTime(row.fired_at) }}
+            </span>
+          </template>
+        </el-table-column>
+
+        <el-table-column label="恢复时间" width="132">
+          <template #default="{ row }">
+            <span v-if="row.resolved_at" class="wk-num wk-sub">
+              {{ relativeTime(row.resolved_at) }}
+            </span>
+            <span v-else class="wk-badge warn">持续 {{ formatDuration(survivalSeconds(row)) }}</span>
+          </template>
+        </el-table-column>
+      </el-table>
+    </WkCard>
   </div>
 </template>
 
 <script setup lang="ts">
-// ===== 告警中心逻辑 =====
-// 功能：拉取 /api/alerts 告警列表，每秒自动刷新，展示状态/指标/阈值/当前值/时间/节点
-import { ref, computed, onMounted, onUnmounted } from 'vue'
-import http from '@/utils/http'
+// ============ 告警中心逻辑 ============
+// 告警列表来自 useOverview() 共享单例（每秒刷新），本页不再独立轮询 /api/alerts
+import { computed, ref } from 'vue'
+import { useRouter } from 'vue-router'
+import WkBadge from '@/components/WkBadge.vue'
+import WkCard from '@/components/WkCard.vue'
+import WkEmptyState from '@/components/WkEmptyState.vue'
+import WkMetric from '@/components/WkMetric.vue'
+import WkSkeleton from '@/components/WkSkeleton.vue'
+import { useOverview } from '@/composables/useOverview'
+import { formatDateTime, formatDuration, relativeTime } from '@/utils/format'
 
-// 告警列表数据（后端可能返回 null，前端兜底成空数组）
-const alertList = ref<any[]>([])
-// 加载状态（仅首次加载显示 loading 遮罩，后续静默刷新不显示）
-const loading = ref(false)
-// 定时刷新定时器引用
-let refreshTimer: ReturnType<typeof setInterval> | null = null
+const router = useRouter()
+const { alerts, loading, firingCount, todayAlerts, alertNodeCount, totalCount } = useOverview()
 
-// 计算属性：进行中告警数（status === 'firing'）
-const firingCount = computed(() =>
-  alertList.value.filter((a) => a.status === 'firing').length
+// ---------------- 筛选状态 ----------------
+const statusFilter = ref<'all' | 'firing' | 'resolved'>('all')
+const metricFilter = ref('all')
+const keyword = ref('')
+
+const resolvedCount = computed(
+  () => alerts.value.filter((item: any) => item.status === 'resolved').length
 )
 
-// 计算属性：已恢复告警数（status === 'resolved'）
-const resolvedCount = computed(() =>
-  alertList.value.filter((a) => a.status === 'resolved').length
-)
+// 状态切换按钮附带数量，避免用户切完才发现是空的
+const statusOptions = computed(() => [
+  { label: '全部', value: 'all' as const, count: alerts.value.length },
+  { label: '进行中', value: 'firing' as const, count: firingCount.value },
+  { label: '已恢复', value: 'resolved' as const, count: resolvedCount.value },
+])
 
-// 拉取告警列表
-// showLoading=true 时显示加载遮罩（首次加载），后续每秒刷新时静默
-async function fetchAlerts(showLoading = false) {
-  if (showLoading) loading.value = true
-  try {
-    // 加时间戳避免浏览器/中间层缓存，确保拿到最新告警状态
-    const res = await http.get(`/api/alerts?_=${Date.now()}`)
-    // 后端无告警时可能返回 null；前端必须兜底成数组，避免表格闪现后因 .length 报错消失
-    alertList.value = Array.isArray(res.data) ? res.data : []
-  } catch (e) {
-    // 请求失败时清空列表，避免显示过期数据
-    console.error('获取告警列表失败', e)
-    alertList.value = []
-  } finally {
-    if (showLoading) loading.value = false
-  }
+// 指标字典：与后端 alert.metric 取值一一对应
+const METRIC_TEXT: Record<string, string> = {
+  offline: '离线',
+  cpu: 'CPU',
+  mem: '内存',
+  disk: '磁盘',
+  ping_latency: 'Ping 延迟',
+  ping_loss: 'Ping 丢包',
 }
 
-// 指标中文名称映射
-// 将后端 metric 字段（offline/cpu/mem 等）转为中文展示
-function metricText(metric: string) {
-  const map: Record<string, string> = {
-    offline: '离线',
-    cpu: 'CPU',
-    mem: '内存',
-    disk: '磁盘',
-    ping_latency: 'Ping 延迟',
-    ping_loss: 'Ping 丢包',
-  }
-  return map[metric] || metric
+const metricOptions = Object.entries(METRIC_TEXT).map(([value, label]) => ({ value, label }))
+
+function metricText(metric: string): string {
+  return METRIC_TEXT[metric] || metric
 }
 
-// 格式化指标数值
-// 不同指标使用不同单位：离线=秒、Ping 延迟=ms、其余=百分比
-function formatValue(metric: string, value?: number) {
+// 数值单位：离线用秒、Ping 延迟用 ms、其余按百分比
+function formatValue(metric: string, value?: number): string {
   if (typeof value !== 'number') return '-'
   if (metric === 'offline') return value > 1 ? `${value.toFixed(0)} 秒` : '离线'
   if (metric === 'ping_latency') return `${value.toFixed(1)} ms`
   return `${value.toFixed(1)}%`
 }
 
-// 格式化时间戳为本地时间字符串
-function formatTime(value?: string) {
-  if (!value) return '-'
-  return new Date(value).toLocaleString()
-}
-
-// 判断当前值是否超过阈值（用于高亮显示）
-// 离线指标特殊处理：value>0 即视为超阈值
-function isOverThreshold(row: any) {
+// 是否真的超阈：只有进行中且数值超过阈值才标红
+function isOver(row: any): boolean {
   if (row.status !== 'firing') return false
-  if (typeof row.value !== 'number' || typeof row.threshold !== 'number') return false
-  return row.value > row.threshold
+  return typeof row.value === 'number' && typeof row.threshold === 'number'
+    ? row.value > row.threshold
+    : true
 }
 
-// 组件挂载：首次加载 + 每秒定时刷新
-onMounted(() => {
-  // 首次加载显示 loading
-  fetchAlerts(true)
-  // 告警中心按秒刷新，配合时间戳参数避免缓存，确保告警状态实时更新
-  refreshTimer = setInterval(() => fetchAlerts(false), 1000)
+// 超阈程度：达到阈值显示半格（50%），达到两倍阈值填满
+function overRatio(row: any): number {
+  if (typeof row.value !== 'number' || typeof row.threshold !== 'number' || row.threshold <= 0) {
+    return row.status === 'firing' ? 100 : 0
+  }
+  const ratio = (row.value / row.threshold) * 50
+  return Math.max(0, Math.min(100, ratio))
+}
+
+// 告警存活时长：进行中用"现在 - 触发时间"，已恢复不显示
+function survivalSeconds(row: any): number {
+  const fired = new Date(row.fired_at || 0).getTime()
+  if (Number.isNaN(fired)) return 0
+  return Math.max(0, (Date.now() - fired) / 1000)
+}
+
+// 过滤逻辑：状态 → 指标 → 关键字（节点名或 ID）
+const filteredAlerts = computed(() => {
+  const text = keyword.value.trim().toLowerCase()
+  return alerts.value.filter((item: any) => {
+    if (statusFilter.value !== 'all' && item.status !== statusFilter.value) return false
+    if (metricFilter.value !== 'all' && item.metric !== metricFilter.value) return false
+    if (text) {
+      const haystack = `${item.agent_name || ''} ${item.agent_id || ''}`.toLowerCase()
+      if (!haystack.includes(text)) return false
+    }
+    return true
+  })
 })
 
-// 组件卸载：清除定时器，避免内存泄漏
-onUnmounted(() => {
-  if (refreshTimer) clearInterval(refreshTimer)
-})
+// 点击行进入节点详情，方便直接排查
+function goToNode(row: any) {
+  if (row?.agent_id) router.push(`/nodes/${row.agent_id}`)
+}
 </script>
 
 <style scoped>
-/* ===== 告警中心局部样式 ===== */
-
-/* 表格卡片容器：去掉默认底部间距，表格撑满 */
-.alert-table-card {
-  margin-bottom: 0;
-  padding: 4px 8px 8px;
+/* severity 色条：状态列左侧一条 3px 竖条，扫视时比读文字更快 */
+.wk-severity {
+  display: inline-flex;
+  align-items: center;
+  padding-left: var(--wk-space-3);
+  border-left: 3px solid transparent;
 }
 
-/* 指标单元格：加粗显示 */
-.metric-cell {
-  font-weight: 600;
+.wk-severity.is-firing {
+  border-left-color: var(--wk-danger);
+}
+
+.wk-severity.is-resolved {
+  border-left-color: var(--wk-success);
+}
+
+.wk-metric-name {
+  font-weight: 500;
   color: var(--wk-text);
 }
 
-/* 阈值单元格：次要色 */
-.threshold-cell {
-  color: var(--wk-text-muted);
-  font-family: 'JetBrains Mono', ui-monospace, monospace;
-  font-size: 13px;
+.wk-node-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
 }
 
-/* 当前值单元格：等宽字体 */
-.value-cell {
-  font-family: 'JetBrains Mono', ui-monospace, monospace;
-  font-size: 13px;
-  font-weight: 600;
+.wk-node-link {
+  font-weight: 500;
+  color: var(--wk-text);
 }
 
-/* 时间单元格：等宽字体，次要色 */
-.time-cell {
-  font-family: 'JetBrains Mono', ui-monospace, monospace;
-  font-size: 12.5px;
+.wk-node-id {
+  font-size: var(--wk-fs-xs);
   color: var(--wk-text-muted);
 }
 
-/* 节点单元格：名称 + ID 上下排列 */
-.node-cell {
+/* 当前值 + 超阈程度条 */
+.wk-value-cell {
   display: flex;
-  flex-direction: column;
-  gap: 2px;
-
-  .node-name {
-    font-weight: 600;
-    color: var(--wk-text);
-  }
-
-  .node-id {
-    font-family: 'JetBrains Mono', ui-monospace, monospace;
-    font-size: 11px;
-    color: var(--wk-text-muted);
-  }
-}
-
-/* 空状态：居中美化提示 */
-.alert-empty {
-  display: flex;
-  flex-direction: column;
   align-items: center;
-  justify-content: center;
-  padding: 56px 20px;
-  text-align: center;
-
-  .empty-icon {
-    color: var(--wk-success);
-    opacity: 0.7;
-    margin-bottom: 14px;
-  }
-
-  .empty-title {
-    font-size: 16px;
-    font-weight: 650;
-    color: var(--wk-text);
-    margin-bottom: 6px;
-  }
-
-  .empty-sub {
-    font-size: 13px;
-    color: var(--wk-text-muted);
-  }
+  gap: var(--wk-space-3);
 }
 
-/* 响应式：小屏下统计卡片单列 */
-@media (max-width: 640px) {
-  .wk-stat-row {
-    grid-template-columns: 1fr !important;
+.wk-over-track {
+  flex: 1;
+  min-width: 60px;
+  height: 4px;
+  border-radius: var(--wk-radius-pill);
+  background: color-mix(in srgb, var(--wk-text) 9%, transparent);
+  overflow: hidden;
+}
+
+.wk-over-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: var(--wk-text-muted);
+  transition: width var(--wk-dur-base) var(--wk-ease);
+}
+
+.wk-over-fill.is-over {
+  background: var(--wk-danger);
+}
+
+/* 搜索框样式与节点列表页保持一致 */
+.wk-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: var(--wk-ctl-md);
+  padding: 0 10px;
+  min-width: 200px;
+  background: var(--wk-bg-recess);
+  border: 1px solid var(--wk-border);
+  border-radius: var(--wk-radius-sm);
+}
+
+.wk-search:focus-within {
+  border-color: var(--wk-primary);
+  box-shadow: var(--wk-ring);
+}
+
+.wk-search svg {
+  width: 15px;
+  height: 15px;
+  color: var(--wk-text-muted);
+}
+
+.wk-search input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  color: var(--wk-text);
+  font-size: var(--wk-fs-base);
+  font-family: inherit;
+  outline: none;
+}
+
+@media (max-width: 860px) {
+  .wk-search {
+    min-width: 140px;
   }
 }
 </style>

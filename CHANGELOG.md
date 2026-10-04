@@ -2,6 +2,35 @@
 
 所有变更记录使用北京时间（UTC+8）。
 
+## [2026-10-05 04:13] - Web UI 重构为现代 SaaS 控制台（设计令牌 + 组件层 + 页面信息架构）
+
+### 改动前总结
+上一轮（2026-08-06）只做了换色层面的现代化，仍存在结构性问题：
+1. 设置页保存的 `theme.primary`（自定义主色）从未写进 CSS 变量，架构决策 #11 的自定义主题实际不生效；
+2. ECharts 配置里直接写 `axisLabel:{color:'var(--wk-text-muted)'}`，canvas 不解析 CSS 变量，轴/图例颜色失效，且 `echarts.init(el,'dark')` 写死深色，切浅色主题图表仍是深色底；
+3. 后台节点详情页只用了后端已有的 20 个 `LatestMetric` 字段中的 3 个（名称/采集频率/Ping 频率），信息量反而少于公开详情页；
+4. `formatBytes/relativeTime/loadLevel` 在 5 个文件各写一份，单位口径不一（KiB 与 KB 混用）、负载阈值不一（60/85 与 70/90）；
+5. 顶栏每 5s 拉 3 接口 + 总览每 1s 拉 2 接口 + 节点页每 1s 拉 2 接口，同一份数据重复请求，后台标签页也不停；
+6. `index.html` 引用 `/favicon.svg` 但仓库无此文件（404）；`App.vue` 与 `index.scss` 重复一份全局 reset 并引用未加载的 Inter 字体。
+
+### 改动后总结
+视觉方向改为现代 SaaS 控制台（参考 Linear 近黑画布 + hairline 边框 + 单一克制强调色、Stripe 的 table-first 与“颜色只表达状态”、Vercel 的中性灰阶与排版层次）。**纯前端改动，未修改 `internal/` 任何 Go 代码，未新增 npm 依赖。**
+
+1. **设计令牌重写**（`web/src/styles/variables.scss`）：中性灰阶画布（暗 #0a0a0b / 浅 #f7f7f8）+ 新主色 indigo（暗 #5e6ad2 / 浅 #4f5bd5）；新增圆角/间距/字号/字重/控件高度/动效尺度令牌；派生色（hover/soft/glow）全部改用 `color-mix()` 从 `--wk-primary` 推导，因此改一个变量即可全站联动；`--el-*` 全部指向 `--wk-*`，Element Plus 自动跟随主题与自定义主色；保留 `--wk-shadow-sm/md`、`--wk-border-light` 等旧名作别名，避免中途回归。
+2. **样式分层**：`index.scss` 拆为 `variables → base → layout → components → element` 五个文件，入口路径与 `main.ts` 导入不变；卡片 hover 不再 translateY 上浮，改为边框 + 阴影反馈。
+3. **新增组件层**（`web/src/components/`，9 个）：`WkCard`、`WkMetric`、`WkProgressBar`、`WkStatusDot`、`WkBadge`、`WkSparkline`（纯 SVG 迷你曲线）、`WkChart`（ECharts 唯一出口，自动 init/dispose/resize + 主题重建）、`WkEmptyState`、`WkSkeleton`。
+4. **新增工具与组合层**：`utils/format.ts`（统一格式化与负载阈值 70/85）、`utils/charts.ts`（`getComputedStyle` 解析 CSS 变量为真实色值 + 注册 wukong 主题 + 统一 axis/tooltip/dataZoom 工厂）、`composables/useTheme.ts`（主题单例，**真正注入 `--wk-primary`**）、`composables/usePolling.ts`（页面不可见自动暂停）、`composables/useOverview.ts`（多页共享一个 1s 轮询 + 内存滚动采样）。
+5. **逐页重构**：顶栏改为页面标题 + 副标题 + 实时药丸 + 告警铃带角标 + 头像菜单；总览新增 KPI sparkline、卡片/列表双视图、集群负载趋势、最近告警；节点列表改为 table-first + 搜索/状态 chips/排序；节点详情页补齐后端已有字段（CPU 型号/核数/负载/总内存/总磁盘/累计流量/启动时间/出口 IP）+ 资源趋势 1h/6h/24h + ISP 摘要 + 系统信息定义列表；告警中心新增 4 计数 + 状态/指标/节点筛选 + severity 色条 + 超阈程度条；设置页改为左侧竖排分区导航，主题页改预设卡 + 主色色板 + 即时预览；登录页改为左品牌右表单分栏；公开首页新增可用性圆环 + 直接复用后端 `summary`；公开详情页新增 Statuspage 风格 24h 丢包色条。
+6. **顺带修复**：删除 `App.vue` 重复 reset；新增 `web/public/favicon.svg` 与 `<meta name="theme-color">`；`prefers-reduced-motion` 下关闭呼吸动画与骨架流光；icon-only 按钮补 `aria-label`。
+
+### 验证
+- `npx vue-tsc --noEmit` 零错误；`npx vite build` 产物输出 `internal/webapi/dist/`（含 favicon.svg）成功。
+- 本机未安装 Go 工具链（`go: command not found`），因此未跑真实主控；改用与 `vite.config.ts` proxy 完全一致的只读 Mock API（`build/mock-api.mjs`，8 节点/4 运营商/12 条告警）+ Vite dev server，用无头浏览器三轮逐页核验：所有页面 console error 0、4xx/5xx 0、无白屏；双主题与 6 种主色切换、1440/820 两档宽度均正常；修复了核验中发现的 `wk-grid-*` 缺 `display:grid`、表格列宽截断、dataZoom 压住时间轴、设置页强制回滚主题、丢包误用资源阈值、内存线与主色同色相等问题。
+
+### 已知限制
+- `/api/public/theme` 不返回 `primary`，未登录访客看到的仍是默认主色（登录态走 `/api/theme` 可完整生效）；要覆盖匿名场景需后端补 1 个字段，本次按“不改后端”约束未做。
+- KPI sparkline 与集群趋势基于前端内存滚动采样，刷新页面后历史清空。
+
 ## [2026-08-06 05:12] - Web UI 全面重构：参考 QuantKing 设计系统现代化改造
 
 ### 改动前总结

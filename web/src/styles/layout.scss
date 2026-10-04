@@ -1,0 +1,502 @@
+// =============================================
+// 布局层：后台外壳（顶栏 + 侧栏 + 内容区）与公开页容器
+// 说明：页面级骨架尺寸集中在这里，组件不关心自己在页面的哪一层
+// =============================================
+@use "./variables.scss" as *;
+
+// ---- App Shell ----
+.wk-app-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow: hidden;
+  background: var(--wk-bg);
+}
+
+.wk-app-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+}
+
+// ---- 顶栏 ----
+.wk-header {
+  height: var(--wk-header-h);
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: var(--wk-space-3);
+  padding: 0 var(--wk-space-4) 0 var(--wk-space-3);
+  // hairline 底边 + 半透明背景 + 模糊：Linear/Vercel 一致的"玻璃顶栏"
+  border-bottom: 1px solid var(--wk-border);
+  background: var(--wk-header-bg);
+  backdrop-filter: blur(12px) saturate(140%);
+  z-index: 40;
+}
+
+.wk-header-left {
+  display: flex;
+  align-items: center;
+  gap: var(--wk-space-3);
+  min-width: 0;
+}
+
+.wk-header-right {
+  display: flex;
+  align-items: center;
+  gap: var(--wk-space-2);
+  margin-left: auto;
+}
+
+// 页面标题 + 副标题（标题层级取代旧的页面内 h2）
+.wk-header-title {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.wk-page-title {
+  font-size: var(--wk-fs-md);
+  font-weight: var(--wk-fw-semibold);
+  letter-spacing: -0.01em;
+  color: var(--wk-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.wk-page-sub {
+  font-size: var(--wk-fs-xs);
+  color: var(--wk-text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.wk-header-divider {
+  width: 1px;
+  height: 18px;
+  background: var(--wk-border);
+}
+
+// 顶栏实时状态药丸（在线数 / 告警数）
+.wk-live-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 10px;
+  border: 1px solid var(--wk-border);
+  border-radius: var(--wk-radius-pill);
+  background: var(--wk-panel);
+  font-size: var(--wk-fs-xs);
+  font-weight: var(--wk-fw-medium);
+  color: var(--wk-text-secondary);
+  white-space: nowrap;
+}
+
+.wk-clock {
+  font-family: var(--wk-mono-family);
+  font-variant-numeric: tabular-nums;
+  color: var(--wk-text-muted);
+  font-size: var(--wk-fs-xs);
+  letter-spacing: 0.02em;
+}
+
+// 图标按钮：32px 方形，hairline 边框，hover 换背景不换形状（SaaS 控制台不做缩放）
+.wk-icon-btn {
+  width: var(--wk-ctl-md);
+  height: var(--wk-ctl-md);
+  border-radius: var(--wk-radius-sm);
+  flex-shrink: 0;
+  border: 1px solid var(--wk-border);
+  background: transparent;
+  color: var(--wk-text-secondary);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background var(--wk-dur-fast) var(--wk-ease),
+    color var(--wk-dur-fast) var(--wk-ease),
+    border-color var(--wk-dur-fast) var(--wk-ease);
+
+  &:hover {
+    background: var(--wk-bg-soft);
+    color: var(--wk-text);
+    border-color: var(--wk-border-strong);
+  }
+
+  svg {
+    width: 16px;
+    height: 16px;
+    flex-shrink: 0;
+  }
+
+  &.is-alert-active {
+    color: var(--wk-danger-text);
+    border-color: color-mix(in srgb, var(--wk-danger) 38%, transparent);
+    background: var(--wk-danger-soft);
+  }
+}
+
+// 头像与用户名区
+.wk-user-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--wk-space-2);
+  height: var(--wk-ctl-md);
+  padding: 0 10px 0 4px;
+  border: 1px solid var(--wk-border);
+  border-radius: var(--wk-radius-pill);
+  background: transparent;
+  color: var(--wk-text-secondary);
+  font-size: var(--wk-fs-base);
+  transition: background var(--wk-dur-fast) var(--wk-ease);
+
+  &:hover {
+    background: var(--wk-bg-soft);
+    color: var(--wk-text);
+  }
+}
+
+.wk-avatar {
+  width: 24px;
+  height: 24px;
+  border-radius: var(--wk-radius-pill);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: var(--wk-fw-bold);
+  color: var(--wk-on-primary);
+  background: linear-gradient(
+    145deg,
+    var(--wk-primary),
+    color-mix(in srgb, var(--wk-primary) 62%, black)
+  );
+  flex-shrink: 0;
+}
+
+// ---- 侧栏 ----
+.wk-sidebar {
+  width: var(--wk-sidebar-w);
+  flex: 0 0 var(--wk-sidebar-w);
+  background: var(--wk-bg-soft);
+  border-right: 1px solid var(--wk-border);
+  display: flex;
+  flex-direction: column;
+  transition: width var(--wk-dur-base) var(--wk-ease),
+    flex-basis var(--wk-dur-base) var(--wk-ease);
+  overflow: hidden;
+}
+
+// 侧栏品牌行（品牌从顶栏移入侧栏，顶栏只保留页面标题，符合 SaaS 控制台惯例）
+.wk-side-brand {
+  height: var(--wk-header-h);
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: var(--wk-space-2);
+  padding: 0 var(--wk-space-3);
+  border-bottom: 1px solid var(--wk-border);
+  overflow: hidden;
+}
+
+.wk-brand-mark {
+  width: 26px;
+  height: 26px;
+  border-radius: var(--wk-radius-sm);
+  flex-shrink: 0;
+  background: linear-gradient(
+    150deg,
+    var(--wk-primary),
+    color-mix(in srgb, var(--wk-primary) 58%, black)
+  );
+  color: var(--wk-on-primary);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: var(--wk-fw-bold);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--wk-primary) 30%, transparent),
+    0 4px 12px -6px var(--wk-primary-glow);
+}
+
+.wk-brand-text {
+  font-size: var(--wk-fs-base);
+  font-weight: var(--wk-fw-semibold);
+  letter-spacing: -0.01em;
+  color: var(--wk-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.wk-side-nav {
+  padding: var(--wk-space-3) var(--wk-space-2);
+  display: flex;
+  flex-direction: column;
+  gap: var(--wk-space-4);
+  flex: 1;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+
+.wk-nav-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.wk-nav-group-title {
+  font-size: var(--wk-fs-xs);
+  font-weight: var(--wk-fw-semibold);
+  color: var(--wk-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: var(--wk-space-1) var(--wk-space-3) 6px;
+}
+
+// 导航项：激活态用左侧 3px 强调条 + 主色浅底，而非整块高饱和
+.wk-nav-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--wk-text-secondary);
+  text-decoration: none;
+  padding: 7px 10px;
+  border-radius: var(--wk-radius-sm);
+  font-size: var(--wk-fs-base);
+  font-weight: var(--wk-fw-medium);
+  transition: background var(--wk-dur-fast) var(--wk-ease),
+    color var(--wk-dur-fast) var(--wk-ease);
+
+  &:hover {
+    color: var(--wk-text);
+    background: color-mix(in srgb, var(--wk-text) 5%, transparent);
+    text-decoration: none;
+  }
+
+  &.active {
+    color: var(--wk-text);
+    background: var(--wk-primary-soft);
+    font-weight: var(--wk-fw-semibold);
+
+    &::before {
+      content: "";
+      position: absolute;
+      left: 0;
+      top: 50%;
+      transform: translateY(-50%);
+      width: 3px;
+      height: 16px;
+      border-radius: 0 var(--wk-radius-pill) var(--wk-radius-pill) 0;
+      background: var(--wk-primary);
+    }
+  }
+
+  .wk-nav-ico {
+    width: 18px;
+    height: 18px;
+    flex: 0 0 18px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: inherit;
+
+    svg {
+      width: 17px;
+      height: 17px;
+    }
+  }
+
+  .wk-nav-count {
+    margin-left: auto;
+    font-size: var(--wk-fs-xs);
+    font-weight: var(--wk-fw-semibold);
+    color: var(--wk-danger-text);
+    background: var(--wk-danger-soft);
+    border-radius: var(--wk-radius-pill);
+    padding: 1px 7px;
+  }
+
+  &.mini {
+    padding: 6px 10px;
+    font-size: var(--wk-fs-base);
+  }
+}
+
+.wk-side-bottom {
+  padding: var(--wk-space-2);
+  border-top: 1px solid var(--wk-border);
+  display: flex;
+  flex-direction: column;
+  gap: var(--wk-space-1);
+}
+
+.wk-status-line {
+  color: var(--wk-text-muted);
+  font-size: var(--wk-fs-xs);
+  padding: 7px 10px;
+  display: flex;
+  align-items: center;
+  gap: var(--wk-space-2);
+}
+
+// ---- 折叠态（桌面端） ----
+.wk-app-shell.sidebar-collapsed {
+  .wk-sidebar {
+    width: var(--wk-sidebar-w-collapsed);
+    flex-basis: var(--wk-sidebar-w-collapsed);
+  }
+
+  .wk-nav-label,
+  .wk-nav-group-title,
+  .wk-side-status-text,
+  .wk-brand-text,
+  .wk-nav-count {
+    display: none;
+  }
+
+  .wk-nav-item {
+    justify-content: center;
+    padding: 9px;
+  }
+
+  .wk-side-brand {
+    justify-content: center;
+    padding: 0;
+  }
+}
+
+// ---- 主内容区 ----
+.wk-main-shell {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--wk-bg);
+}
+
+.wk-container {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--wk-space-5) var(--wk-space-6) var(--wk-space-8);
+  scrollbar-width: thin;
+}
+
+// 内容限宽：超宽屏不让卡片被拉成一条线
+.wk-container-inner {
+  width: 100%;
+  max-width: var(--wk-content-max);
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--wk-gap-section);
+}
+
+// ---- 公开页容器（无侧栏，居中限宽） ----
+.wk-public-shell {
+  min-height: 100vh;
+  // 顶部一层极淡的主色氛围渐变，代替旧版 glow 装饰
+  background: radial-gradient(
+      120% 42% at 50% -8%,
+      color-mix(in srgb, var(--wk-primary) 12%, transparent),
+      transparent 62%
+    ),
+    var(--wk-bg);
+  color: var(--wk-text);
+}
+
+.wk-public-inner {
+  width: min(1240px, calc(100% - 32px));
+  margin: 0 auto;
+}
+
+.wk-public-nav {
+  height: 68px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--wk-space-4);
+}
+
+.wk-public-main {
+  padding-bottom: var(--wk-space-10);
+}
+
+// ---- 响应式 ----
+@media (max-width: 1080px) {
+  .wk-header-metrics {
+    display: none;
+  }
+}
+
+@media (max-width: 860px) {
+  .wk-sidebar {
+    position: fixed;
+    left: 0;
+    top: var(--wk-header-h);
+    bottom: 0;
+    z-index: 50;
+    width: var(--wk-sidebar-w);
+    flex-basis: var(--wk-sidebar-w);
+    transform: translateX(-100%);
+    box-shadow: var(--wk-shadow-pop);
+    transition: transform var(--wk-dur-base) var(--wk-ease);
+  }
+
+  .wk-app-shell.sidebar-open .wk-sidebar {
+    transform: translateX(0);
+  }
+
+  // 移动端抽屉展开时忽略桌面折叠态
+  .wk-app-shell.sidebar-collapsed .wk-sidebar {
+    width: var(--wk-sidebar-w);
+    flex-basis: var(--wk-sidebar-w);
+  }
+
+  .wk-app-shell.sidebar-collapsed .wk-nav-label,
+  .wk-app-shell.sidebar-collapsed .wk-nav-group-title,
+  .wk-app-shell.sidebar-collapsed .wk-side-status-text,
+  .wk-app-shell.sidebar-collapsed .wk-brand-text {
+    display: initial;
+  }
+
+  .wk-app-shell.sidebar-collapsed .wk-nav-item {
+    justify-content: flex-start;
+    padding: 7px 10px;
+  }
+
+  .wk-app-shell.sidebar-collapsed .wk-side-brand {
+    justify-content: flex-start;
+    padding: 0 var(--wk-space-3);
+  }
+
+  .wk-sidebar-backdrop {
+    display: none;
+    position: fixed;
+    inset: 0;
+    top: var(--wk-header-h);
+    background: var(--wk-scrim);
+    z-index: 45;
+    backdrop-filter: blur(2px);
+  }
+
+  .wk-app-shell.sidebar-open .wk-sidebar-backdrop {
+    display: block;
+  }
+
+  .wk-page-sub,
+  .wk-clock,
+  .wk-user-name {
+    display: none;
+  }
+
+  .wk-container {
+    padding: var(--wk-space-4) var(--wk-space-3) var(--wk-space-6);
+  }
+}

@@ -1,16 +1,16 @@
 <template>
   <!-- ============================================================
-       公开首页：未登录用户可查看脱敏后的服务器运行状态
-       设计参考 QuantKing：蓝色主色调 + 圆角卡片 + 双主题
+       公开首页：未登录可访问的服务器状态展示
+       结构与后台总览页共用同一套卡片类，保证两个入口视觉一致
        ============================================================ -->
-  <div class="public-page">
-    <!-- 顶部导航栏：品牌标志 + 站点标题 + 管理登录按钮 -->
-    <header class="public-nav">
-      <div class="nav-brand">
-        <span class="wk-brand-mark">悟</span>
-        <div class="nav-brand-text">
-          <strong>{{ siteTitle }}</strong>
-          <small>公开服务器监控</small>
+  <div class="wk-public-shell">
+    <!-- ---------------- 顶部导航 ---------------- -->
+    <header class="wk-public-nav">
+      <div class="wk-row" style="gap: 10px; min-width: 0">
+        <span class="wk-brand-mark" style="width: 32px; height: 32px; font-size: 15px">悟</span>
+        <div style="min-width: 0">
+          <strong style="font-size: var(--wk-fs-md)">{{ siteTitle }}</strong>
+          <div class="wk-sub">公开服务器状态</div>
         </div>
       </div>
       <el-button type="primary" plain @click="goAdmin">
@@ -18,151 +18,200 @@
       </el-button>
     </header>
 
-    <!-- 主内容区域 -->
-    <main class="public-main">
-      <!-- 统计摘要区域：6 个指标卡，展示服务器数 / 在线 / 离线 / 平均 CPU / 平均内存 / 网络流量 -->
-      <section class="wk-metrics summary-grid">
-        <div class="wk-metric">
-          <span class="label">服务器</span>
-          <span class="value">{{ servers.length }}</span>
-          <span class="sub">台</span>
+    <main class="wk-public-inner wk-public-main">
+      <!-- ---------------- Hero：整体可用性 + 汇总指标 ---------------- -->
+      <section class="wk-hero">
+        <div class="wk-hero-text">
+          <div class="wk-eyebrow">
+            <span class="wk-status-dot online is-pulse" style="margin-right: 6px" />
+            实时监控 · 更新于 {{ updatedText }}
+          </div>
+          <h1 class="wk-hero-title">服务器运行状态</h1>
+          <p class="wk-sub">
+            共 {{ summary.total }} 台服务器，秒级上报 CPU / 内存 / 磁盘 / 网络与运营商链路质量
+          </p>
         </div>
-        <div class="wk-metric">
-          <span class="label">在线</span>
-          <span class="value green">{{ onlineCount }}</span>
-          <span class="sub">台</span>
-        </div>
-        <div class="wk-metric">
-          <span class="label">离线</span>
-          <span class="value red">{{ offlineCount }}</span>
-          <span class="sub">台</span>
-        </div>
-        <div class="wk-metric">
-          <span class="label">平均 CPU</span>
-          <span class="value">{{ avgCpu }}</span>
-          <span class="sub">%</span>
-        </div>
-        <div class="wk-metric">
-          <span class="label">平均内存</span>
-          <span class="value">{{ avgMem }}</span>
-          <span class="sub">%</span>
-        </div>
-        <div class="wk-metric">
-          <span class="label">网络流量</span>
-          <span class="value">{{ totalNet }}</span>
-          <span class="sub">/s</span>
+
+        <!-- 可用性圆环：纯 CSS conic-gradient，不引图表库就能表达"在线率" -->
+        <div class="wk-availability">
+          <div class="wk-avail-ring" :style="ringStyle">
+            <span class="wk-num wk-avail-value">{{ uptimePercent }}</span>
+            <span class="wk-avail-unit">在线率</span>
+          </div>
+          <div class="wk-avail-meta">
+            <span class="wk-badge ok" dot>{{ summary.online }} 在线</span>
+            <span v-if="summary.offline > 0" class="wk-badge fail" dot>
+              {{ summary.offline }} 离线
+            </span>
+          </div>
         </div>
       </section>
 
-      <!-- 服务器列表区域标题 -->
-      <div class="wk-page-header">
-        <h2>服务器列表</h2>
-        <span class="muted">点击卡片查看详情</span>
+      <!-- ---------------- 汇总指标（直接使用后端 summary，避免前端重算口径漂移） ---------------- -->
+      <section class="wk-grid-6">
+        <WkMetric label="服务器" :value="summary.total" unit="台" :loading="loading" hint="已注册探针总数" />
+        <WkMetric
+          label="在线"
+          :value="summary.online"
+          unit="台"
+          tone="success"
+          :loading="loading"
+          hint="心跳正常"
+        />
+        <WkMetric
+          label="离线"
+          :value="summary.offline"
+          unit="台"
+          :tone="summary.offline > 0 ? 'danger' : 'default'"
+          :loading="loading"
+          :hint="summary.offline > 0 ? '需要检查探针' : '全部在线'"
+        />
+        <WkMetric
+          label="平均 CPU"
+          :value="formatOneDecimal(summary.avg_cpu)"
+          unit="%"
+          :tone="toneOf(summary.avg_cpu)"
+          :loading="loading"
+          hint="所有上报节点均值"
+        />
+        <WkMetric
+          label="平均内存"
+          :value="formatOneDecimal(summary.avg_mem)"
+          unit="%"
+          :tone="toneOf(summary.avg_mem)"
+          :loading="loading"
+          hint="所有上报节点均值"
+        />
+        <WkMetric
+          label="平均磁盘"
+          :value="formatOneDecimal(summary.avg_disk)"
+          unit="%"
+          :tone="toneOf(summary.avg_disk)"
+          :loading="loading"
+          hint="所有上报节点均值"
+        />
+      </section>
+
+      <!-- ---------------- 工具栏：筛选 + 排序 ---------------- -->
+      <div class="wk-toolbar" style="margin: var(--wk-space-6) 0 var(--wk-space-4)">
+        <div class="wk-chips" role="group" aria-label="状态筛选">
+          <button
+            v-for="chip in statusChips"
+            :key="chip.value"
+            type="button"
+            :class="['wk-chip', { active: statusFilter === chip.value }]"
+            @click="statusFilter = chip.value"
+          >
+            {{ chip.label }}
+            <span class="wk-chip-count">{{ chip.count }}</span>
+          </button>
+        </div>
+
+        <el-select v-model="sortKey" size="small" style="width: 140px" aria-label="排序方式">
+          <el-option label="按名称" value="name" />
+          <el-option label="按 CPU" value="cpu" />
+          <el-option label="按内存" value="mem" />
+          <el-option label="按磁盘" value="disk" />
+        </el-select>
+
+        <span class="wk-sub" style="margin-left: auto">点击卡片查看单台服务器详情</span>
       </div>
 
-      <!-- 数据加载时显示骨架屏 -->
-      <div v-if="loading" class="server-grid">
-        <div v-for="i in 6" :key="i" class="server-card wk-card">
-          <div class="wk-skeleton skeleton-line" style="width: 60%" />
-          <div class="wk-skeleton skeleton-line" style="width: 40%; margin-top: 8px" />
-          <div class="wk-skeleton skeleton-bar" />
-          <div class="wk-skeleton skeleton-bar" />
-          <div class="wk-skeleton skeleton-bar" />
-          <div class="wk-skeleton skeleton-line" style="width: 80%; margin-top: 12px" />
+      <!-- ---------------- 服务器卡片 ---------------- -->
+      <div v-if="loading" class="wk-node-grid">
+        <div v-for="i in 6" :key="i" class="wk-node-card" style="cursor: default">
+          <WkSkeleton width="130px" height="16px" />
+          <WkSkeleton height="8px" />
+          <WkSkeleton height="8px" />
+          <WkSkeleton height="8px" />
+          <WkSkeleton width="60%" height="12px" />
         </div>
       </div>
 
-      <!-- 空状态提示 -->
-      <div v-else-if="servers.length === 0" class="empty-state">
-        <div class="empty-icon">📭</div>
-        <p class="empty-title">暂无服务器</p>
-        <p class="empty-desc">请登录管理后台安装探针</p>
-      </div>
+      <WkEmptyState
+        v-else-if="servers.length === 0"
+        icon="server"
+        title="暂无服务器"
+        description="请登录管理后台，在「系统设置 → 安装节点」生成安装命令接入探针"
+      >
+        <template #action>
+          <el-button type="primary" @click="goAdmin">前往管理后台</el-button>
+        </template>
+      </WkEmptyState>
 
-      <!-- 服务器卡片网格 -->
-      <section v-else class="server-grid">
+      <WkEmptyState
+        v-else-if="filteredServers.length === 0"
+        icon="search"
+        title="没有匹配的服务器"
+        description="切换上方的状态筛选条件试试"
+      />
+
+      <section v-else class="wk-node-grid">
         <article
-          v-for="server in servers"
+          v-for="server in filteredServers"
           :key="server.id"
-          class="server-card wk-card"
+          :class="['wk-node-card', { 'is-offline': server.status !== 'online' }]"
           @click="router.push(`/server/${server.id}`)"
         >
-          <!-- 卡片头部：名称 + 状态灯 -->
-          <div class="server-card-head">
-            <div class="server-info">
-              <span class="server-name">{{ server.name || '未命名服务器' }}</span>
-              <div class="server-meta">{{ serverMeta(server) }}</div>
+          <div class="wk-node-card-head">
+            <div style="min-width: 0">
+              <div class="wk-node-card-name">{{ server.name || '未命名服务器' }}</div>
+              <div class="wk-eyebrow" style="margin-top: 3px">{{ serverMeta(server) }}</div>
             </div>
-            <span :class="['wk-status-dot', server.status === 'online' ? 'online' : 'offline']" />
+            <WkStatusDot
+              :status="dotStatus(server.status)"
+              :pulse="server.status === 'online'"
+            />
           </div>
 
-          <!-- 指标进度条：CPU / 内存 / 磁盘 -->
-          <div class="metric-bars">
-            <div class="metric-row">
-              <span class="metric-label">CPU</span>
-              <el-progress
-                :percentage="metricPercent(server.cpu)"
-                :show-text="false"
-                :color="progressColor(server.cpu)"
-                :stroke-width="8"
-              />
-              <strong class="metric-val">{{ formatPercent(server.cpu) }}</strong>
-            </div>
-            <div class="metric-row">
-              <span class="metric-label">内存</span>
-              <el-progress
-                :percentage="metricPercent(server.mem)"
-                :show-text="false"
-                :color="progressColor(server.mem)"
-                :stroke-width="8"
-              />
-              <strong class="metric-val">{{ formatPercent(server.mem) }}</strong>
-            </div>
-            <div class="metric-row">
-              <span class="metric-label">磁盘</span>
-              <el-progress
-                :percentage="metricPercent(server.disk)"
-                :show-text="false"
-                :color="progressColor(server.disk)"
-                :stroke-width="8"
-              />
-              <strong class="metric-val">{{ formatPercent(server.disk) }}</strong>
-            </div>
+          <div class="wk-node-card-meters">
+            <WkProgressBar label="CPU" :value="server.cpu" />
+            <WkProgressBar label="内存" :value="server.mem" />
+            <WkProgressBar label="磁盘" :value="server.disk" />
           </div>
 
-          <!-- 卡片底部：上下行流量 + 最后活跃时间 -->
-          <div class="server-foot">
-            <span class="foot-item">
-              <span class="foot-icon up">↑</span>
-              {{ formatBytes(server.net_up) }}/s
-            </span>
-            <span class="foot-item">
-              <span class="foot-icon down">↓</span>
-              {{ formatBytes(server.net_down) }}/s
-            </span>
-            <span class="foot-item foot-time">
+          <div class="wk-node-card-foot">
+            <span class="up">↑ {{ formatRate(server.net_up) }}</span>
+            <span class="down">↓ {{ formatRate(server.net_down) }}</span>
+            <span class="wk-node-card-time">
+              {{ server.uptime_seconds ? formatDuration(server.uptime_seconds) + ' · ' : '' }}
               {{ relativeTime(server.last_seen_at || server.updated_at) }}
             </span>
           </div>
         </article>
       </section>
 
-      <!-- 页脚：站点 footer 文本 -->
-      <footer v-if="siteFooter" class="public-footer">
-        <a href="https://github.com/luowei729/wukong" target="_blank" rel="noopener noreferrer">
-          {{ siteFooter }}
-        </a>
+      <!-- ---------------- 页脚 ---------------- -->
+      <footer v-if="siteFooter" class="wk-public-footer">
+        {{ siteFooter }}
       </footer>
     </main>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+// ============ 公开首页逻辑 ============
+// 只访问 /api/public/* 脱敏接口，不携带 JWT；数据字段与后端 publicServerSummary 对齐
+import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
+import WkEmptyState from '@/components/WkEmptyState.vue'
+import WkMetric from '@/components/WkMetric.vue'
+import WkProgressBar from '@/components/WkProgressBar.vue'
+import WkSkeleton from '@/components/WkSkeleton.vue'
+import WkStatusDot from '@/components/WkStatusDot.vue'
 import http from '@/utils/http'
+import { usePolling } from '@/composables/usePolling'
+import { useTheme } from '@/composables/useTheme'
+import {
+  archText,
+  formatClock,
+  formatDuration,
+  formatRate,
+  loadLevel,
+  relativeTime,
+} from '@/utils/format'
 
-// 服务器数据接口，与公开 API 返回字段对齐
+// 服务器字段（与后端脱敏接口一致，全部可选，缺字段时前端显示 '-'）
 interface PublicServer {
   id: string
   name: string
@@ -180,407 +229,238 @@ interface PublicServer {
   net_up?: number
   net_down?: number
   uptime_seconds?: number
+  cpu_model?: string
 }
 
-// 响应式状态
+// 后端 summary 直接给出的聚合值，前端不再重复计算，避免两处口径不一致
+interface PublicSummary {
+  total: number
+  online: number
+  offline: number
+  avg_cpu: number
+  avg_mem: number
+  avg_disk: number
+}
+
 const router = useRouter()
-const loading = ref(false)                     // 加载状态标志
-const servers = ref<PublicServer[]>([])         // 服务器列表数据
-const siteTitle = ref('wukong 监控')            // 站点标题，从主题接口加载
-const siteFooter = ref('')                      // 站点页脚，从主题接口加载
-const hasToken = computed(() => Boolean(localStorage.getItem('access_token')))  // 是否已登录
-let refreshTimer: ReturnType<typeof setInterval> | null = null                  // 定时刷新计时器
+const { title: siteTitle, footer: siteFooter, load: loadTheme } = useTheme()
 
-// ==================== 主题加载 ====================
+const loading = ref(true)
+const servers = ref<PublicServer[]>([])
+const summary = ref<PublicSummary>({ total: 0, online: 0, offline: 0, avg_cpu: 0, avg_mem: 0, avg_disk: 0 })
+const generatedAt = ref<number>(0)
 
-// 加载站点主题（标题和页脚），公开首页也需要显示后台设置的标题
-async function loadTheme() {
-  try {
-    const res = await http.get(`/api/public/theme?_=${Date.now()}`)
-    // 设置站点标题并写入 localStorage 供其他页面读取
-    if (res.data.title) {
-      siteTitle.value = res.data.title
-      localStorage.setItem('site_title', res.data.title)
-      document.title = res.data.title
-    }
-    // 设置页脚文本
-    if (res.data.footer_text) siteFooter.value = res.data.footer_text
-    // 设置主题预设（dark / light）
-    if (res.data.preset) {
-      document.documentElement.dataset.theme = res.data.preset
-      document.documentElement.classList.toggle('dark', res.data.preset === 'dark')
-    }
-  } catch {}
-}
+const hasToken = computed(() => Boolean(localStorage.getItem('access_token')))
 
-// ==================== 统计摘要计算 ====================
-
-// 在线服务器数量
-const onlineCount = computed(() => servers.value.filter(s => s.status === 'online').length)
-// 离线服务器数量（非 online 均算离线）
-const offlineCount = computed(() => servers.value.filter(s => s.status !== 'online').length)
-// 平均 CPU 使用率
-const avgCpu = computed(() => {
-  const list = servers.value.filter(s => typeof s.cpu === 'number')
-  return list.length ? (list.reduce((sum, s) => sum + (s.cpu || 0), 0) / list.length).toFixed(1) : '-'
-})
-// 平均内存使用率
-const avgMem = computed(() => {
-  const list = servers.value.filter(s => typeof s.mem === 'number')
-  return list.length ? (list.reduce((sum, s) => sum + (s.mem || 0), 0) / list.length).toFixed(1) : '-'
-})
-// 网络流量汇总（上行 + 下行）
-const totalNet = computed(() => {
-  const up = servers.value.reduce((sum, s) => sum + (s.net_up || 0), 0)
-  const down = servers.value.reduce((sum, s) => sum + (s.net_down || 0), 0)
-  return `${formatBytesShort(up)}↑ ${formatBytesShort(down)}↓`
-})
-
-// ==================== 数据加载 ====================
-
-// 获取公开服务器列表，公开首页只访问 /api/public/servers，不携带 JWT
-async function loadData(showLoading = false) {
-  if (showLoading) loading.value = true
+// 拉取公开服务器列表（每秒静默刷新，保持"实时"承诺）
+async function loadData() {
   try {
     const res = await http.get(`/api/public/servers?_=${Date.now()}`)
     servers.value = res.data.servers || []
+    if (res.data.summary) summary.value = res.data.summary
+    generatedAt.value = res.data.generated_at ? new Date(res.data.generated_at).getTime() : Date.now()
+  } catch (error) {
+    console.error('获取公开服务器列表失败', error)
   } finally {
-    if (showLoading) loading.value = false
+    loading.value = false
   }
 }
 
-// 跳转管理后台，已登录去 dashboard，未登录去 login
-function goAdmin() {
-  router.push(hasToken.value ? '/dashboard' : '/login')
+// 每秒一次轮询，页面切到后台自动暂停（见 usePolling）
+usePolling(loadData, 1000)
+
+onMounted(() => {
+  // 站点标题/页脚由主题单例提供，公开页同样生效
+  loadTheme()
+})
+
+// ---------------- 展示辅助 ----------------
+function formatOneDecimal(value?: number | null): string {
+  return typeof value === 'number' ? value.toFixed(1) : '-'
 }
 
-// ==================== 工具函数 ====================
+function toneOf(value?: number): 'default' | 'warning' | 'danger' {
+  const level = loadLevel(value)
+  if (level === 'danger') return 'danger'
+  if (level === 'warning') return 'warning'
+  return 'default'
+}
 
-// 服务器元信息：系统 + 区域 + 架构，类似 qio.ng 风格
-function serverMeta(server: PublicServer) {
+function dotStatus(status: string): 'online' | 'offline' | 'stale' | 'muted' {
+  if (status === 'online') return 'online'
+  if (status === 'stale') return 'stale'
+  if (status === 'offline') return 'offline'
+  return 'muted'
+}
+
+// 系统 · 区域 · 架构（qio.ng 风格一行交代身份）
+function serverMeta(server: PublicServer): string {
   const parts: string[] = []
   if (server.platform) parts.push(server.platform)
   else if (server.os_version) parts.push(server.os_version)
   if (server.region) parts.push(server.region)
-  if (server.arch) parts.push(server.arch)
+  if (server.arch) parts.push(archText(server.arch))
   return parts.length ? parts.join(' · ') : '系统信息待上报'
 }
 
-// 状态文本映射
-function statusText(status: string) {
-  return ({ online: '在线', offline: '离线', stale: '数据延迟', unknown: '未知' } as Record<string, string>)[status] || '未知'
-}
+const updatedText = computed(() =>
+  generatedAt.value ? formatClock(generatedAt.value) : '连接中'
+)
 
-// 数值转百分比（0-100），用于进度条
-function metricPercent(value?: number) {
-  return Math.max(0, Math.min(100, Math.round(value || 0)))
-}
-
-// 进度条颜色：低绿色、中蓝色、高红色，参考 QuantKing 配色
-function progressColor(value?: number): string {
-  if (typeof value !== 'number') return '#3b82f6'
-  if (value < 50) return '#34d399'
-  if (value < 80) return '#3b82f6'
-  if (value < 90) return '#fbbf24'
-  return '#f87171'
-}
-
-// 格式化百分比显示
-function formatPercent(value?: number) {
-  return typeof value === 'number' ? `${value.toFixed(1)}%` : '-'
-}
-
-// 格式化字节数（完整单位）
-function formatBytes(value?: number) {
-  if (!value) return '0 B'
-  const units = ['B', 'KB', 'MB', 'GB']
-  let size = value
-  let index = 0
-  while (size >= 1024 && index < units.length - 1) {
-    size /= 1024
-    index++
-  }
-  return `${size.toFixed(size >= 10 ? 0 : 1)} ${units[index]}`
-}
-
-// 格式化字节数（简短单位，用于摘要区域）
-function formatBytesShort(value: number) {
-  if (!value) return '0B'
-  const units = ['B', 'K', 'M', 'G']
-  let size = value
-  let index = 0
-  while (size >= 1024 && index < units.length - 1) {
-    size /= 1024
-    index++
-  }
-  return `${size.toFixed(size >= 10 ? 0 : 1)}${units[index]}`
-}
-
-// 相对时间格式化（如"5分钟前"）
-function relativeTime(value?: string) {
-  if (!value) return '暂无上报'
-  const diff = Date.now() - new Date(value).getTime()
-  if (diff < 0) return '0秒前'
-  const seconds = Math.floor(diff / 1000)
-  if (seconds < 60) return `${seconds}秒前`
-  const minutes = Math.floor(seconds / 60)
-  if (minutes < 60) return `${minutes}分钟前`
-  const hours = Math.floor(minutes / 60)
-  if (hours < 24) return `${hours}小时前`
-  return `${Math.floor(hours / 24)}天前`
-}
-
-// ==================== 生命周期 ====================
-
-onMounted(() => {
-  // 初始化加载主题和服务器数据
-  loadTheme()
-  loadData(true)
-  // 首页状态卡片每秒刷新一次，保证公开展示接近实时
-  refreshTimer = setInterval(() => loadData(false), 1000)
+// 在线率：整数百分比，无服务器时显示 0，避免"100%"造成误导
+const uptimePercent = computed(() => {
+  const { total, online } = summary.value
+  if (!total) return '0%'
+  return `${Math.round((online / total) * 100)}%`
 })
 
-onUnmounted(() => {
-  // 组件卸载时清除定时器，避免内存泄漏
-  if (refreshTimer) clearInterval(refreshTimer)
+// 可用性圆环：在线比例决定 conic-gradient 角度，颜色跟随状态令牌
+const ringStyle = computed(() => {
+  const { total, online } = summary.value
+  const ratio = total ? online / total : 0
+  const color = ratio === 1
+    ? 'var(--wk-success)'
+    : ratio >= 0.6
+      ? 'var(--wk-warning)'
+      : 'var(--wk-danger)'
+  return {
+    background: `conic-gradient(${color} ${ratio * 360}deg, color-mix(in srgb, var(--wk-text) 10%, transparent) 0deg)`,
+  }
 })
+
+// ---------------- 筛选与排序 ----------------
+const statusFilter = ref<'all' | 'online' | 'offline'>('all')
+const sortKey = ref<'name' | 'cpu' | 'mem' | 'disk'>('cpu')
+
+const statusChips = computed(() => [
+  { label: '全部', value: 'all' as const, count: servers.value.length },
+  {
+    label: '在线',
+    value: 'online' as const,
+    count: servers.value.filter((item) => item.status === 'online').length,
+  },
+  {
+    label: '离线',
+    value: 'offline' as const,
+    count: servers.value.filter((item) => item.status !== 'online').length,
+  },
+])
+
+const filteredServers = computed(() => {
+  const list = servers.value.filter((item) => {
+    if (statusFilter.value === 'online') return item.status === 'online'
+    if (statusFilter.value === 'offline') return item.status !== 'online'
+    return true
+  })
+  const sorted = list.slice()
+  if (sortKey.value === 'name') {
+    sorted.sort((a, b) => (a.name || '').localeCompare(b.name || ''))
+  } else {
+    const key = sortKey.value
+    sorted.sort((a, b) => (Number(b[key]) || -1) - (Number(a[key]) || -1))
+  }
+  return sorted
+})
+
+function goAdmin() {
+  router.push(hasToken.value ? '/dashboard' : '/login')
+}
 </script>
 
 <style scoped>
-/* 公开首页容器：简洁渐变背景，移除旧的 glow 装饰效果 */
-.public-page {
-  min-height: 100vh;
-  background:
-    linear-gradient(180deg, color-mix(in srgb, var(--wk-primary) 8%, transparent) 0%, transparent 280px),
-    var(--wk-bg);
-  color: var(--wk-text);
-}
-
-/* 顶部导航栏和主内容区统一宽度居中 */
-.public-nav,
-.public-main {
-  width: min(1180px, calc(100% - 32px));
-  margin: 0 auto;
-}
-
-/* 导航栏：左右两端对齐 */
-.public-nav {
-  height: 76px;
+/* Hero 区：左侧文字 + 右侧可用性圆环 */
+.wk-hero {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: var(--wk-space-6);
+  padding: var(--wk-space-6) 0 var(--wk-space-5);
 }
 
-/* 品牌区域：标志 + 标题文字 */
-.nav-brand {
+.wk-hero-title {
+  font-size: var(--wk-fs-3xl);
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  line-height: 1.15;
+  margin: var(--wk-space-2) 0;
+}
+
+/* 可用性圆环 */
+.wk-availability {
   display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 12px;
-}
-
-/* 品牌标志放大（覆盖全局 .wk-brand-mark 的 28px） */
-.nav-brand .wk-brand-mark {
-  width: 40px;
-  height: 40px;
-  font-size: 18px;
-  border-radius: 12px;
-}
-
-/* 品牌标题文字 */
-.nav-brand-text strong {
-  display: block;
-  font-size: 16px;
-  font-weight: 700;
-}
-
-.nav-brand-text small {
-  display: block;
-  color: var(--wk-text-muted);
-  font-size: 12px;
-}
-
-/* 统计摘要网格：6 列 */
-.summary-grid {
-  margin-top: 24px;
-}
-
-/* 页面标题区域 */
-.public-main .wk-page-header {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 12px;
-  margin: 32px 0 18px;
-}
-
-.public-main .wk-page-header h2 {
-  font-size: 20px;
-  font-weight: 700;
-  margin: 0;
-}
-
-/* 服务器卡片网格：3 列 */
-.server-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 16px;
-  padding-bottom: 64px;
-}
-
-/* 服务器卡片：可点击，悬停浮起 */
-.server-card {
-  cursor: pointer;
-  margin-bottom: 0;
-  transition: transform 0.2s ease, box-shadow 0.2s ease;
-}
-
-.server-card:hover {
-  transform: translateY(-4px);
-  box-shadow: var(--wk-shadow-md);
-}
-
-/* 卡片头部：名称 + 状态灯 */
-.server-card-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 16px;
-}
-
-.server-name {
-  font-size: 16px;
-  font-weight: 700;
-  display: block;
-}
-
-.server-meta {
-  color: var(--wk-text-muted);
-  font-size: 12px;
-  margin-top: 4px;
-}
-
-/* 指标进度条容器 */
-.metric-bars {
-  display: grid;
-  gap: 12px;
-  margin: 16px 0;
-}
-
-/* 单行指标：标签 + 进度条 + 数值 */
-.metric-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.metric-label {
-  width: 36px;
-  font-size: 12px;
-  color: var(--wk-text-muted);
+  gap: var(--wk-space-3);
   flex-shrink: 0;
 }
 
-.metric-row .el-progress {
-  flex: 1;
+.wk-avail-ring {
+  position: relative;
+  width: 92px;
+  height: 92px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
-.metric-val {
-  width: 52px;
-  text-align: right;
-  font-family: ui-monospace, 'JetBrains Mono', monospace;
-  font-size: 13px;
+/* 内圈挖空：用 panel 色覆盖中心，形成圆环而无需 SVG */
+.wk-avail-ring::before {
+  content: "";
+  position: absolute;
+  inset: 9px;
+  border-radius: 50%;
+  background: var(--wk-panel);
+  border: 1px solid var(--wk-border);
+}
+
+.wk-avail-value {
+  position: relative;
+  z-index: 1;
+  font-size: var(--wk-fs-lg);
   font-weight: 600;
 }
 
-/* 卡片底部：流量 + 时间 */
-.server-foot {
+.wk-avail-unit {
+  position: absolute;
+  z-index: 1;
+  bottom: 24px;
+  font-size: var(--wk-fs-xs);
+  color: var(--wk-text-muted);
+}
+
+.wk-avail-meta {
   display: flex;
-  align-items: center;
-  gap: 16px;
-  padding-top: 12px;
-  border-top: 1px solid var(--wk-border);
-  font-size: 12px;
-  color: var(--wk-text-muted);
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: center;
 }
 
-.foot-item {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-}
-
-.foot-icon.up { color: var(--wk-success); }
-.foot-icon.down { color: var(--wk-primary); }
-
-.foot-time {
-  margin-left: auto;
-}
-
-/* 骨架屏样式 */
-.skeleton-line {
-  height: 16px;
-  border-radius: 6px;
-}
-
-.skeleton-bar {
-  height: 8px;
-  border-radius: 4px;
-  margin-top: 12px;
-}
-
-/* 空状态提示 */
-.empty-state {
-  text-align: center;
-  padding: 80px 20px;
-  color: var(--wk-text-muted);
-}
-
-.empty-icon {
-  font-size: 48px;
-  margin-bottom: 16px;
-}
-
-.empty-title {
-  font-size: 18px;
-  font-weight: 600;
-  color: var(--wk-text);
-  margin-bottom: 8px;
-}
-
-.empty-desc {
-  font-size: 14px;
-}
-
-/* 页脚 */
-.public-footer {
-  text-align: center;
-  padding: 24px 0 48px;
-  color: var(--wk-text-muted);
-  font-size: 12px;
-  opacity: 0.6;
-}
-
-.public-footer a {
-  color: inherit;
-  text-decoration: none;
-}
-
-.public-footer a:hover {
-  color: var(--wk-primary);
-}
-
-/* 响应式：中等屏幕 2 列 */
+/* 六列汇总在小屏降级为三列 */
 @media (max-width: 980px) {
-  .server-grid {
+  .wk-grid-6 {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  .wk-hero {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .wk-grid-6 {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
-/* 响应式：小屏幕单列 */
-@media (max-width: 640px) {
-  .server-grid {
-    grid-template-columns: 1fr;
-  }
+/* 页脚 */
+.wk-public-footer {
+  margin-top: var(--wk-space-8);
+  padding: var(--wk-space-5) 0 var(--wk-space-8);
+  border-top: 1px solid var(--wk-border);
+  color: var(--wk-text-muted);
+  font-size: var(--wk-fs-sm);
+  text-align: center;
 }
 </style>

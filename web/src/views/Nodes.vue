@@ -1,151 +1,327 @@
 <template>
-  <!-- ===== 节点列表页 ===== -->
-  <div class="nodes-page">
-    <!-- 页面头部：使用全局 .wk-page-header 样式类 -->
-    <div class="wk-page-header">
-      <h2>节点列表</h2>
-      <div class="muted">所有已注册的服务器探针节点，每秒自动刷新</div>
+  <!-- ============ 节点列表页（table-first） ============ -->
+  <div class="wk-stack">
+    <!-- 工具栏：搜索 + 状态筛选 + 排序，全部为纯前端过滤（节点量级小，无需后端分页） -->
+    <div class="wk-toolbar">
+      <div class="wk-search">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round">
+          <circle cx="11" cy="11" r="7" />
+          <path d="M20 20l-3.5-3.5" />
+        </svg>
+        <input
+          v-model="keyword"
+          type="search"
+          placeholder="搜索名称 / 主机名 / 出口 IP"
+          aria-label="搜索节点"
+        />
+      </div>
+
+      <div class="wk-chips" role="group" aria-label="状态筛选">
+        <button
+          v-for="chip in statusChips"
+          :key="chip.value"
+          type="button"
+          :class="['wk-chip', { active: statusFilter === chip.value }]"
+          @click="statusFilter = chip.value"
+        >
+          {{ chip.label }}
+          <span class="wk-chip-count">{{ chip.count }}</span>
+        </button>
+      </div>
+
+      <el-select v-model="sortKey" size="small" style="width: 148px" aria-label="排序方式">
+        <el-option label="按 CPU 降序" value="cpu" />
+        <el-option label="按内存降序" value="mem" />
+        <el-option label="按磁盘降序" value="disk" />
+        <el-option label="按名称" value="name" />
+        <el-option label="按最近上报" value="recent" />
+      </el-select>
+
+      <span class="wk-sub" style="margin-left: auto">
+        显示 {{ filteredNodes.length }} / {{ nodes.length }} 个节点
+      </span>
     </div>
 
-    <!-- 节点表格：使用 Element Plus el-table，外层包一层卡片容器适配新主题 -->
-    <div class="wk-card-solid nodes-table-wrap">
+    <!-- 节点表格 -->
+    <WkCard padding="none">
+      <!-- 首次加载骨架 -->
+      <div v-if="loading" style="padding: var(--wk-space-5)">
+        <WkSkeleton v-for="i in 6" :key="i" height="18px" style="margin-bottom: 12px" />
+      </div>
+
+      <WkEmptyState
+        v-else-if="nodes.length === 0"
+        icon="server"
+        title="还没有节点接入"
+        description="到「系统设置 → 安装节点」生成安装命令，在服务器上执行即可自动注册上报"
+      >
+        <template #action>
+          <el-button type="primary" @click="router.push('/settings')">前往安装节点</el-button>
+        </template>
+      </WkEmptyState>
+
+      <WkEmptyState
+        v-else-if="filteredNodes.length === 0"
+        icon="search"
+        title="没有匹配的节点"
+        description="调整搜索关键字或状态筛选条件试试"
+      />
+
       <el-table
-        :data="nodeList"
+        v-else
+        :data="filteredNodes"
         style="width: 100%"
-        v-loading="loading"
-        :header-cell-style="{ background: 'var(--wk-bg-soft)', color: 'var(--wk-text-muted)' }"
         :row-class-name="rowClassName"
       >
-        <!-- 状态列：在线/离线状态灯 -->
-        <el-table-column label="状态" width="80" align="center">
+        <!-- 状态 -->
+        <el-table-column label="状态" width="48" align="center">
           <template #default="{ row }">
-            <span :class="['wk-status-dot', row.online ? 'online' : 'offline']" />
+            <WkStatusDot
+              :status="row.online ? 'online' : 'offline'"
+              :size="8"
+              :pulse="row.online"
+              :title="row.online ? '在线' : '离线'"
+            />
           </template>
         </el-table-column>
 
-        <!-- 名称列：显示节点名称 + 改名按钮 -->
-        <el-table-column prop="name" label="名称" min-width="180">
+        <!-- 名称：点击进入详情，改名入口悬浮出现，避免行内常驻按钮干扰阅读 -->
+        <el-table-column label="名称" min-width="140">
           <template #default="{ row }">
-            <div class="name-cell">
-              <span class="name-text" @click="goToNode(row.id)">{{ row.name || row.hostname || row.id }}</span>
-              <el-button size="small" type="primary" link @click.stop="openRename(row)">改名</el-button>
+            <div class="wk-name-cell">
+              <span class="wk-node-name" @click="goToNode(row.id)">{{ displayName(row) }}</span>
+              <button
+                type="button"
+                class="wk-row-action"
+                title="修改名称"
+                aria-label="修改名称"
+                @click="openRename(row)"
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M12 20h9" />
+                  <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z" />
+                </svg>
+              </button>
             </div>
           </template>
         </el-table-column>
 
-        <!-- CPU 使用率列 -->
-        <el-table-column label="CPU" width="100" align="right">
+        <!-- CPU / 内存 / 磁盘：数值在上 + 微型的整宽条在下，窄列里也能看清 -->
+        <el-table-column label="CPU" min-width="88">
           <template #default="{ row }">
-            <span :class="['metric-val', loadLevel(row.cpu)]">{{ formatPercent(row.cpu) }}</span>
+            <WkProgressBar class="wk-cell-meter" :value="row.cpu" />
+          </template>
+        </el-table-column>
+        <el-table-column label="内存" min-width="88">
+          <template #default="{ row }">
+            <WkProgressBar class="wk-cell-meter" :value="row.mem" />
+          </template>
+        </el-table-column>
+        <el-table-column label="磁盘" min-width="88">
+          <template #default="{ row }">
+            <WkProgressBar class="wk-cell-meter" :value="row.disk" />
           </template>
         </el-table-column>
 
-        <!-- 内存使用率列 -->
-        <el-table-column label="内存" width="100" align="right">
+        <!-- 上下行速率：单行紧凑格式，列宽可控不被省略号截断 -->
+        <el-table-column label="网络 ↑/↓ (B/s)" min-width="150">
           <template #default="{ row }">
-            <span :class="['metric-val', loadLevel(row.mem)]">{{ formatPercent(row.mem) }}</span>
-          </template>
-        </el-table-column>
-
-        <!-- 磁盘使用率列 -->
-        <el-table-column label="磁盘" width="100" align="right">
-          <template #default="{ row }">
-            <span :class="['metric-val', loadLevel(row.disk)]">{{ formatPercent(row.disk) }}</span>
-          </template>
-        </el-table-column>
-
-        <!-- 出口 IP 列：同时显示 IPv4 和 IPv6 -->
-        <el-table-column label="出口 IP" min-width="220">
-          <template #default="{ row }">
-            <div class="ip-cell">
-              <div v-if="row.ip_v4">IPv4: {{ row.ip_v4 }}</div>
-              <div v-if="row.ip_v6">IPv6: {{ row.ip_v6 }}</div>
-              <span v-if="!row.ip_v4 && !row.ip_v6">-</span>
+            <div class="wk-net-cell">
+              <span class="up">↑ {{ netShort(row.net_up) }}</span>
+              <span class="down">↓ {{ netShort(row.net_down) }}</span>
             </div>
           </template>
         </el-table-column>
 
-        <!-- 系统版本列 -->
-        <el-table-column label="系统版本" min-width="150">
-          <template #default="{ row }">{{ row.os_version || '-' }}</template>
-        </el-table-column>
-
-        <!-- 探针版本列 -->
-        <el-table-column label="探针版本" width="120">
+        <!-- 出口 IP：主显示 IPv4，IPv6 放 title，降低列宽占用（仅后台可见） -->
+        <el-table-column label="出口 IP" min-width="124">
           <template #default="{ row }">
-            <span class="ver-tag">{{ row.agent_ver || '-' }}</span>
+            <span v-if="row.ip_v4 || row.ip_v6" class="wk-num wk-ip" :title="ipTitle(row)">
+              {{ row.ip_v4 || row.ip_v6 }}
+            </span>
+            <span v-else class="wk-sub">-</span>
           </template>
         </el-table-column>
 
-        <!-- 最后上报时间列 -->
-        <el-table-column label="最后上报" width="180">
-          <template #default="{ row }">{{ row.last_seen_at || '-' }}</template>
+        <!-- 系统 · 架构：单行 -->
+        <el-table-column label="系统" min-width="110">
+          <template #default="{ row }">
+            <span class="wk-sub">{{ osText(row) }}{{ row.arch ? ` · ${archText(row.arch)}` : '' }}</span>
+          </template>
         </el-table-column>
 
-        <!-- 操作列：详情跳转 + 删除节点 -->
-        <el-table-column label="操作" width="140" fixed="right">
+        <!-- 探针版本 -->
+        <el-table-column label="探针" width="96">
           <template #default="{ row }">
-            <el-button size="small" type="primary" link @click="goToNode(row.id)">详情</el-button>
-            <el-button size="small" type="danger" link @click="deleteNode(row)">删除</el-button>
+            <span class="wk-tag">{{ row.agent_ver || '-' }}</span>
+          </template>
+        </el-table-column>
+
+        <!-- 运行时长 -->
+        <el-table-column label="运行" width="78" align="right">
+          <template #default="{ row }">
+            <span class="wk-num">{{ formatDuration(row.uptime_seconds) }}</span>
+          </template>
+        </el-table-column>
+
+        <!-- 最近上报：相对时间为主，绝对时间放 title 便于精确排查 -->
+        <el-table-column label="最近上报" width="84" align="right">
+          <template #default="{ row }">
+            <span class="wk-sub" :title="formatDateTime(row.last_seen_at || row.updated_at)">
+              {{ relativeTime(row.last_seen_at || row.updated_at) }}
+            </span>
+          </template>
+        </el-table-column>
+
+        <!-- 操作：图标按钮，宽度固定不挤压数据列 -->
+        <el-table-column label="操作" width="78" fixed="right" align="right">
+          <template #default="{ row }">
+            <div class="wk-row-actions">
+              <button
+                type="button"
+                class="wk-row-action"
+                title="查看详情"
+                aria-label="查看详情"
+                @click="goToNode(row.id)"
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z" />
+                  <circle cx="12" cy="12" r="3" />
+                </svg>
+              </button>
+              <button
+                type="button"
+                class="wk-row-action is-danger"
+                title="删除节点"
+                aria-label="删除节点"
+                @click="deleteNode(row)"
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14" />
+                </svg>
+              </button>
+            </div>
           </template>
         </el-table-column>
       </el-table>
-    </div>
+    </WkCard>
   </div>
 </template>
 
 <script setup lang="ts">
-// ===== 节点列表页逻辑 =====
-import { ref, onMounted, onUnmounted } from 'vue'
+// ============ 节点列表页逻辑 ============
+// 数据来自 useOverview() 共享单例：与顶栏、总览页共用同一个每秒轮询
+import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import WkCard from '@/components/WkCard.vue'
+import WkEmptyState from '@/components/WkEmptyState.vue'
+import WkProgressBar from '@/components/WkProgressBar.vue'
+import WkSkeleton from '@/components/WkSkeleton.vue'
+import WkStatusDot from '@/components/WkStatusDot.vue'
 import http from '@/utils/http'
+import { refreshOverview, useOverview } from '@/composables/useOverview'
+import {
+  archText,
+  formatBytesShort,
+  formatDateTime,
+  formatDuration,
+  relativeTime,
+} from '@/utils/format'
 
 const router = useRouter()
-// 节点列表数据（合并 agents 基础信息和 latest 实时指标）
-const nodeList = ref<any[]>([])
-// 加载状态标志
-const loading = ref(false)
-// 定时刷新定时器引用
-let refreshTimer: ReturnType<typeof setInterval> | null = null
+const { nodes, loading } = useOverview()
 
-// 获取节点列表：并行请求 /api/agents 和 /api/agents/latest，合并数据
-// showLoading 参数控制是否显示加载遮罩，仅首次加载时传 true，每秒定时刷新时不传避免闪烁
-async function fetchNodes(showLoading = false) {
-  if (showLoading) loading.value = true
-  try {
-    // 并行请求节点基础信息和最新实时指标，加时间戳避免缓存
-    const [agentsRes, latestRes] = await Promise.all([
-      http.get(`/api/agents?_=${Date.now()}`),
-      http.get(`/api/agents/latest?_=${Date.now()}`),
-    ])
-    // latest 是以节点 id 为 key 的对象，合并到每个节点上
-    const latest = latestRes.data || {}
-    nodeList.value = (agentsRes.data || []).map((node: any) => ({
-      ...node,
-      ...(latest[node.id] || {}),
-    }))
-  } catch (e) {
-    console.error('获取节点列表失败', e)
-  } finally {
-    if (showLoading) loading.value = false
+// ---------------- 筛选与排序状态 ----------------
+const keyword = ref('')
+const statusFilter = ref<'all' | 'online' | 'offline'>('all')
+const sortKey = ref<'cpu' | 'mem' | 'disk' | 'name' | 'recent'>('cpu')
+
+// chips 带数量，一眼看出各状态规模（数量来自当前节点集合，不受关键字影响）
+const statusChips = computed(() => [
+  { label: '全部', value: 'all' as const, count: nodes.value.length },
+  {
+    label: '在线',
+    value: 'online' as const,
+    count: nodes.value.filter((n: any) => n.online).length,
+  },
+  {
+    label: '离线',
+    value: 'offline' as const,
+    count: nodes.value.filter((n: any) => !n.online).length,
+  },
+])
+
+// 节点显示名：后台自定义名称 > 主机名 > ID 前缀
+function displayName(node: any): string {
+  return node.name || node.hostname || `节点 ${String(node.id).slice(0, 8)}`
+}
+
+// 系统展示：platform 更全（含版本号），回退到 os_version
+function osText(node: any): string {
+  return node.platform || node.os_version || '系统信息待上报'
+}
+
+// 速率紧凑写法：3.8M / 12.4G（表头已标明单位是 B/s，单元格不再重复写 /s）
+function netShort(value?: number): string {
+  return formatBytesShort(value)
+}
+
+// 出口 IP 悬浮标题：单元格只放 IPv4 以免拉宽表格，双栈地址在 title 里完整展示
+function ipTitle(node: any): string {
+  const parts: string[] = []
+  if (node.ip_v4) parts.push(`IPv4 ${node.ip_v4}`)
+  if (node.ip_v6) parts.push(`IPv6 ${node.ip_v6}`)
+  return parts.join(' · ')
+}
+
+// 关键字匹配范围：名称、主机名、ID、出口 IP
+function matchKeyword(node: any, text: string): boolean {
+  if (!text) return true
+  const haystack = [
+    node.name,
+    node.hostname,
+    node.id,
+    node.ip_v4,
+    node.ip_v6,
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase()
+  return haystack.includes(text.toLowerCase())
+}
+
+// 过滤 + 排序后的列表：数值列缺失时按 -1 参与排序，保证离线节点沉底
+const filteredNodes = computed(() => {
+  const list = nodes.value.filter((node: any) => {
+    if (statusFilter.value === 'online' && !node.online) return false
+    if (statusFilter.value === 'offline' && node.online) return false
+    return matchKeyword(node, keyword.value.trim())
+  })
+
+  const sorted = list.slice()
+  if (sortKey.value === 'name') {
+    sorted.sort((a: any, b: any) => displayName(a).localeCompare(displayName(b)))
+  } else if (sortKey.value === 'recent') {
+    sorted.sort(
+      (a: any, b: any) =>
+        new Date(b.last_seen_at || b.updated_at || 0).getTime() -
+        new Date(a.last_seen_at || a.updated_at || 0).getTime()
+    )
+  } else {
+    const key = sortKey.value
+    sorted.sort((a: any, b: any) => (Number(b[key]) || -1) - (Number(a[key]) || -1))
   }
+  return sorted
+})
+
+// 离线行弱化
+function rowClassName({ row }: { row: any }) {
+  return row.online ? '' : 'row-offline'
 }
 
-// 格式化百分比：非数字返回 '-'，否则保留一位小数
-function formatPercent(value?: number) {
-  return typeof value === 'number' ? `${value.toFixed(1)}%` : '-'
-}
-
-// 根据负载百分比返回颜色级别类名，用于高亮显示
-function loadLevel(value?: number) {
-  if (typeof value !== 'number') return ''
-  if (value >= 90) return 'red'      // 90% 以上红色告警
-  if (value >= 70) return 'yellow'   // 70%-90% 黄色警告
-  return ''                          // 正常无特殊颜色
-}
-
-// 修改节点名称：弹出输入框，调用 PUT /api/agents/:id 更新
+// ---------------- 节点操作（接口与原来保持一致） ----------------
+// 改名：弹出输入框，PUT /api/agents/{id}
 async function openRename(row: any) {
   try {
     const { value } = await ElMessageBox.prompt('请输入新的服务器节点名称', '修改节点名称', {
@@ -155,148 +331,182 @@ async function openRename(row: any) {
       inputPattern: /^.{1,64}$/,
       inputErrorMessage: '节点名称长度必须为 1-64 个字符',
     })
-    // 调用后端更新节点名称
     await http.put(`/api/agents/${row.id}`, { name: value })
     ElMessage.success('节点名称已保存')
-    // 刷新列表显示新名称
-    await fetchNodes()
+    // 立即刷新共享数据，顶栏与总览页同步显示新名称
+    await refreshOverview()
   } catch (e: any) {
-    // 用户点取消不报错，其他错误显示后端返回的错误信息
     if (e !== 'cancel') {
       ElMessage.error(e.response?.data?.error || '修改节点名称失败')
     }
   }
 }
 
-// 删除节点：弹出确认框，确认后调用 DELETE /api/agents/:id
+// 删除：二次确认后 DELETE /api/agents/{id}
 async function deleteNode(row: any) {
   try {
     await ElMessageBox.confirm(
-      `确认删除节点"${row.name || row.hostname || row.id}"？删除后该节点的探针需要重新注册才能恢复。`,
+      `确认删除节点“${displayName(row)}”？删除后该节点的探针需要重新注册才能恢复。`,
       '删除确认',
-      {
-        confirmButtonText: '删除',
-        cancelButtonText: '取消',
-        type: 'warning',
-      }
+      { confirmButtonText: '删除', cancelButtonText: '取消', type: 'warning' }
     )
-    // 调用后端删除节点
     await http.delete(`/api/agents/${row.id}`)
     ElMessage.success('节点已删除')
-    // 刷新列表移除已删除节点
-    await fetchNodes()
+    await refreshOverview()
   } catch (e: any) {
-    // 用户点取消不报错，其他错误显示后端返回的错误信息
     if (e !== 'cancel') {
       ElMessage.error(e.response?.data?.error || '删除节点失败')
     }
   }
 }
 
-// 跳转到节点详情页
 function goToNode(id: string) {
   router.push(`/nodes/${id}`)
 }
-
-// 行样式：离线节点添加灰显样式
-function rowClassName({ row }: { row: any }) {
-  return row.online ? '' : 'row-offline'
-}
-
-// 组件挂载：首次获取数据（显示加载遮罩）+ 每秒定时刷新（静默刷新不闪烁）
-onMounted(() => {
-  fetchNodes(true)
-  // 每秒静默刷新一次，保证实时状态更新
-  refreshTimer = setInterval(() => fetchNodes(false), 1000)
-})
-
-// 组件卸载：清除定时器避免内存泄漏
-onUnmounted(() => {
-  if (refreshTimer) clearInterval(refreshTimer)
-})
 </script>
 
 <style scoped>
-/* 节点列表页容器 */
-.nodes-page {
-  width: 100%;
+/* 表格内的指标条：数值在上 / 短条在下。
+   DOM 顺序是 track 在前、value 在后，所以用 order 把数值提到第一行；
+   track 必须 flex:none，否则在纵向 flex 里会被压缩到 0 高度而看不见 */
+.wk-cell-meter {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 3px;
 }
 
-/* 表格容器：使用 wk-card-solid 提供卡片背景和边框 */
-.nodes-table-wrap {
-  padding: 4px;
-  overflow: hidden;
+.wk-cell-meter :deep(.wk-meter-value) {
+  order: -1;
+  width: auto;
+  text-align: left;
 }
 
-/* 表格名称单元格：名称 + 改名按钮水平排列 */
-.name-cell {
+.wk-cell-meter :deep(.wk-meter-track) {
+  flex: none;
+  height: 4px;
+}
+
+/* 搜索框：原生 input + 令牌样式，避免 EP 输入框在工具栏里偏高 */
+.wk-search {
   display: flex;
   align-items: center;
   gap: 8px;
+  height: var(--wk-ctl-md);
+  padding: 0 10px;
+  min-width: 260px;
+  background: var(--wk-bg-recess);
+  border: 1px solid var(--wk-border);
+  border-radius: var(--wk-radius-sm);
+  transition: border-color var(--wk-dur-fast) var(--wk-ease),
+    box-shadow var(--wk-dur-fast) var(--wk-ease);
 }
 
-/* 节点名称文字：可点击跳转详情 */
-.name-text {
-  cursor: pointer;
-  font-weight: 550;
-  color: var(--wk-text);
-  transition: color .12s;
+.wk-search:focus-within {
+  border-color: var(--wk-primary);
+  box-shadow: var(--wk-ring);
 }
-.name-text:hover {
+
+.wk-search svg {
+  width: 15px;
+  height: 15px;
+  color: var(--wk-text-muted);
+  flex-shrink: 0;
+}
+
+.wk-search input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  color: var(--wk-text);
+  font-size: var(--wk-fs-base);
+  font-family: inherit;
+  outline: none;
+  padding: 0;
+}
+
+/* 名称单元格：文本占满，改名按钮悬浮时才出现 */
+.wk-name-cell {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.wk-node-name {
+  cursor: pointer;
+  font-weight: 500;
+  color: var(--wk-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wk-node-name:hover {
   color: var(--wk-primary);
 }
 
-/* 指标数值：等宽字体对齐 */
-.metric-val {
-  font-family: 'JetBrains Mono', 'Fira Code', monospace;
-  font-size: 12.5px;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
+/* 行内图标按钮：16px 图标，平时低不透明度弱化，自身 hover 时强化 */
+.wk-row-action {
+  width: 26px;
+  height: 26px;
+  border: none;
+  border-radius: var(--wk-radius-xs);
+  background: transparent;
+  color: var(--wk-text-muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0.7;
+  transition: opacity var(--wk-dur-fast) var(--wk-ease),
+    background var(--wk-dur-fast) var(--wk-ease), color var(--wk-dur-fast) var(--wk-ease);
 }
 
-/* IP 单元格：等宽字体换行显示 */
-.ip-cell {
-  font-family: 'JetBrains Mono', 'Fira Code', monospace;
-  font-size: 12px;
-  line-height: 1.5;
-  color: var(--wk-text-muted);
-  word-break: break-all;
+.wk-row-action svg {
+  width: 15px;
+  height: 15px;
 }
 
-/* 探针版本标签样式 */
-.ver-tag {
-  font-family: 'JetBrains Mono', 'Fira Code', monospace;
-  font-size: 11.5px;
-  color: var(--wk-text-muted);
+.wk-row-actions {
+  display: inline-flex;
+  gap: 2px;
+}
+
+.wk-row-action:hover,
+.wk-row-action:focus-visible {
   background: var(--wk-bg-soft);
-  padding: 2px 8px;
-  border-radius: 6px;
+  color: var(--wk-text);
+  opacity: 1;
 }
 
-/* 离线节点行灰显 */
-:deep(.row-offline) {
-  opacity: 0.55;
+.wk-row-action.is-danger:hover {
+  color: var(--wk-danger-text);
+  background: var(--wk-danger-soft);
 }
 
-/* Element Plus 表格暗黑主题覆盖：适配新设计令牌 */
-:deep(.el-table) {
-  background: transparent !important;
-  --el-table-bg-color: transparent;
-  --el-table-tr-bg-color: transparent;
-  --el-table-header-bg-color: var(--wk-bg-soft);
-  --el-table-border-color: var(--wk-border);
-  --el-table-text-color: var(--wk-text);
-  --el-table-header-text-color: var(--wk-text-muted);
-  --el-table-row-hover-bg-color: var(--wk-bg-soft);
+/* 上下行：单行横向排列，颜色区分方向，列宽更省 */
+.wk-net-cell {
+  display: flex;
+  align-items: center;
+  gap: var(--wk-space-3);
+  font-family: var(--wk-mono-family);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--wk-fs-sm);
+  white-space: nowrap;
 }
 
-/* 表格内边距收紧 */
-:deep(.el-table .cell) {
-  padding: 0 10px;
+.wk-net-cell .up {
+  color: var(--wk-success-text);
 }
 
-/* 表格行 hover 效果 */
-:deep(.el-table tbody tr:hover > td) {
-  background-color: var(--wk-primary-soft) !important;
+.wk-net-cell .down {
+  color: var(--wk-primary);
+}
+
+/* IP 单元格：只显示一个地址，完整（含 IPv6）放 hover 标题 */
+.wk-ip {
+  font-size: var(--wk-fs-sm);
+  color: var(--wk-text-secondary);
+  white-space: nowrap;
 }
 </style>

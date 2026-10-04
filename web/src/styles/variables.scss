@@ -1,123 +1,295 @@
 // =============================================
-// wukong 监控 - 全局样式变量
-// 参考 QuantKing 设计令牌系统：蓝色主色调 + 双主题 + 圆角卡片
-// 设计原则：只换展示层，保留 wk-* 类名兼容既有组件
+// wukong 监控 - 设计令牌（Design Tokens）
+// 视觉方向：现代 SaaS 控制台
+//   · Linear  —— 近黑画布 + hairline 边框 + 单一克制强调色
+//   · Stripe  —— table-first、颜色只用于"状态"、数字一律 tabular-nums
+//   · Vercel  —— 中性灰阶层级、排版而非盒子构建层次
+// 设计原则：
+//   1) 只换展示层，保留全部 wk-* 类名与旧变量名（含别名），避免既有组件回归
+//   2) 所有颜色/尺度一律走 CSS 变量，禁止在组件里散落魔法数
+//   3) 主色的派生色（hover/soft/glow）一律用 color-mix() 从 --wk-primary 推导，
+//      这样设置页保存 theme.primary 后，useTheme() 只改一个变量即可全站联动
 // =============================================
 
-// 字体栈：系统字体优先，禁用外部 CDN 字体
-$wk-font-family: -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", "Helvetica Neue", Arial, sans-serif;
-$wk-mono-family: ui-monospace, "JetBrains Mono", "Fira Code", SFMono-Regular, Consolas, monospace;
-$wk-radius: 1rem;
-$wk-radius-sm: 0.75rem;
+// ---- SCSS 常量：字体栈（系统字体优先，生产环境可能无外网，禁止外部 CDN 字体） ----
+$wk-font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+  "Hiragino Sans GB", "Microsoft YaHei", "Helvetica Neue", Arial, sans-serif;
+$wk-mono-family: ui-monospace, "JetBrains Mono", "Fira Code", SFMono-Regular,
+  Menlo, Consolas, monospace;
+
+// 兼容旧引用：$wk-radius / $wk-radius-sm / $wk-transition 保留（新代码请用 CSS 变量）
+$wk-radius: 0.75rem;
+$wk-radius-sm: 0.5rem;
 $wk-transition: 0.15s ease;
 
-// ========== 暗黑主题（默认，charcoal 风格） ==========
-:root,
-html[data-theme='dark'] {
-  --wk-bg: #1c1c1c;
-  --wk-bg-soft: #171717;
-  --wk-panel: #262626;
-  --wk-panel-solid: #262626;
-  --wk-border: rgb(255 255 255 / 0.10);
-  --wk-border-light: rgb(255 255 255 / 0.16);
-  --wk-text: #f5f5f5;
-  --wk-text-muted: #a3a3a3;
-  --wk-text-secondary: #a3a3a3;
+// ========== 尺度令牌：两套主题共用，放在基础层 ==========
+:root {
+  // 圆角：卡片 12 / 控件 8 / 药丸 999
+  --wk-radius-xs: 6px;
+  --wk-radius-sm: 8px;
+  --wk-radius-md: 10px;
+  --wk-radius-lg: 12px;
+  --wk-radius-xl: 16px;
+  --wk-radius-pill: 999px;
+  // 兼容旧变量名
+  --wk-radius: var(--wk-radius-lg);
 
-  --wk-primary: #3b82f6;
-  --wk-primary-hover: #60a5fa;
-  --wk-primary-glow: rgba(59, 130, 246, 0.38);
-  --wk-primary-soft: rgba(59, 130, 246, 0.15);
+  // 间距：4px 基准栅格
+  --wk-space-1: 4px;
+  --wk-space-2: 8px;
+  --wk-space-3: 12px;
+  --wk-space-4: 16px;
+  --wk-space-5: 20px;
+  --wk-space-6: 24px;
+  --wk-space-8: 32px;
+  --wk-space-10: 40px;
+  --wk-gap-card: 12px;      // 卡片网格间隙
+  --wk-gap-section: 20px;   // 页面分区之间的间隙
 
-  --wk-success: #34d399;
-  --wk-success-soft: rgba(52, 211, 153, 0.14);
-  --wk-warning: #fbbf24;
-  --wk-warning-soft: rgba(251, 191, 36, 0.14);
-  --wk-danger: #f87171;
-  --wk-danger-soft: rgba(248, 113, 113, 0.14);
-  --wk-info: #38bdf8;
-  --wk-info-soft: rgba(56, 189, 248, 0.14);
+  // 字号阶梯
+  --wk-fs-xs: 11px;
+  --wk-fs-sm: 12px;
+  --wk-fs-base: 13px;
+  --wk-fs-md: 14px;
+  --wk-fs-lg: 16px;
+  --wk-fs-xl: 20px;
+  --wk-fs-2xl: 26px;
+  --wk-fs-3xl: 32px;
 
-  --wk-chart-grid: rgb(255 255 255 / 0.08);
-  --wk-shadow-sm: 0 1px 2px rgb(0 0 0 / 0.25);
-  --wk-shadow-md: 0 4px 12px rgb(0 0 0 / 0.35);
-  --wk-header-bg: rgba(28, 28, 28, 0.88);
-  --wk-log-bg: #141414;
+  // 字重
+  --wk-fw-normal: 400;
+  --wk-fw-medium: 500;
+  --wk-fw-semibold: 600;
+  --wk-fw-bold: 700;
 
-  // Element Plus 暗黑覆盖
-  --el-bg-color: #262626;
-  --el-bg-color-overlay: #2a2a2a;
-  --el-bg-color-page: #1c1c1c;
-  --el-text-color-primary: #f5f5f5;
-  --el-text-color-secondary: #a3a3a3;
-  --el-text-color-regular: #d4d4d4;
-  --el-border-color: rgb(255 255 255 / 0.10);
-  --el-border-color-light: rgb(255 255 255 / 0.08);
-  --el-border-color-lighter: rgb(255 255 255 / 0.06);
-  --el-color-primary: #3b82f6;
-  --el-color-primary-light-3: #60a5fa;
-  --el-color-primary-light-5: #93c5fd;
-  --el-color-primary-light-7: #bfdbfe;
-  --el-color-primary-light-9: rgba(59, 130, 246, 0.12);
-  --el-color-primary-dark-2: #2563eb;
-  --el-fill-color: #2e2e2e;
-  --el-fill-color-light: #333333;
-  --el-fill-color-lighter: #2a2a2a;
-  --el-fill-color-blank: #262626;
-  --el-mask-bg: rgba(0, 0, 0, 0.6);
+  // 控件高度
+  --wk-ctl-sm: 28px;
+  --wk-ctl-md: 32px;
+  --wk-ctl-lg: 38px;
+
+  // 字体族变量（组件内可直接 var() 引用，不必再 import scss 常量）
+  --wk-font-family: #{$wk-font-family};
+  --wk-mono-family: #{$wk-mono-family};
+
+  // 动效时长与缓动
+  --wk-dur-fast: 120ms;
+  --wk-dur-base: 180ms;
+  --wk-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+
+  // 布局尺寸
+  --wk-header-h: 56px;
+  --wk-sidebar-w: 240px;
+  --wk-sidebar-w-collapsed: 68px;
+  --wk-content-max: 1440px;
 }
 
-// ========== 浅色主题（明亮简洁） ==========
-html[data-theme='light'] {
-  --wk-bg: #ffffff;
-  --wk-bg-soft: #fafafa;
+// ========== 暗黑主题（默认） ==========
+:root,
+html[data-theme="dark"] {
+  // 画布与表面：中性近黑，不用蓝灰偏色，避免"廉价科技感"
+  --wk-bg: #0a0a0b;
+  --wk-bg-soft: #0f0f11;
+  --wk-bg-recess: #0c0c0d;
+  --wk-panel: #131316;
+  --wk-panel-solid: #131316;
+  --wk-elevated: #19191d;
+  --wk-header-bg: rgba(10, 10, 11, 0.72);
+  --wk-log-bg: #0c0c0d;
+
+  // 边框：SaaS 控制台主要靠 hairline 而非阴影分层
+  --wk-border: rgba(255, 255, 255, 0.08);
+  --wk-border-light: rgba(255, 255, 255, 0.14); // 旧名，保留作 strong 的别名
+  --wk-border-strong: rgba(255, 255, 255, 0.14);
+  --wk-scrim: rgba(0, 0, 0, 0.55);
+
+  // 文本三级层次（muted 在 #0a0a0b 上约 6.5:1，满足 AA）
+  --wk-text: #ededf0;
+  --wk-text-secondary: #b4b4bd;
+  --wk-text-muted: #8a8a94;
+
+  // 强调色：Linear 式薰衣草蓝，全站唯一"品牌色"，只用于交互与关键数据
+  --wk-primary: #5e6ad2;
+  --wk-primary-hover: color-mix(in srgb, var(--wk-primary) 78%, white);
+  --wk-primary-active: color-mix(in srgb, var(--wk-primary) 85%, black);
+  --wk-primary-soft: color-mix(in srgb, var(--wk-primary) 15%, transparent);
+  --wk-primary-glow: color-mix(in srgb, var(--wk-primary) 35%, transparent);
+  --wk-on-primary: #ffffff;
+
+  // 状态色：颜色只表达状态，不做装饰
+  --wk-success: #34d399;
+  --wk-success-soft: color-mix(in srgb, #34d399 14%, transparent);
+  --wk-warning: #fbbf24;
+  --wk-warning-soft: color-mix(in srgb, #fbbf24 14%, transparent);
+  --wk-danger: #f87171;
+  --wk-danger-soft: color-mix(in srgb, #f87171 14%, transparent);
+  --wk-info: #38bdf8;
+  --wk-info-soft: color-mix(in srgb, #38bdf8 14%, transparent);
+  // 状态文本色（暗黑下与图形色一致，无需单独调深）
+  --wk-success-text: var(--wk-success);
+  --wk-warning-text: var(--wk-warning);
+  --wk-danger-text: var(--wk-danger);
+
+  // 阴影：暗黑下以边框为主，阴影只用于"抬起的浮层"
+  --wk-shadow-1: 0 1px 2px rgba(0, 0, 0, 0.5);
+  --wk-shadow-2: 0 8px 24px -12px rgba(0, 0, 0, 0.7);
+  --wk-shadow-pop: 0 12px 32px -8px rgba(0, 0, 0, 0.6);
+  // 旧名别名
+  --wk-shadow-sm: var(--wk-shadow-1);
+  --wk-shadow-md: var(--wk-shadow-2);
+
+  // 图表专用令牌（ECharts 不解析 CSS 变量，utils/charts.ts 会读取解析后的色值）
+  --wk-chart-grid: rgba(255, 255, 255, 0.06);
+  --wk-chart-axis: rgba(255, 255, 255, 0.1);
+  --wk-chart-text: #8a8a94;
+  --wk-chart-tooltip-bg: rgba(25, 25, 29, 0.94);
+  --wk-chart-tooltip-border: rgba(255, 255, 255, 0.12);
+  --wk-chart-c1: var(--wk-primary);
+  --wk-chart-c2: #34d399;
+  --wk-chart-c3: #fbbf24;
+  --wk-chart-c4: #f87171;
+  --wk-chart-c5: #22d3ee;
+  --wk-chart-c6: #a78bfa;
+  --wk-chart-c7: #f472b6;
+
+  // 焦点环 / 骨架屏
+  --wk-ring: 0 0 0 3px color-mix(in srgb, var(--wk-primary) 26%, transparent);
+  --wk-skeleton-base: #131316;
+  --wk-skeleton-highlight: #1d1d22;
+
+  // ---- Element Plus 映射：全部指向 wk-* 令牌，使自定义主色自动流入 EP 组件 ----
+  --el-color-primary: var(--wk-primary);
+  --el-color-primary-light-3: color-mix(in srgb, var(--wk-primary) 70%, #141416);
+  --el-color-primary-light-5: color-mix(in srgb, var(--wk-primary) 50%, #141416);
+  --el-color-primary-light-7: color-mix(in srgb, var(--wk-primary) 30%, #141416);
+  --el-color-primary-light-8: color-mix(in srgb, var(--wk-primary) 20%, #141416);
+  --el-color-primary-light-9: color-mix(in srgb, var(--wk-primary) 12%, #141416);
+  --el-color-primary-dark-2: color-mix(in srgb, var(--wk-primary) 85%, black);
+  --el-color-success: var(--wk-success);
+  --el-color-warning: var(--wk-warning);
+  --el-color-danger: var(--wk-danger);
+  --el-color-error: var(--wk-danger);
+  --el-color-info: var(--wk-info);
+  --el-bg-color: var(--wk-panel);
+  --el-bg-color-overlay: var(--wk-elevated);
+  --el-bg-color-page: var(--wk-bg);
+  --el-fill-color: #1c1c21;
+  --el-fill-color-light: var(--wk-bg-soft);
+  --el-fill-color-lighter: #151518;
+  --el-fill-color-blank: var(--wk-panel);
+  --el-text-color-primary: var(--wk-text);
+  --el-text-color-regular: #d0d0d7;
+  --el-text-color-secondary: var(--wk-text-muted);
+  --el-text-color-placeholder: #6b6b74;
+  --el-text-color-disabled: #55555c;
+  --el-border-color: var(--wk-border);
+  --el-border-color-light: rgba(255, 255, 255, 0.06);
+  --el-border-color-lighter: rgba(255, 255, 255, 0.05);
+  --el-border-color-extra-light: rgba(255, 255, 255, 0.04);
+  --el-border-color-strong: var(--wk-border-strong);
+  --el-border-radius-base: 8px;
+  --el-border-radius-small: 6px;
+  --el-mask-color: rgba(0, 0, 0, 0.6);
+  --el-box-shadow-light: var(--wk-shadow-2);
+  --el-box-shadow: var(--wk-shadow-pop);
+  --el-font-size-base: 13px;
+  --el-font-family: var(--wk-font-family);
+}
+
+// ========== 浅色主题 ==========
+html[data-theme="light"] {
+  --wk-bg: #f7f7f8;
+  --wk-bg-soft: #f1f2f4;
+  --wk-bg-recess: #fafafb;
   --wk-panel: #ffffff;
   --wk-panel-solid: #ffffff;
-  --wk-border: #ebebeb;
-  --wk-border-light: rgba(15, 23, 42, 0.12);
-  --wk-text: #171717;
-  --wk-text-muted: #737373;
-  --wk-text-secondary: #737373;
-
-  --wk-primary: #3b82f6;
-  --wk-primary-hover: #2563eb;
-  --wk-primary-glow: rgba(59, 130, 246, 0.18);
-  --wk-primary-soft: rgba(59, 130, 246, 0.08);
-
-  --wk-success: #10b981;
-  --wk-success-soft: rgba(16, 185, 129, 0.12);
-  --wk-warning: #f59e0b;
-  --wk-warning-soft: rgba(245, 158, 11, 0.14);
-  --wk-danger: #ef4444;
-  --wk-danger-soft: rgba(239, 68, 68, 0.12);
-  --wk-info: #0ea5e9;
-  --wk-info-soft: rgba(14, 165, 233, 0.12);
-
-  --wk-chart-grid: rgba(100, 116, 139, 0.15);
-  --wk-shadow-sm: 0 1px 2px rgb(0 0 0 / 0.04);
-  --wk-shadow-md: 0 4px 12px rgb(0 0 0 / 0.06);
-  --wk-header-bg: rgba(255, 255, 255, 0.88);
+  --wk-elevated: #ffffff;
+  --wk-header-bg: rgba(255, 255, 255, 0.78);
   --wk-log-bg: #f8fafc;
 
-  // Element Plus 浅色覆盖
-  --el-bg-color: #ffffff;
-  --el-bg-color-overlay: #ffffff;
-  --el-bg-color-page: #f5f7fb;
-  --el-text-color-primary: #171717;
-  --el-text-color-secondary: #737373;
-  --el-text-color-regular: #404040;
-  --el-border-color: #ebebeb;
-  --el-border-color-light: #f0f0f0;
-  --el-border-color-lighter: #f5f5f5;
-  --el-color-primary: #3b82f6;
-  --el-color-primary-light-3: #60a5fa;
-  --el-color-primary-light-5: #93c5fd;
-  --el-color-primary-light-7: #bfdbfe;
-  --el-color-primary-light-9: rgba(59, 130, 246, 0.08);
-  --el-color-primary-dark-2: #2563eb;
-  --el-fill-color: #f5f5f5;
-  --el-fill-color-light: #fafafa;
-  --el-fill-color-lighter: #fafafa;
+  --wk-border: #e4e4e7;
+  --wk-border-light: #d4d4d8; // 旧名别名
+  --wk-border-strong: #d4d4d8;
+  --wk-scrim: rgba(15, 15, 18, 0.4);
+
+  --wk-text: #18181b;
+  --wk-text-secondary: #52525b;
+  --wk-text-muted: #71717a;
+
+  // 浅色下主色加深，保证与白底对比度满足文本/边框使用
+  --wk-primary: #4f5bd5;
+  --wk-primary-hover: color-mix(in srgb, var(--wk-primary) 82%, black);
+  --wk-primary-active: color-mix(in srgb, var(--wk-primary) 90%, black);
+  --wk-primary-soft: color-mix(in srgb, var(--wk-primary) 9%, transparent);
+  --wk-primary-glow: color-mix(in srgb, var(--wk-primary) 20%, transparent);
+  --wk-on-primary: #ffffff;
+
+  // 浅色下的状态色取文本安全色（对比度 ≥ 4.5:1），图形与文本共用一支色
+  --wk-success: #059669;
+  --wk-success-soft: color-mix(in srgb, #059669 11%, transparent);
+  --wk-warning: #d97706;
+  --wk-warning-soft: color-mix(in srgb, #d97706 12%, transparent);
+  --wk-danger: #dc2626;
+  --wk-danger-soft: color-mix(in srgb, #dc2626 10%, transparent);
+  --wk-info: #0284c7;
+  --wk-info-soft: color-mix(in srgb, #0284c7 11%, transparent);
+  --wk-success-text: var(--wk-success);
+  --wk-warning-text: var(--wk-warning);
+  --wk-danger-text: var(--wk-danger);
+
+  --wk-shadow-1: 0 1px 2px rgba(16, 16, 20, 0.06);
+  --wk-shadow-2: 0 8px 24px -12px rgba(16, 16, 20, 0.18);
+  --wk-shadow-pop: 0 12px 32px -10px rgba(16, 16, 20, 0.18);
+  --wk-shadow-sm: var(--wk-shadow-1);
+  --wk-shadow-md: var(--wk-shadow-2);
+
+  --wk-chart-grid: rgba(24, 24, 27, 0.07);
+  --wk-chart-axis: rgba(24, 24, 27, 0.14);
+  --wk-chart-text: #71717a;
+  --wk-chart-tooltip-bg: rgba(255, 255, 255, 0.96);
+  --wk-chart-tooltip-border: #e4e4e7;
+  --wk-chart-c1: var(--wk-primary);
+  --wk-chart-c2: #059669;
+  --wk-chart-c3: #d97706;
+  --wk-chart-c4: #dc2626;
+  --wk-chart-c5: #0891b2;
+  --wk-chart-c6: #7c3aed;
+  --wk-chart-c7: #db2777;
+
+  --wk-ring: 0 0 0 3px color-mix(in srgb, var(--wk-primary) 20%, transparent);
+  --wk-skeleton-base: #f1f2f4;
+  --wk-skeleton-highlight: #e6e7ea;
+
+  // ---- Element Plus 浅色映射 ----
+  --el-color-primary: var(--wk-primary);
+  --el-color-primary-light-3: color-mix(in srgb, var(--wk-primary) 75%, white);
+  --el-color-primary-light-5: color-mix(in srgb, var(--wk-primary) 55%, white);
+  --el-color-primary-light-7: color-mix(in srgb, var(--wk-primary) 35%, white);
+  --el-color-primary-light-8: color-mix(in srgb, var(--wk-primary) 25%, white);
+  --el-color-primary-light-9: color-mix(in srgb, var(--wk-primary) 12%, white);
+  --el-color-primary-dark-2: color-mix(in srgb, var(--wk-primary) 85%, black);
+  --el-color-success: var(--wk-success);
+  --el-color-warning: var(--wk-warning);
+  --el-color-danger: var(--wk-danger);
+  --el-color-error: var(--wk-danger);
+  --el-color-info: var(--wk-info);
+  --el-bg-color: var(--wk-panel);
+  --el-bg-color-overlay: var(--wk-elevated);
+  --el-bg-color-page: var(--wk-bg);
+  --el-fill-color: #f1f2f4;
+  --el-fill-color-light: #f6f7f9;
+  --el-fill-color-lighter: #fafafb;
   --el-fill-color-blank: #ffffff;
-  --el-mask-bg: rgba(0, 0, 0, 0.4);
+  --el-text-color-primary: var(--wk-text);
+  --el-text-color-regular: #3f3f46;
+  --el-text-color-secondary: var(--wk-text-muted);
+  --el-text-color-placeholder: #a1a1aa;
+  --el-text-color-disabled: #c4c4cc;
+  --el-border-color: var(--wk-border);
+  --el-border-color-light: #ececee;
+  --el-border-color-lighter: #f1f2f4;
+  --el-border-color-extra-light: #f5f5f7;
+  --el-border-color-strong: var(--wk-border-strong);
+  --el-mask-color: rgba(255, 255, 255, 0.75);
+  --el-box-shadow-light: var(--wk-shadow-2);
+  --el-box-shadow: var(--wk-shadow-pop);
 }

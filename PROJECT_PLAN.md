@@ -228,3 +228,23 @@ Telegram 通知配置缺少测试按钮，Bot Token 输入框容易被浏览器�
 - Ping 聚合：Cloudflare 已返回至少 1 个分钟聚合点。
 - 无头 Chrome 截图：`/tmp/wukong-chrome-final/home.png`、`/tmp/wukong-chrome-final/detail.png`。
 
+## 十四、2026-10-05 04:13（北京时间）Web UI 重构为现代 SaaS 控制台
+
+### 改动前总结
+前端已完成上一轮换色改造，但仍有结构性欠债：自定义主色只存库不注入（决策 #11 无效）、ECharts 把 CSS 变量当颜色传给 canvas（轴/图例颜色失效且主题写死 dark）、后台节点详情页只用了后端 20 个实时字段中的 3 个、格式化工具函数在 5 个文件重复且口径不一、顶栏与总览/节点页重复轮同一份数据。
+
+### 改动后总结
+- **视觉方向**：现代 SaaS 控制台（Linear 近黑画布 + hairline 边框 + 单一强调色；Stripe table-first、颜色只表达状态；Vercel 中性灰阶与排版层次）。暗色画布 #0a0a0b、主色 #5e6ad2；浅色画布 #f7f7f8、主色 #4f5bd5。
+- **新增层次**：`web/src/components/`（9 个 Wk* 展示组件）、`web/src/composables/`（useTheme/usePolling/useOverview）、`web/src/utils/`（format.ts/charts.ts）；样式拆为 variables/base/layout/components/element。接口、路由、功能分区完全没动，**未改 `internal/` 任何 Go 代码，未新增 npm 依赖**。
+- **功能补齐**：后台节点详情页从 3 字段扩充到全部后端已有字段（CPU 型号/核数、负载 1/5/15、总内存/总磁盘、累计上下行、启动时间、区域、出口 IP）+ 1h/6h/24h 资源趋势；总览页新增卡片/列表双视图与集群趋势；告警中心新增筛选与超阈程度条；公开首页新增在线率圆环并改用后端 `summary`；公开详情页新增 24h 丢包色条。
+- **修复**：自定义主色注入链路打通；ECharts 颜色改为 getComputedStyle 解析真实色值并随主题重建；负载阈值全局统一 70/85；重复轮询收敛为共享单例并支持后台标签页暂停；补 `web/public/favicon.svg` 与 `theme-color`；删除 `App.vue` 重复 reset。
+- **文档**：新增根目录 `DEVTIPS.md`，收录设计令牌契约、主色注入链路、ECharts 与 CSS 变量坑、轮询约定、表格密度约定、本地 mock 验 UI 方法。
+
+### 验证要求
+- 部署前必须在真实主控 + 真实探针环境再跑一轮：本次因本机未安装 Go 工具链，只用了与 `vite.config.ts` proxy 对齐的只读 Mock API（`build/mock-api.mjs`）完成无头浏览器逐页核验（console error 0、4xx/5xx 0、双主题与 6 种主色切换、1440/820 两档宽度）。
+- 重点回归项：探针每秒上报下页面稳定性、`agent_server_addr`/`site_domain` 保存与安装命令生成、告警阈值保存、Telegram 测试发送。
+
+### 验证结果
+- `npx vue-tsc --noEmit` 零错误；`npx vite build` 成功，产物含 `favicon.svg` 并已输出到 `internal/webapi/dist/`（该目录被 git 跟踪，需一并提交）。
+- 无头浏览器三轮逐页截图：公开首页/公开详情/登录/总览/节点列表/节点详情/告警/设置 均非白屏，图表轴与图例颜色随主题正确变化，自定义主色在侧栏/按钮/图表首色上生效。
+

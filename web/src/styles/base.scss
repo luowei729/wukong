@@ -1,0 +1,175 @@
+// =============================================
+// 基础层：重置、排版、工具类、可访问性、滚动条
+// 只放"与布局无关"的最小基线，避免与组件样式重复定义
+// =============================================
+@use "./variables.scss" as *;
+
+// ---- 重置 ----
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html {
+  font-family: var(--wk-font-family);
+  font-size: 14px;
+  line-height: 1.5;
+  height: 100%;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+body {
+  background: var(--wk-bg);
+  color: var(--wk-text);
+  min-height: 100vh;
+  // 默认允许滚动；后台管理外壳 .wk-app-shell 自行 overflow:hidden 管理内部滚动
+  font-size: var(--wk-fs-md);
+}
+
+a {
+  color: var(--wk-primary);
+  text-decoration: none;
+  transition: color var(--wk-dur-fast) var(--wk-ease);
+
+  &:hover {
+    color: var(--wk-primary-hover);
+    text-decoration: none;
+  }
+}
+
+code,
+.mono {
+  font-family: var(--wk-mono-family);
+  font-size: 0.9em;
+}
+
+h1,
+h2,
+h3,
+h4 {
+  font-weight: var(--wk-fw-semibold);
+  letter-spacing: -0.011em;
+  color: var(--wk-text);
+}
+
+button:not(:disabled),
+[role="button"]:not(:disabled) {
+  cursor: pointer;
+}
+
+// ---- 排版工具类：SaaS 控制台的层次靠排版而非盒子 ----
+// eyebrow：卡片/区块的极小大写标签（Vercel/Stripe 表格头风格）
+.wk-eyebrow {
+  font-size: var(--wk-fs-xs);
+  font-weight: var(--wk-fw-semibold);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--wk-text-muted);
+}
+
+// sub：次要说明文字
+.wk-sub {
+  font-size: var(--wk-fs-sm);
+  color: var(--wk-text-muted);
+  line-height: 1.5;
+}
+
+// num：所有数字统一等宽 + tabular figures，保证每秒刷新的数值不会左右抖动
+.wk-num {
+  font-family: var(--wk-mono-family);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+}
+
+.wk-title {
+  font-size: var(--wk-fs-lg);
+  font-weight: var(--wk-fw-semibold);
+  letter-spacing: -0.015em;
+}
+
+.wk-stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--wk-gap-section);
+}
+
+.wk-row {
+  display: flex;
+  align-items: center;
+  gap: var(--wk-space-3);
+}
+
+.wk-row-between {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--wk-space-3);
+}
+
+.wk-truncate {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+// ---- 状态文本色（保留旧类名，兼容既有页面） ----
+.muted {
+  color: var(--wk-text-muted);
+}
+.green {
+  color: var(--wk-success-text) !important;
+}
+.red {
+  color: var(--wk-danger-text) !important;
+}
+.yellow {
+  color: var(--wk-warning-text) !important;
+}
+.blue {
+  color: var(--wk-primary) !important;
+}
+
+// ---- 可访问性：键盘焦点可见，鼠标点击不出现描边 ----
+:focus-visible {
+  outline: none;
+  box-shadow: var(--wk-ring);
+  border-radius: var(--wk-radius-sm);
+}
+
+::selection {
+  background: color-mix(in srgb, var(--wk-primary) 32%, transparent);
+}
+
+// ---- 滚动条：细化、跟随主题 ----
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--wk-text-muted) 32%, transparent);
+  border-radius: var(--wk-radius-pill);
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--wk-text-muted) 55%, transparent);
+  background-clip: padding-box;
+}
+
+// ---- 减弱动效偏好：关闭呼吸光晕与骨架流光，仅保留颜色过渡 ----
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}

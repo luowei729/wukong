@@ -1,481 +1,515 @@
 <template>
-  <!-- ============ 总览仪表盘页面 ============ -->
-  <div class="dashboard">
-    <!-- 页面头部：使用全局 .wk-page-header 样式 -->
-    <div class="wk-page-header">
-      <h2>总览仪表盘</h2>
-      <div class="muted">实时监控所有节点状态与资源使用情况</div>
+  <!-- ============ 总览仪表盘 ============ -->
+  <!-- 结构：KPI 行 → 节点状态（卡片/列表双视图）→ 集群趋势 + 最近告警 -->
+  <div class="wk-stack">
+    <!-- ---------------- KPI 行 ---------------- -->
+    <div class="wk-grid-4">
+      <!-- 在线节点：全在线为绿色，有离线则降为警告色 -->
+      <WkMetric
+        label="在线节点"
+        :value="onlineCount"
+        :unit="`/ ${totalCount}`"
+        :loading="loading"
+        :tone="offlineCount > 0 ? 'warning' : 'success'"
+        :hint="offlineCount > 0 ? `${offlineCount} 个节点离线` : '全部节点在线'"
+        :spark="onlineHistory"
+        :spark-color="'var(--wk-success)'"
+      />
+      <!-- 平均 CPU：阈值分级由 WkMetric 的 tone 体现，趋势来自前端滚动采样 -->
+      <WkMetric
+        label="平均 CPU"
+        :value="formatOneDecimal(avgCpu)"
+        unit="%"
+        :loading="loading"
+        :tone="toneOf(avgCpu)"
+        :hint="`共 ${metricCount} 个节点上报指标`"
+        :spark="cpuHistory"
+        :spark-max="100"
+        :delta="cpuDelta"
+        :delta-tone="deltaTone(cpuDelta)"
+      />
+      <!-- 平均内存 -->
+      <WkMetric
+        label="平均内存"
+        :value="formatOneDecimal(avgMem)"
+        unit="%"
+        :loading="loading"
+        :tone="toneOf(avgMem)"
+        :hint="avgDisk !== null ? `平均磁盘 ${formatOneDecimal(avgDisk)}%` : '暂无磁盘数据'"
+        :spark="memHistory"
+        :spark-max="100"
+        :delta="memDelta"
+        :delta-tone="deltaTone(memDelta)"
+      />
+      <!-- 今日告警：0 时显示"一切正常"的积极态 -->
+      <WkMetric
+        label="今日告警"
+        :value="todayAlerts.length"
+        unit="条"
+        :loading="loading"
+        :tone="firingCount > 0 ? 'danger' : todayAlerts.length > 0 ? 'warning' : 'default'"
+        :hint="firingCount > 0 ? `${firingCount} 条进行中` : todayAlerts.length > 0 ? '今日告警均已恢复' : '今日无告警'"
+      />
     </div>
 
-    <!-- ============ 统计卡片行：在线节点 / 平均CPU / 平均内存 / 今日告警 ============ -->
-    <!-- 使用 .wk-stat-row > .wk-metric 结构，4 列等宽布局 -->
-    <div class="wk-stat-row" v-if="!loading">
-      <!-- 在线节点数 -->
-      <div class="wk-metric">
-        <div class="label">在线节点</div>
-        <div class="value">{{ stats.online }}</div>
-        <div class="sub">台</div>
-      </div>
-      <!-- 平均 CPU 使用率 -->
-      <div class="wk-metric">
-        <div class="label">平均 CPU</div>
-        <div class="value">{{ stats.avgCpu }}</div>
-        <div class="sub">%</div>
-      </div>
-      <!-- 平均内存使用率 -->
-      <div class="wk-metric">
-        <div class="label">平均内存</div>
-        <div class="value">{{ stats.avgMem }}</div>
-        <div class="sub">%</div>
-      </div>
-      <!-- 今日告警数 -->
-      <div class="wk-metric">
-        <div class="label">今日告警</div>
-        <div class="value" :class="{ 'text-danger': stats.alerts > 0 }">{{ stats.alerts }}</div>
-        <div class="sub">条</div>
-      </div>
-    </div>
+    <!-- ---------------- 节点状态 ---------------- -->
+    <WkCard
+      title="节点状态"
+      :subtitle="`共 ${totalCount} 个节点 · ${onlineCount} 个在线，每秒自动刷新`"
+      padding="none"
+    >
+      <template #actions>
+        <!-- 视图切换：卡片适合看趋势，列表适合看数值，选择结果本地持久化 -->
+        <div class="wk-segment" role="tablist" aria-label="节点视图切换">
+          <button
+            type="button"
+            :class="['wk-segment-item', { active: viewMode === 'card' }]"
+            role="tab"
+            aria-label="卡片视图"
+            @click="setViewMode('card')"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75">
+              <rect x="3" y="3" width="7" height="7" rx="1.5" />
+              <rect x="14" y="3" width="7" height="7" rx="1.5" />
+              <rect x="3" y="14" width="7" height="7" rx="1.5" />
+              <rect x="14" y="14" width="7" height="7" rx="1.5" />
+            </svg>
+            卡片
+          </button>
+          <button
+            type="button"
+            :class="['wk-segment-item', { active: viewMode === 'list' }]"
+            role="tab"
+            aria-label="列表视图"
+            @click="setViewMode('list')"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round">
+              <path d="M4 6h16M4 12h16M4 18h16" />
+            </svg>
+            列表
+          </button>
+        </div>
+      </template>
 
-    <!-- 统计卡片骨架屏：数据加载时显示 -->
-    <div class="wk-stat-row" v-if="loading">
-      <div class="wk-metric" v-for="i in 4" :key="i">
-        <div class="wk-skeleton" style="width: 60px; height: 12px;"></div>
-        <div class="wk-skeleton" style="width: 80px; height: 28px; margin-top: 8px;"></div>
-        <div class="wk-skeleton" style="width: 30px; height: 10px; margin-top: 6px;"></div>
-      </div>
-    </div>
-
-    <!-- ============ 节点状态列表：用 .wk-card-solid 包裹 ============ -->
-    <div class="wk-card-solid node-section">
-      <div class="section-header">
-        <h3>节点状态</h3>
-        <span class="node-count">共 {{ nodeList.length }} 个节点</span>
-      </div>
-
-      <!-- 节点卡片骨架屏：加载中显示 -->
-      <div class="node-grid" v-if="loading">
-        <div class="wk-card node-card" v-for="i in 4" :key="'sk-' + i">
-          <div class="node-header">
-            <div class="wk-skeleton" style="width: 12px; height: 12px; border-radius: 50%;"></div>
-            <div class="wk-skeleton" style="width: 100px; height: 16px;"></div>
-          </div>
-          <div class="metric-bar" v-for="j in 3" :key="j">
-            <div class="wk-skeleton" style="width: 40px; height: 12px;"></div>
-            <div class="wk-skeleton" style="flex: 1; height: 12px;"></div>
-            <div class="wk-skeleton" style="width: 50px; height: 12px;"></div>
-          </div>
+      <!-- 首次加载骨架：与真实卡片同尺寸，加载完成不跳动 -->
+      <div v-if="loading" class="wk-node-grid" style="padding: var(--wk-space-5)">
+        <div v-for="i in 4" :key="'sk-' + i" class="wk-node-card" style="cursor: default">
+          <WkSkeleton width="120px" height="16px" />
+          <WkSkeleton height="8px" />
+          <WkSkeleton height="8px" />
+          <WkSkeleton height="8px" />
+          <WkSkeleton width="60%" height="12px" />
         </div>
       </div>
 
-      <!-- 节点卡片网格：数据加载完成后显示 -->
-      <div class="node-grid" v-if="!loading">
-        <div
-          v-for="node in nodeList"
+      <!-- 空状态：还没有探针接入 -->
+      <WkEmptyState
+        v-else-if="nodes.length === 0"
+        icon="server"
+        title="还没有节点接入"
+        description="到「系统设置 → 安装节点」生成安装命令，在服务器上执行即可自动注册上报"
+      >
+        <template #action>
+          <el-button type="primary" @click="router.push('/settings')">前往安装节点</el-button>
+        </template>
+      </WkEmptyState>
+
+      <!-- 卡片视图 -->
+      <div
+        v-else-if="viewMode === 'card'"
+        class="wk-node-grid"
+        style="padding: 0 var(--wk-space-5) var(--wk-space-5)"
+      >
+        <article
+          v-for="node in nodes"
           :key="node.id"
-          class="wk-card node-card"
+          :class="['wk-node-card', { 'is-offline': !node.online }]"
           @click="goToNode(node.id)"
         >
-          <!-- 节点头部：状态指示灯 + 节点名称 -->
-          <div class="node-header">
-            <span :class="['wk-status-dot', node.online ? 'online' : 'offline']" />
-            <span class="node-name">{{ node.name }}</span>
-            <span class="node-ip" v-if="node.ip_v4">{{ node.ip_v4 }}</span>
-          </div>
-
-          <!-- CPU 使用率指标 + 进度条 -->
-          <div class="metric-bar">
-            <span class="metric-label">CPU</span>
-            <div class="progress-wrap">
-              <div
-                class="progress-bar"
-                :class="getProgressClass(node.cpu)"
-                :style="{ width: clamp(node.cpu) + '%' }"
-              />
+          <div class="wk-node-card-head">
+            <div style="min-width: 0">
+              <div class="wk-node-card-name">{{ displayName(node) }}</div>
+              <div class="wk-eyebrow" style="margin-top: 3px">{{ nodeMeta(node) }}</div>
             </div>
-            <span class="metric-value">{{ formatNum(node.cpu) }}%</span>
+            <WkStatusDot :status="node.online ? 'online' : 'offline'" :pulse="node.online" />
           </div>
 
-          <!-- 内存使用率指标 + 进度条 -->
-          <div class="metric-bar">
-            <span class="metric-label">内存</span>
-            <div class="progress-wrap">
-              <div
-                class="progress-bar"
-                :class="getProgressClass(node.mem)"
-                :style="{ width: clamp(node.mem) + '%' }"
-              />
-            </div>
-            <span class="metric-value">{{ formatNum(node.mem) }}%</span>
+          <div class="wk-node-card-meters">
+            <WkProgressBar label="CPU" :value="node.cpu" />
+            <WkProgressBar label="内存" :value="node.mem" />
+            <WkProgressBar label="磁盘" :value="node.disk" />
           </div>
 
-          <!-- 磁盘使用率指标 + 进度条 -->
-          <div class="metric-bar">
-            <span class="metric-label">磁盘</span>
-            <div class="progress-wrap">
-              <div
-                class="progress-bar"
-                :class="getProgressClass(node.disk)"
-                :style="{ width: clamp(node.disk) + '%' }"
-              />
-            </div>
-            <span class="metric-value">{{ formatNum(node.disk) }}%</span>
+          <div class="wk-node-card-foot">
+            <span class="up">↑ {{ formatRate(node.net_up) }}</span>
+            <span class="down">↓ {{ formatRate(node.net_down) }}</span>
+            <span class="wk-node-card-time">
+              {{ node.uptime_seconds ? formatDuration(node.uptime_seconds) + '·' : ''
+              }}{{ relativeTime(node.last_seen_at || node.updated_at) }}
+            </span>
           </div>
-        </div>
-
-        <!-- 空状态：无节点数据时提示 -->
-        <div v-if="nodeList.length === 0" class="empty-state">
-          <el-empty description="暂无节点数据，请先安装探针" />
-        </div>
+        </article>
       </div>
+
+      <!-- 列表视图：与节点列表页同一套数值口径，只是更紧凑 -->
+      <el-table v-else :data="nodes" style="width: 100%" :row-class-name="rowClassName">
+        <el-table-column label="状态" width="72" align="center">
+          <template #default="{ row }">
+            <WkStatusDot :status="row.online ? 'online' : 'offline'" :size="6" />
+          </template>
+        </el-table-column>
+        <el-table-column label="名称" min-width="180">
+          <template #default="{ row }">
+            <span class="wk-node-name" @click="goToNode(row.id)">{{ displayName(row) }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="CPU" min-width="150">
+          <template #default="{ row }">
+            <WkProgressBar :value="row.cpu" :show-value="true" />
+          </template>
+        </el-table-column>
+        <el-table-column label="内存" min-width="150">
+          <template #default="{ row }">
+            <WkProgressBar :value="row.mem" />
+          </template>
+        </el-table-column>
+        <el-table-column label="磁盘" min-width="150">
+          <template #default="{ row }">
+            <WkProgressBar :value="row.disk" />
+          </template>
+        </el-table-column>
+        <el-table-column label="上行" width="110" align="right">
+          <template #default="{ row }">
+            <span class="wk-num">{{ formatRate(row.net_up) }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="下行" width="110" align="right">
+          <template #default="{ row }">
+            <span class="wk-num">{{ formatRate(row.net_down) }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="最近上报" width="120" align="right">
+          <template #default="{ row }">
+            <span class="wk-sub">{{ relativeTime(row.last_seen_at || row.updated_at) }}</span>
+          </template>
+        </el-table-column>
+      </el-table>
+    </WkCard>
+
+    <!-- ---------------- 集群趋势 + 最近告警 ---------------- -->
+    <div class="wk-dash-bottom">
+      <!-- 趋势图数据源是前端内存滚动采样（最近 10 分钟），不需要额外后端接口 -->
+      <WkCard title="集群负载趋势" subtitle="最近 10 分钟平均 CPU / 内存（前端滚动采样）">
+        <WkChart
+          :builder="buildTrendOption"
+          :deps="history"
+          height="260px"
+          :loading="loading"
+        />
+        <template #footer>
+          <span>采样点 {{ history.length }} 个</span>
+          <span style="margin-left: auto">
+            更新于 {{ lastUpdated ? formatClock(lastUpdated) : '-' }}
+          </span>
+        </template>
+      </WkCard>
+
+      <!-- 最近告警：只列 5 条，更多进告警中心 -->
+      <WkCard title="最近告警" subtitle="按触发时间倒序，最多显示 5 条">
+        <template #actions>
+          <el-button text size="small" @click="router.push('/alerts')">告警中心</el-button>
+        </template>
+
+        <WkEmptyState
+          v-if="recentAlerts.length === 0"
+          icon="shield"
+          ok
+          title="暂无告警记录"
+          description="所有节点指标都在阈值范围内"
+        />
+
+        <ul v-else class="wk-alert-list">
+          <li
+            v-for="alert in recentAlerts"
+            :key="alert.id"
+            class="wk-alert-item"
+            @click="goToNode(alert.agent_id)"
+          >
+            <WkBadge :tone="alert.status === 'firing' ? 'fail' : 'ok'" dot>
+              {{ alert.status === 'firing' ? '进行中' : '已恢复' }}
+            </WkBadge>
+            <div class="wk-alert-body">
+              <div class="wk-alert-title">
+                {{ metricText(alert.metric) }} · {{ alert.agent_name || alert.agent_id }}
+              </div>
+              <div class="wk-sub">
+                当前 <b class="wk-num">{{ formatValue(alert.metric, alert.value) }}</b>
+                / 阈值 {{ formatValue(alert.metric, alert.threshold) }}
+                · {{ relativeTime(alert.fired_at) }}
+              </div>
+            </div>
+          </li>
+        </ul>
+      </WkCard>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-// ============ 依赖引入 ============
-import { ref, reactive, onMounted, onUnmounted } from 'vue'
+// ============ 总览仪表盘逻辑 ============
+// 数据全部来自 useOverview() 共享单例：本页面不再自己写 setInterval 轮询，
+// 与顶栏、节点列表页共用同一个 1s 定时器，减少重复请求（历史事故：多页重复轮询放大 SQLite 写锁竞争）
+import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import http from '@/utils/http'
+import WkCard from '@/components/WkCard.vue'
+import WkMetric from '@/components/WkMetric.vue'
+import WkProgressBar from '@/components/WkProgressBar.vue'
+import WkStatusDot from '@/components/WkStatusDot.vue'
+import WkBadge from '@/components/WkBadge.vue'
+import WkEmptyState from '@/components/WkEmptyState.vue'
+import WkSkeleton from '@/components/WkSkeleton.vue'
+import WkChart from '@/components/WkChart.vue'
+import { useOverview } from '@/composables/useOverview'
+import {
+  baseCategoryAxis,
+  baseDataZoom,
+  baseGrid,
+  baseLegend,
+  baseTooltip,
+  baseValueAxis,
+  buildLineSeries,
+  readChartTokens,
+} from '@/utils/charts'
+import {
+  archText,
+  formatClock,
+  formatDuration,
+  formatRate,
+  loadLevel,
+  relativeTime,
+} from '@/utils/format'
 
-// ============ 路由实例，用于跳转节点详情 ============
 const router = useRouter()
 
-// ============ 响应式状态 ============
-// 节点列表数据
-const nodeList = ref<any[]>([])
-// 加载状态标志：首次加载时显示骨架屏
-const loading = ref(true)
-// SSE 事件源引用
-let eventSource: EventSource | null = null
-// 定时刷新定时器引用
-let refreshTimer: ReturnType<typeof setInterval> | null = null
+const {
+  nodes,
+  loading,
+  history,
+  lastUpdated,
+  onlineCount,
+  totalCount,
+  offlineCount,
+  avgCpu,
+  avgMem,
+  avgDisk,
+  firingCount,
+  todayAlerts,
+  cpuHistory,
+  memHistory,
+  alerts,
+} = useOverview()
 
-// 统计数据：在线节点数、平均CPU、平均内存、今日告警
-const stats = reactive({
-  online: 0,       // 在线节点数量
-  avgCpu: '-',     // 平均 CPU 使用率（无数据时显示 '-'）
-  avgMem: '-',     // 平均内存使用率（无数据时显示 '-'）
-  alerts: 0,       // 今日告警条数
+// ---------------- 视图模式（卡片 / 列表） ----------------
+const VIEW_KEY = 'wk-dashboard-view'
+const viewMode = ref<'card' | 'list'>(
+  localStorage.getItem(VIEW_KEY) === 'list' ? 'list' : 'card'
+)
+
+function setViewMode(mode: 'card' | 'list') {
+  viewMode.value = mode
+  // 记住用户偏好：运维在大屏看卡片、在窄屏看列表，刷新后保持
+  localStorage.setItem(VIEW_KEY, mode)
+}
+
+// ---------------- 展示辅助 ----------------
+// 节点显示名：优先后台自定义名称，其次主机名，最后截断 ID
+function displayName(node: any): string {
+  return node.name || node.hostname || `节点 ${String(node.id).slice(0, 8)}`
+}
+
+// 节点头部元信息：系统 · 区域 · 架构（与公开页同一口径）
+function nodeMeta(node: any): string {
+  const parts: string[] = []
+  const os = node.platform || node.os_version
+  if (os) parts.push(os)
+  if (node.region) parts.push(node.region)
+  if (node.arch) parts.push(archText(node.arch))
+  return parts.length ? parts.join(' · ') : '系统信息待上报'
+}
+
+// 一位小数格式化：null 统一显示短横线
+function formatOneDecimal(value: number | null): string {
+  return value === null || value === undefined ? '-' : value.toFixed(1)
+}
+
+// KPI 卡语气色跟随统一负载阈值（≥70 警告 / ≥85 危险）
+function toneOf(value: number | null): 'default' | 'warning' | 'danger' {
+  const level = loadLevel(value ?? undefined)
+  if (level === 'danger') return 'danger'
+  if (level === 'warning') return 'warning'
+  return 'default'
+}
+
+// 相对 1 分钟前的变化摘要（采样历史不足时不显示，避免误导）
+function deltaText(series: number[]): string {
+  if (series.length < 60) return ''
+  const current = series[series.length - 1]
+  const previous = series[series.length - 60]
+  const diff = current - previous
+  if (Math.abs(diff) < 0.05) return ''
+  return `${diff > 0 ? '+' : ''}${diff.toFixed(1)}%`
+}
+
+const cpuDelta = computed(() => deltaText(cpuHistory.value))
+const memDelta = computed(() => deltaText(memHistory.value))
+
+function deltaTone(delta: string): 'ok' | 'fail' | 'neutral' {
+  if (!delta) return 'neutral'
+  // 负载上升视为风险（红），下降视为缓解（绿）
+  return delta.startsWith('-') ? 'ok' : 'fail'
+}
+
+// 在线数趋势（用于"在线节点"卡的迷你条），无数据时不画
+const onlineHistory = computed(() => history.value.map((item) => item.online))
+
+// 有指标的节点数：作为"共 N 个节点上报指标"的说明
+const metricCount = computed(
+  () => nodes.value.filter((n: any) => typeof n.cpu === 'number').length
+)
+
+// 离线行弱化
+function rowClassName({ row }: { row: any }) {
+  return row.online ? '' : 'row-offline'
+}
+
+// ---------------- 最近告警 ----------------
+const ALERT_METRIC_TEXT: Record<string, string> = {
+  offline: '离线',
+  cpu: 'CPU',
+  mem: '内存',
+  disk: '磁盘',
+  ping_latency: 'Ping 延迟',
+  ping_loss: 'Ping 丢包',
+}
+
+function metricText(metric: string): string {
+  return ALERT_METRIC_TEXT[metric] || metric
+}
+
+// 告警数值单位：离线用秒、Ping 延迟用 ms、其余按百分比
+function formatValue(metric: string, value?: number): string {
+  if (typeof value !== 'number') return '-'
+  if (metric === 'offline') return value > 1 ? `${value.toFixed(0)} 秒` : '离线'
+  if (metric === 'ping_latency') return `${value.toFixed(1)} ms`
+  return `${value.toFixed(1)}%`
+}
+
+// 按触发时间倒序取前 5 条
+const recentAlerts = computed(() => {
+  const list = alerts.value.slice()
+  list.sort((a: any, b: any) => {
+    const ta = new Date(a.fired_at || 0).getTime()
+    const tb = new Date(b.fired_at || 0).getTime()
+    return tb - ta
+  })
+  return list.slice(0, 5)
 })
 
-// ============ 工具函数 ============
+// ---------------- 集群趋势图 ----------------
+// builder 在渲染时刻读取当前主题令牌，切浅色/改主色后图表颜色自动跟随
+function buildTrendOption() {
+  const tokens = readChartTokens()
+  const points = history.value
+  const labels = points.map((item) => formatClock(item.t))
+  const cpu = points.map((item) => item.cpu)
+  const mem = points.map((item) => item.mem)
 
-/**
- * 格式化数值：保留一位小数，无数据返回 '--'
- * @param val 数值
- */
-function formatNum(val?: number): string {
-  if (val == null || isNaN(val)) return '--'
-  return val.toFixed(1)
-}
-
-/**
- * 限制进度条宽度在 0~100 之间
- * @param val 数值
- */
-function clamp(val?: number): number {
-  if (val == null || isNaN(val)) return 0
-  return Math.max(0, Math.min(100, val))
-}
-
-/**
- * 根据使用率返回进度条颜色类名
- * - < 60%: 正常（绿色）
- * - 60~85%: 警告（黄色）
- * - > 85%: 危险（红色）
- * @param val 使用率数值
- */
-function getProgressClass(val?: number): string {
-  if (val == null || isNaN(val)) return ''
-  if (val >= 85) return 'danger'
-  if (val >= 60) return 'warning'
-  return 'success'
-}
-
-// ============ 核心功能函数 ============
-
-/**
- * 获取节点列表数据
- * 同时请求 /api/agents（节点基础信息）和 /api/agents/latest（最新指标数据）
- * 将两个接口的数据合并后更新节点列表和统计卡片
- */
-async function fetchNodes() {
-  try {
-    // 并发请求：节点列表 + 最新指标
-    const [agentsRes, latestRes] = await Promise.all([
-      http.get(`/api/agents?_=${Date.now()}`),
-      http.get(`/api/agents/latest?_=${Date.now()}`),
-    ])
-
-    // 最新指标数据以节点 ID 为键
-    const latest = latestRes.data || {}
-
-    // 合并节点基础信息与最新指标数据
-    nodeList.value = (agentsRes.data || []).map((node: any) => ({
-      ...node,
-      ...(latest[node.id] || {}),
-    }))
-
-    // 计算在线节点数
-    const onlineNodes = nodeList.value.filter((n: any) => n.online)
-    stats.online = onlineNodes.length
-
-    // 计算平均 CPU 和内存使用率（仅统计有指标数据的节点）
-    const metricNodes = nodeList.value.filter((n: any) => typeof n.cpu === 'number')
-    if (metricNodes.length > 0) {
-      const avgCpu = metricNodes.reduce((sum: number, n: any) => sum + n.cpu, 0) / metricNodes.length
-      const avgMem = metricNodes.reduce((sum: number, n: any) => sum + n.mem, 0) / metricNodes.length
-      stats.avgCpu = avgCpu.toFixed(1)
-      stats.avgMem = avgMem.toFixed(1)
-    } else {
-      stats.avgCpu = '-'
-      stats.avgMem = '-'
-    }
-
-    // 获取今日告警数（从 /api/alerts 接口获取）
-    fetchAlerts()
-  } catch (e) {
-    console.error('获取节点列表失败', e)
-  } finally {
-    // 首次加载完成，关闭骨架屏
-    loading.value = false
+  return {
+    animation: false,
+    // 只启用滚轮缩放，没有底部滑块，因此 grid 下方不需要额外让位
+    grid: baseGrid({ bottom: 8 }),
+    tooltip: baseTooltip(tokens),
+    legend: baseLegend(tokens),
+    xAxis: baseCategoryAxis(tokens, labels),
+    yAxis: baseValueAxis(tokens, { max: 100, formatter: '{value}%' }),
+    // 10 分钟窗口不需要缩放滑块，只保留滚轮缩放
+    dataZoom: [baseDataZoom(tokens)[0]],
+    series: [
+      buildLineSeries('CPU', cpu, tokens.palette[0], { area: true }),
+      // 第二色用粉：主色与紫/蓝同色相容易混淆，粉色在深浅两套主题下都能与主色拉开
+      buildLineSeries('内存', mem, tokens.palette[6], { area: true }),
+    ],
   }
 }
 
-/**
- * 获取今日告警数量
- * 调用 /api/alerts 接口，筛选今日的告警记录
- */
-async function fetchAlerts() {
-  try {
-    const res = await http.get(`/api/alerts?_=${Date.now()}`)
-    const alerts = Array.isArray(res.data) ? res.data : (res.data?.alerts || [])
-    // 获取今天的日期（本地时区）
-    const today = new Date()
-    const todayStr = today.toDateString()
-    // 筛选今天触发的告警
-    const todayAlerts = alerts.filter((a: any) => {
-      const alertDate = new Date(a.created_at || a.time || a.timestamp)
-      return alertDate.toDateString() === todayStr
-    })
-    stats.alerts = todayAlerts.length
-  } catch {
-    // 告警接口失败不影响主流程
-    stats.alerts = 0
-  }
-}
-
-/**
- * SSE 实时更新：连接 /api/events 事件流
- * 收到 metrics_update 事件时自动刷新节点数据
- */
-function connectSSE() {
-  // 从本地存储获取 JWT token
-  const token = localStorage.getItem('access_token')
-  // 创建 EventSource 连接，通过 URL 传递 token
-  eventSource = new EventSource(`/api/events?token=${token}`)
-
-  // 监听消息事件
-  eventSource.onmessage = (event) => {
-    try {
-      const data = JSON.parse(event.data)
-      // 收到指标更新事件时刷新节点列表
-      if (data.type === 'metrics_update') {
-        fetchNodes()
-      }
-    } catch {
-      // JSON 解析失败时忽略
-    }
-  }
-
-  // SSE 连接异常时自动重连
-  eventSource.onerror = () => {
-    eventSource?.close()
-    // 5 秒后尝试重连
-    setTimeout(() => {
-      if (refreshTimer) connectSSE()
-    }, 5000)
-  }
-}
-
-/**
- * 跳转到节点详情页
- * @param id 节点 ID
- */
+// 跳转节点详情
 function goToNode(id: string) {
+  if (!id) return
   router.push(`/nodes/${id}`)
 }
-
-// ============ 生命周期 ============
-
-// 组件挂载时：首次获取数据、建立 SSE 连接、启动定时刷新
-onMounted(() => {
-  // 首次获取节点列表和指标
-  fetchNodes()
-  // 建立 SSE 实时推送连接
-  connectSSE()
-  // 后台总览每秒主动刷新一次，避免依赖 SSE 或浏览器缓存导致设备状态不更新
-  refreshTimer = setInterval(fetchNodes, 1000)
-})
-
-// 组件卸载时：关闭 SSE 连接、清除定时器，避免内存泄漏
-onUnmounted(() => {
-  eventSource?.close()
-  if (refreshTimer) clearInterval(refreshTimer)
-})
 </script>
 
 <style scoped>
-/* ============ 页面整体布局 ============ */
-.dashboard {
-  padding: 4px;
-}
-
-/* ============ 节点状态区块 ============ */
-.node-section {
-  padding: 20px;
-}
-
-/* 区块头部：标题 + 节点计数 */
-.section-header {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  margin-bottom: 16px;
-}
-
-.section-header h3 {
-  margin: 0;
-}
-
-.node-count {
-  font-size: 12px;
-  color: var(--wk-text-muted);
-  font-variant-numeric: tabular-nums;
-}
-
-/* ============ 节点卡片网格 ============ */
-.node-grid {
+/* 底部两栏：趋势图占主，告警列表占辅；窄屏单列 */
+.wk-dash-bottom {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-  gap: 12px;
+  grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr);
+  gap: var(--wk-gap-card);
 }
 
-/* 单个节点卡片 */
-.node-card {
-  padding: 16px;
+@media (max-width: 1100px) {
+  .wk-dash-bottom {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* 表格里的节点名称可点击跳转 */
+.wk-node-name {
   cursor: pointer;
-  transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
-}
-
-/* 节点卡片悬停效果：边框高亮 + 轻微上浮 */
-.node-card:hover {
-  border-color: var(--wk-primary);
-  box-shadow: 0 4px 16px color-mix(in srgb, var(--wk-primary) 15%, transparent);
-  transform: translateY(-2px);
-}
-
-/* 节点头部：状态灯 + 名称 + IP */
-.node-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 14px;
-}
-
-.node-name {
-  font-weight: 650;
-  font-size: 14px;
+  font-weight: 500;
   color: var(--wk-text);
-  flex: 1;
+}
+
+.wk-node-name:hover {
+  color: var(--wk-primary);
+}
+
+/* 最近告警列表 */
+.wk-alert-list {
+  display: flex;
+  flex-direction: column;
+  list-style: none;
+  margin: calc(var(--wk-space-2) * -1) 0;
+}
+
+.wk-alert-item {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--wk-space-3);
+  padding: var(--wk-space-3) 0;
+  border-bottom: 1px solid var(--wk-border);
+  cursor: pointer;
+  transition: background var(--wk-dur-fast) var(--wk-ease);
+}
+
+.wk-alert-item:last-child {
+  border-bottom: none;
+}
+
+.wk-alert-item:hover .wk-alert-title {
+  color: var(--wk-primary);
+}
+
+.wk-alert-body {
+  min-width: 0;
+}
+
+.wk-alert-title {
+  font-size: var(--wk-fs-base);
+  font-weight: 500;
+  color: var(--wk-text);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.node-ip {
-  font-family: 'JetBrains Mono', ui-monospace, monospace;
-  font-size: 11px;
-  color: var(--wk-text-muted);
-  font-variant-numeric: tabular-nums;
-}
-
-/* ============ 指标进度条 ============ */
-.metric-bar {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 5px 0;
-  font-size: 12.5px;
-}
-
-.metric-label {
-  color: var(--wk-text-muted);
-  width: 32px;
-  flex-shrink: 0;
-  font-weight: 600;
-}
-
-/* 进度条外层容器 */
-.progress-wrap {
-  flex: 1;
-  height: 6px;
-  background: var(--wk-bg-soft);
-  border-radius: 3px;
-  overflow: hidden;
-}
-
-/* 进度条填充部分 */
-.progress-bar {
-  height: 100%;
-  border-radius: 3px;
-  transition: width 0.3s ease, background 0.3s ease;
-}
-
-/* 进度条颜色：根据使用率分级 */
-.progress-bar.success {
-  background: var(--wk-success);
-}
-.progress-bar.warning {
-  background: var(--wk-warning);
-}
-.progress-bar.danger {
-  background: var(--wk-danger);
-}
-
-/* 指标数值：等宽字体 + tabular-nums 对齐 */
-.metric-value {
-  font-family: 'JetBrains Mono', ui-monospace, monospace;
-  font-weight: 700;
-  font-size: 12.5px;
-  font-variant-numeric: tabular-nums;
-  color: var(--wk-text);
-  width: 48px;
-  text-align: right;
-  flex-shrink: 0;
-}
-
-/* ============ 统计卡片数值样式增强 ============ */
-.wk-metric .value {
-  font-variant-numeric: tabular-nums;
-}
-
-.wk-metric .sub {
-  color: var(--wk-text-muted);
-  font-size: 12px;
-  margin-top: 4px;
-}
-
-/* 告警数值高亮（红色） */
-.text-danger {
-  color: var(--wk-danger) !important;
-}
-
-/* ============ 空状态 ============ */
-.empty-state {
-  grid-column: 1 / -1;
-  text-align: center;
-  padding: 40px 20px;
-  color: var(--wk-text-muted);
 }
 </style>

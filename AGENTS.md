@@ -1,6 +1,6 @@
 # wukong 监控系统 - 开发规范与提示
 
-> 最后更新: 2026-06-30 14:00 (北京时间)
+> 最后更新: 2026-10-05 04:13 (北京时间)
 
 ## 开发原则
 
@@ -34,6 +34,11 @@ wukong/
 │   └── agentcore/     # 探针核心（采集 + gRPC client + 缓冲）
 ├── proto/             # gRPC proto 定义 + 生成 Go 代码
 ├── web/               # Vue3 前端源码
+│   └── src/
+│       ├── components/    # Wk* 展示组件（卡片/指标/图表/空态…）
+│       ├── composables/   # useTheme / usePolling / useOverview（单例状态）
+│       ├── utils/         # http.ts / format.ts / charts.ts
+│       └── styles/        # variables / base / layout / components / element
 ├── deploy/
 │   ├── nginx/         # nginx 反代配置
 │   ├── systemd/       # systemd unit 文件
@@ -102,6 +107,8 @@ wukong/
 - **2026-07-23 14:15（北京时间）**：主站故障修复。根因：`runMaintenanceLoop` 数据保留期硬编码 30 天（`DropOldHourlyTables(24*30)`），13 节点 × 1s 采集 × 30 天 ≈ 1.3 亿行撑至 wukong.db 9.9GB，SQLite 写锁竞争导致全部 HTTP API goroutine 阻塞，主控 7 月 21 日静默卡死（进程存活无响应，docker stop 需 SIGKILL），前端经 openresty 能加载但 API 全部超时（000）。紧急处理：停容器批量 DROP 1086 张 7 天前历史小时表 + `VACUUM INTO` 压缩 9.9GB→2.4GB。代码修复：保留期 30 天→24 小时（`retentionHours=24`），清理频率 6h→1h。注意：主控容器为 alpine(musl) 镜像，本机 glibc 编译的二进制 docker cp 进去会报 `exec format: no such file`，必须走 GHCR Actions 重新构建镜像或用 alpine 容器编译 musl 二进制；重建容器时不传 `--config`（纯环境变量启动），原容器 Cmd `[--config ]` 带尾随空格会触发 `flag needs an argument`。
 
 - **2026-07-23 15:55（北京时间）**：修复 DropOldHourlyTables 死锁 bug。根因：`DropOldHourlyTables` 在 `rows.Next()` 循环内执行 `DROP TABLE`（schema 修改需独占锁），但 `defer rows.Close()` 使读事务一直持有，独占锁获取不到导致死锁，阻塞全部写 goroutine 致主控卡死（WAL 飙至 94MB）。30 天保留版因无过期表未触发；24 小时保留首次清理 DROP 约 360 张表即死锁。修复：先收集表名到 slice、显式 `rows.Close()` 释放读事务后再循环 DROP，末尾 `PRAGMA wal_checkpoint(TRUNCATE)` 防 WAL 膨胀。教训：SQLite schema 修改（DROP/ALTER TABLE）不能在未关闭的 rows 读事务中执行，必须先读完关闭再改 schema。本机 glibc 编译的二进制不可用（alpine musl），紧急修复用 `docker run golang:1.25-alpine` 编译 musl 二进制 + docker cp 部署，后续走 GHCR Actions 持久化。
+
+- **2026-10-05 04:13（北京时间）**：Web UI 重构为现代 SaaS 控制台（纯前端，未改 `internal/` Go 代码、未加 npm 依赖）。① 设计令牌单一来源在 `web/src/styles/variables.scss`，暗 #0a0a0b / 浅 #f7f7f8 中性灰阶 + indigo 主色（暗 #5e6ad2 / 浅 #4f5bd5）；新增圆角/间距/字号/控件高度尺度令牌，**新代码禁止魔法数，一律用 var(--wk-space-*/radius-*/fs-*)**；样式已拆为 variables → base → layout → components → element，入口仍是 `styles/index.scss`。② 新增 `web/src/components/` 9 个展示组件（WkCard/WkMetric/WkProgressBar/WkStatusDot/WkBadge/WkSparkline/WkChart/WkEmptyState/WkSkeleton）与 `web/src/composables/`（useTheme/usePolling/useOverview）、`web/src/utils/`（format.ts/charts.ts）。**改页面先查有没有现成 Wk* 组件与 format 函数可用，不要在页面里重写卡片/进度条/字节格式化**。③ 主色注入链路：设置页 `theme.primary` → `useTheme().setPrimary()` → 只写 `--wk-primary`，派生色与 `--el-color-primary` 靠 `color-mix()` 自动联动（旧版只存库不注入，自定义主色一直无效）。④ **ECharts 永远不能用 CSS 变量当颜色**：canvas 不解析 var()，必须经 `utils/charts.ts` 的 `readChartTokens()` 用 getComputedStyle 取真实色值；图表统一用 `WkChart` + `builder` 函数，它监听 `themeVersion` 保证切主题/改主色时重建。⑤ 实时数据统一走 `useOverview()` 单例（引用计数共用一个 1s 定时器 + 页面不可见暂停），**禁止再在组件里手写 `setInterval(fetch, 1000)`**；内存滞后的 600 个采样点给 sparkline 与集群趋势用。⑥ 负载分级全局统一为 `LOAD_WARN=70 / LOAD_DANGER=85`（`utils/format.ts`）；丢包不能套用资源阈值，用 `lossTone()` 类独立语义。⑦ 已知限制：`/api/public/theme` 不返回 `primary`，未登录访客看不到自定义主色；要覆盖需后端补 1 个字段（本次按“不改后端”未做）。
 
 ## 部署相关长期提示
 

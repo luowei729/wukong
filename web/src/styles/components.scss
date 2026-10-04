@@ -1,0 +1,975 @@
+// =============================================
+// 组件层：可复用视觉类的唯一定义处
+// 约定：Vue 组件（src/components/Wk*.vue）只负责结构与 props 映射，
+//       视觉全部落在本文件的全局类上，避免每个组件重复写一遍 scoped 样式
+// =============================================
+@use "./variables.scss" as *;
+
+// ---- 卡片容器 ----
+.wk-card {
+  background: var(--wk-panel);
+  color: var(--wk-text);
+  border: 1px solid var(--wk-border);
+  border-radius: var(--wk-radius-lg);
+  box-shadow: var(--wk-shadow-1);
+}
+
+.wk-card--pad-none {
+  padding: 0;
+}
+.wk-card--pad-sm {
+  padding: var(--wk-space-4);
+}
+.wk-card--pad-md {
+  padding: var(--wk-space-5);
+}
+
+// 卡片头：标题 + 副标题 + 右侧操作区
+.wk-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--wk-space-3);
+
+  & + .wk-card-body {
+    margin-top: var(--wk-space-4);
+  }
+}
+
+.wk-card-title {
+  font-size: var(--wk-fs-md);
+  font-weight: var(--wk-fw-semibold);
+  letter-spacing: -0.012em;
+  color: var(--wk-text);
+  margin: 0;
+}
+
+.wk-card-sub {
+  font-size: var(--wk-fs-sm);
+  color: var(--wk-text-muted);
+  margin-top: 2px;
+}
+
+.wk-card-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--wk-space-2);
+  flex-shrink: 0;
+}
+
+.wk-card-foot {
+  margin-top: var(--wk-space-4);
+  padding-top: var(--wk-space-3);
+  border-top: 1px solid var(--wk-border);
+  display: flex;
+  align-items: center;
+  gap: var(--wk-space-3);
+  font-size: var(--wk-fs-sm);
+  color: var(--wk-text-muted);
+}
+
+// 旧类名兼容（历史页面用 wk-card-solid 表示"实心底卡片"）
+.wk-card-solid {
+  background: var(--wk-panel);
+  border: 1px solid var(--wk-border);
+  border-radius: var(--wk-radius-lg);
+  padding: var(--wk-space-5);
+  box-shadow: var(--wk-shadow-1);
+}
+
+// ---- 页面头（标题 + 描述 + 操作） ----
+.wk-page-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--wk-space-4);
+
+  h2 {
+    font-size: var(--wk-fs-xl);
+    font-weight: var(--wk-fw-semibold);
+    letter-spacing: -0.02em;
+    margin-bottom: 2px;
+  }
+
+  .muted {
+    font-size: var(--wk-fs-base);
+    color: var(--wk-text-muted);
+  }
+}
+
+// ---- KPI 指标卡 ----
+.wk-metric {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--wk-space-1);
+  background: var(--wk-panel);
+  border: 1px solid var(--wk-border);
+  border-radius: var(--wk-radius-lg);
+  padding: var(--wk-space-4);
+  overflow: hidden;
+  transition: border-color var(--wk-dur-fast) var(--wk-ease);
+
+  &:hover {
+    border-color: var(--wk-border-strong);
+  }
+}
+
+.wk-metric-label {
+  font-size: var(--wk-fs-xs);
+  font-weight: var(--wk-fw-semibold);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--wk-text-muted);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.wk-metric-value {
+  font-family: var(--wk-mono-family);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--wk-fs-2xl);
+  font-weight: var(--wk-fw-semibold);
+  line-height: 1.15;
+  letter-spacing: -0.02em;
+  color: var(--wk-text);
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+}
+
+.wk-metric-unit {
+  font-size: var(--wk-fs-sm);
+  font-weight: var(--wk-fw-medium);
+  color: var(--wk-text-muted);
+}
+
+.wk-metric-hint {
+  font-size: var(--wk-fs-sm);
+  color: var(--wk-text-muted);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+// 指标卡色调：仅状态语义时使用（Stripe 规则：颜色只表达状态）
+.wk-metric--success .wk-metric-value { color: var(--wk-success-text); }
+.wk-metric--warning .wk-metric-value { color: var(--wk-warning-text); }
+.wk-metric--danger .wk-metric-value { color: var(--wk-danger-text); }
+.wk-metric--primary .wk-metric-value { color: var(--wk-primary); }
+
+// sparkline 定位在卡片右下，不与数字抢层次
+.wk-metric-spark {
+  position: absolute;
+  right: var(--wk-space-3);
+  bottom: var(--wk-space-3);
+  opacity: 0.9;
+  pointer-events: none;
+}
+
+// 旧结构兼容：.wk-metrics 网格 + .wk-metric 内的 .label/.value/.sub
+.wk-metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: var(--wk-gap-card);
+}
+
+.wk-metric {
+  .label {
+    font-size: var(--wk-fs-xs);
+    font-weight: var(--wk-fw-semibold);
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--wk-text-muted);
+  }
+
+  .value {
+    font-family: var(--wk-mono-family);
+    font-variant-numeric: tabular-nums;
+    font-size: var(--wk-fs-2xl);
+    font-weight: var(--wk-fw-semibold);
+    letter-spacing: -0.02em;
+    color: var(--wk-text);
+    line-height: 1.15;
+  }
+
+  .sub {
+    font-size: var(--wk-fs-sm);
+    color: var(--wk-text-muted);
+  }
+}
+
+// ---- 指标条（CPU / 内存 / 磁盘） ----
+.wk-meter {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: var(--wk-fs-base);
+}
+
+.wk-meter-label {
+  width: 34px;
+  flex-shrink: 0;
+  font-size: var(--wk-fs-sm);
+  font-weight: var(--wk-fw-medium);
+  color: var(--wk-text-muted);
+}
+
+.wk-meter-track {
+  flex: 1;
+  min-width: 0;
+  height: 4px;
+  border-radius: var(--wk-radius-pill);
+  background: color-mix(in srgb, var(--wk-text) 9%, transparent);
+  overflow: hidden;
+}
+
+.wk-meter-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: var(--wk-primary);
+  // 数值每秒刷新，宽度做短过渡避免"跳变"但又不显得迟钝
+  transition: width 320ms var(--wk-ease), background var(--wk-dur-base) var(--wk-ease);
+
+  &.is-normal { background: var(--wk-success); }
+  &.is-warning { background: var(--wk-warning); }
+  &.is-danger { background: var(--wk-danger); }
+}
+
+.wk-meter-value {
+  font-family: var(--wk-mono-family);
+  font-variant-numeric: tabular-nums;
+  width: 52px;
+  flex-shrink: 0;
+  text-align: right;
+  font-size: var(--wk-fs-sm);
+  font-weight: var(--wk-fw-semibold);
+  color: var(--wk-text);
+}
+
+.wk-meter--thick-6 .wk-meter-track { height: 6px; }
+.wk-meter--thick-8 .wk-meter-track { height: 8px; }
+
+// 数值文本随负载分级变色（正常态保持主文本色，不额外抢注意力）
+.wk-meter-value.is-warning { color: var(--wk-warning-text); }
+.wk-meter-value.is-danger { color: var(--wk-danger-text); }
+
+// ---- 状态灯 ----
+.wk-status-dot,
+.wk-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--wk-text-muted);
+
+  &.online {
+    background: var(--wk-success);
+  }
+
+  &.offline {
+    background: var(--wk-text-muted);
+  }
+
+  &.stale {
+    background: var(--wk-warning);
+  }
+
+  &.alert {
+    background: var(--wk-danger);
+  }
+
+  &.muted {
+    background: var(--wk-text-muted);
+  }
+
+  // 呼吸光晕：只有在线/告警才带光晕，避免满屏灯都在闪
+  &.is-pulse {
+    box-shadow: 0 0 0 0 color-mix(in srgb, currentColor 0%, transparent);
+    position: relative;
+
+    &::after {
+      content: "";
+      position: absolute;
+      inset: -3px;
+      border-radius: 50%;
+      border: 1px solid currentColor;
+      opacity: 0.5;
+      animation: wk-dot-pulse 2.4s var(--wk-ease) infinite;
+    }
+  }
+
+  &.online.is-pulse { color: var(--wk-success); }
+  &.alert.is-pulse { color: var(--wk-danger); }
+}
+
+@keyframes wk-dot-pulse {
+  0% { transform: scale(0.7); opacity: 0.7; }
+  70% { transform: scale(1.5); opacity: 0; }
+  100% { transform: scale(1.5); opacity: 0; }
+}
+
+// ---- 徽章 / 药丸 ----
+.wk-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px;
+  border-radius: var(--wk-radius-pill);
+  font-size: var(--wk-fs-xs);
+  font-weight: var(--wk-fw-semibold);
+  line-height: 18px;
+  border: 1px solid transparent;
+  white-space: nowrap;
+
+  &.ok {
+    background: var(--wk-success-soft);
+    color: var(--wk-success-text);
+    border-color: color-mix(in srgb, var(--wk-success) 26%, transparent);
+  }
+  &.fail {
+    background: var(--wk-danger-soft);
+    color: var(--wk-danger-text);
+    border-color: color-mix(in srgb, var(--wk-danger) 26%, transparent);
+  }
+  &.warn {
+    background: var(--wk-warning-soft);
+    color: var(--wk-warning-text);
+    border-color: color-mix(in srgb, var(--wk-warning) 26%, transparent);
+  }
+  &.info {
+    background: var(--wk-info-soft);
+    color: var(--wk-info);
+    border-color: color-mix(in srgb, var(--wk-info) 26%, transparent);
+  }
+  &.neutral {
+    background: var(--wk-bg-soft);
+    color: var(--wk-text-secondary);
+    border-color: var(--wk-border);
+  }
+  // 旧页面用到的别名
+  &.primary {
+    background: var(--wk-primary-soft);
+    color: var(--wk-primary);
+    border-color: color-mix(in srgb, var(--wk-primary) 26%, transparent);
+  }
+}
+
+// 状态药丸（公开详情页 Hero 用）
+.wk-status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 11px;
+  border-radius: var(--wk-radius-pill);
+  border: 1px solid var(--wk-border);
+  background: var(--wk-bg-soft);
+  font-size: var(--wk-fs-base);
+  font-weight: var(--wk-fw-semibold);
+  color: var(--wk-text-secondary);
+
+  &.online {
+    color: var(--wk-success-text);
+    border-color: color-mix(in srgb, var(--wk-success) 32%, transparent);
+    background: var(--wk-success-soft);
+  }
+  &.offline {
+    color: var(--wk-danger-text);
+    border-color: color-mix(in srgb, var(--wk-danger) 32%, transparent);
+    background: var(--wk-danger-soft);
+  }
+  &.stale,
+  &.unknown {
+    color: var(--wk-warning-text);
+    border-color: color-mix(in srgb, var(--wk-warning) 32%, transparent);
+    background: var(--wk-warning-soft);
+  }
+}
+
+// 行内代码标签（探针版本、架构等）
+.wk-tag {
+  display: inline-flex;
+  align-items: center;
+  font-family: var(--wk-mono-family);
+  font-size: var(--wk-fs-xs);
+  color: var(--wk-text-secondary);
+  background: var(--wk-bg-soft);
+  border: 1px solid var(--wk-border);
+  border-radius: var(--wk-radius-xs);
+  padding: 1px 6px;
+  white-space: nowrap;
+}
+
+// ---- 筛选 chips 与视图切换（segmented） ----
+.wk-chips {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.wk-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 10px;
+  border-radius: var(--wk-radius-pill);
+  border: 1px solid var(--wk-border);
+  background: transparent;
+  color: var(--wk-text-secondary);
+  font-size: var(--wk-fs-sm);
+  font-weight: var(--wk-fw-medium);
+  transition: all var(--wk-dur-fast) var(--wk-ease);
+
+  &:hover {
+    color: var(--wk-text);
+    border-color: var(--wk-border-strong);
+    background: var(--wk-bg-soft);
+  }
+
+  &.active {
+    color: var(--wk-on-primary);
+    background: var(--wk-primary);
+    border-color: var(--wk-primary);
+    font-weight: var(--wk-fw-semibold);
+  }
+
+  .wk-chip-count {
+    font-family: var(--wk-mono-family);
+    font-variant-numeric: tabular-nums;
+    opacity: 0.75;
+  }
+}
+
+.wk-segment {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px;
+  gap: 2px;
+  background: var(--wk-bg-soft);
+  border: 1px solid var(--wk-border);
+  border-radius: var(--wk-radius-sm);
+}
+
+.wk-segment-item {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 26px;
+  min-width: 30px;
+  padding: 0 10px;
+  border: none;
+  background: transparent;
+  border-radius: 6px;
+  color: var(--wk-text-muted);
+  font-size: var(--wk-fs-sm);
+  font-weight: var(--wk-fw-medium);
+  transition: all var(--wk-dur-fast) var(--wk-ease);
+
+  &:hover {
+    color: var(--wk-text);
+  }
+
+  &.active {
+    background: var(--wk-panel);
+    color: var(--wk-text);
+    font-weight: var(--wk-fw-semibold);
+    box-shadow: var(--wk-shadow-1);
+  }
+
+  svg {
+    width: 14px;
+    height: 14px;
+  }
+}
+
+// ---- 工具栏（搜索 + 筛选 + 排序） ----
+.wk-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--wk-space-2);
+  flex-wrap: wrap;
+}
+
+// ---- 网格 ----
+// 注：.wk-grid-N 必须自带 display 与 gap，否则单独使用 class="wk-grid-4"
+// 的容器会退化成 block，导致 KPI 卡变成一整列堆叠（无头浏览器实测发现）
+.wk-grid,
+.wk-grid-2,
+.wk-grid-3,
+.wk-grid-4,
+.wk-grid-5,
+.wk-grid-6 {
+  display: grid;
+  gap: var(--wk-gap-card);
+  min-width: 0;
+}
+
+.wk-grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.wk-grid-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.wk-grid-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.wk-grid-5 { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+.wk-grid-6 { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+
+// 自适应节点卡网格（总览/公开首页共用）
+.wk-node-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(272px, 1fr));
+  gap: var(--wk-gap-card);
+}
+
+// ---- 节点卡（总览、公开首页共用同一形态） ----
+.wk-node-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--wk-space-3);
+  padding: var(--wk-space-4);
+  background: var(--wk-panel);
+  border: 1px solid var(--wk-border);
+  border-radius: var(--wk-radius-lg);
+  cursor: pointer;
+  transition: border-color var(--wk-dur-fast) var(--wk-ease),
+    box-shadow var(--wk-dur-base) var(--wk-ease),
+    background var(--wk-dur-fast) var(--wk-ease);
+
+  // SaaS 控制台不做 hover 上浮，只给边框 + 极轻阴影反馈
+  &:hover {
+    border-color: color-mix(in srgb, var(--wk-primary) 45%, var(--wk-border));
+    box-shadow: var(--wk-shadow-2);
+  }
+
+  &.is-offline {
+    background: var(--wk-bg-recess);
+
+    .wk-node-card-name {
+      color: var(--wk-text-secondary);
+    }
+  }
+}
+
+.wk-node-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--wk-space-2);
+}
+
+.wk-node-card-name {
+  font-size: var(--wk-fs-md);
+  font-weight: var(--wk-fw-semibold);
+  letter-spacing: -0.012em;
+  color: var(--wk-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+
+.wk-node-card-meters {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.wk-node-card-foot {
+  display: flex;
+  align-items: center;
+  gap: var(--wk-space-3);
+  padding-top: var(--wk-space-3);
+  border-top: 1px solid var(--wk-border);
+  font-size: var(--wk-fs-sm);
+  color: var(--wk-text-muted);
+
+  .up {
+    color: var(--wk-success-text);
+  }
+  .down {
+    color: var(--wk-primary);
+  }
+  .wk-node-card-time {
+    margin-left: auto;
+    font-family: var(--wk-mono-family);
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+// ---- 定义列表（详情页规格区） ----
+.wk-kv {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: var(--wk-space-6);
+}
+
+.wk-kv-item {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--wk-space-4);
+  padding: 9px 0;
+  border-bottom: 1px solid var(--wk-border);
+
+  &:last-child {
+    border-bottom: none;
+  }
+
+  dt {
+    font-size: var(--wk-fs-sm);
+    color: var(--wk-text-muted);
+    white-space: nowrap;
+  }
+
+  dd {
+    font-size: var(--wk-fs-base);
+    color: var(--wk-text);
+    text-align: right;
+    word-break: break-word;
+    font-weight: var(--wk-fw-medium);
+  }
+
+  dd.wk-num {
+    font-weight: var(--wk-fw-semibold);
+  }
+}
+
+// ---- 24h 丢包色条（Statuspage 风格） ----
+.wk-strip-row {
+  display: flex;
+  align-items: center;
+  gap: var(--wk-space-3);
+
+  & + & {
+    margin-top: 7px;
+  }
+}
+
+.wk-strip-label {
+  width: 108px;
+  flex-shrink: 0;
+  font-size: var(--wk-fs-sm);
+  color: var(--wk-text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wk-strip {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  gap: 1px;
+  height: 16px;
+  border-radius: var(--wk-radius-xs);
+  overflow: hidden;
+}
+
+.wk-strip-cell {
+  flex: 1;
+  min-width: 1px;
+  background: var(--wk-bg-soft);
+
+  &.is-ok { background: color-mix(in srgb, var(--wk-success) 62%, transparent); }
+  &.is-warn { background: var(--wk-warning); }
+  &.is-bad { background: var(--wk-danger); }
+  &.is-none { background: color-mix(in srgb, var(--wk-text-muted) 22%, transparent); }
+}
+
+.wk-strip-value {
+  width: 86px;
+  flex-shrink: 0;
+  text-align: right;
+  font-family: var(--wk-mono-family);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--wk-fs-sm);
+  color: var(--wk-text-secondary);
+}
+
+// ---- 骨架屏 ----
+.wk-skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--wk-skeleton-base) 0%,
+    var(--wk-skeleton-base) 30%,
+    var(--wk-skeleton-highlight) 50%,
+    var(--wk-skeleton-base) 70%,
+    var(--wk-skeleton-base) 100%
+  );
+  background-size: 300% 100%;
+  animation: wk-shimmer 1.7s ease-in-out infinite;
+  border-radius: var(--wk-radius-xs);
+  display: block;
+}
+
+@keyframes wk-shimmer {
+  0% { background-position: 100% 50%; }
+  100% { background-position: -100% 50%; }
+}
+
+// ---- 空状态 ----
+.wk-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--wk-space-2);
+  padding: var(--wk-space-10) var(--wk-space-4);
+  text-align: center;
+
+  .wk-empty-icon {
+    color: var(--wk-text-muted);
+    opacity: 0.55;
+    margin-bottom: 2px;
+
+    svg {
+      width: 40px;
+      height: 40px;
+    }
+
+    &.is-ok {
+      color: var(--wk-success);
+      opacity: 0.75;
+    }
+  }
+
+  .wk-empty-title {
+    font-size: var(--wk-fs-md);
+    font-weight: var(--wk-fw-semibold);
+    color: var(--wk-text);
+  }
+
+  .wk-empty-desc {
+    font-size: var(--wk-fs-base);
+    color: var(--wk-text-muted);
+    max-width: 380px;
+  }
+}
+
+// ---- 图表容器 ----
+.wk-chart-wrap {
+  position: relative;
+  width: 100%;
+}
+
+// ---- 命令框（安装脚本） ----
+.wk-codebox {
+  position: relative;
+  background: var(--wk-bg-recess);
+  border: 1px solid var(--wk-border);
+  border-radius: var(--wk-radius-md);
+  padding: var(--wk-space-4);
+  overflow-x: auto;
+
+  code {
+    font-family: var(--wk-mono-family);
+    font-size: var(--wk-fs-base);
+    line-height: 1.7;
+    color: var(--wk-text);
+    white-space: pre-wrap;
+    word-break: break-all;
+  }
+
+  .wk-codebox-copy {
+    position: absolute;
+    top: var(--wk-space-2);
+    right: var(--wk-space-2);
+  }
+}
+
+// ---- 登录页 ----
+.wk-login-wrap {
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: 1.05fr 1fr;
+  background: var(--wk-bg);
+  color: var(--wk-text);
+}
+
+// 左侧品牌区：极淡主色氛围渐变，无 emoji、无插画
+.wk-login-brand-side {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: var(--wk-space-6);
+  padding: var(--wk-space-10) var(--wk-space-8);
+  border-right: 1px solid var(--wk-border);
+  background: radial-gradient(
+      96% 62% at 12% 0%,
+      color-mix(in srgb, var(--wk-primary) 20%, transparent),
+      transparent 58%
+    ),
+    linear-gradient(180deg, var(--wk-bg-soft), var(--wk-bg));
+  overflow: hidden;
+
+  &::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    // 细网格底纹，呼应"监控/时序"语义，透明度极低不干扰阅读
+    background-image: linear-gradient(
+        var(--wk-border) 1px,
+        transparent 1px
+      ),
+      linear-gradient(90deg, var(--wk-border) 1px, transparent 1px);
+    background-size: 48px 48px;
+    opacity: 0.35;
+    mask-image: radial-gradient(70% 60% at 30% 20%, #000, transparent 80%);
+    pointer-events: none;
+  }
+
+  > * {
+    position: relative;
+    z-index: 1;
+  }
+}
+
+.wk-login-brand-title {
+  font-size: var(--wk-fs-3xl);
+  font-weight: var(--wk-fw-bold);
+  letter-spacing: -0.03em;
+  line-height: 1.15;
+}
+
+.wk-login-brand-desc {
+  font-size: var(--wk-fs-md);
+  color: var(--wk-text-secondary);
+  max-width: 420px;
+  line-height: 1.65;
+}
+
+.wk-login-points {
+  display: flex;
+  flex-direction: column;
+  gap: var(--wk-space-3);
+
+  li {
+    display: flex;
+    align-items: center;
+    gap: var(--wk-space-3);
+    list-style: none;
+    font-size: var(--wk-fs-base);
+    color: var(--wk-text-secondary);
+
+    svg {
+      width: 16px;
+      height: 16px;
+      color: var(--wk-primary);
+      flex-shrink: 0;
+    }
+  }
+}
+
+.wk-login-form-side {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--wk-space-8) var(--wk-space-4);
+  position: relative;
+}
+
+.wk-login-card {
+  width: 100%;
+  max-width: 372px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--wk-space-5);
+}
+
+.wk-login-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: var(--wk-fs-lg);
+  font-weight: var(--wk-fw-semibold);
+  letter-spacing: -0.015em;
+  color: var(--wk-text);
+
+  .wk-brand-mark {
+    width: 32px;
+    height: 32px;
+    font-size: 15px;
+  }
+}
+
+.wk-login-title {
+  h2 {
+    font-size: var(--wk-fs-xl);
+    font-weight: var(--wk-fw-semibold);
+    letter-spacing: -0.02em;
+  }
+
+  p {
+    font-size: var(--wk-fs-base);
+    color: var(--wk-text-muted);
+    margin-top: 4px;
+  }
+}
+
+.wk-login-btn {
+  width: 100%;
+}
+
+.wk-login-error {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--wk-danger-text);
+  font-size: var(--wk-fs-base);
+  background: var(--wk-danger-soft);
+  border: 1px solid color-mix(in srgb, var(--wk-danger) 28%, transparent);
+  border-radius: var(--wk-radius-sm);
+  padding: 9px var(--wk-space-3);
+}
+
+.wk-theme-toggle {
+  position: absolute;
+  top: var(--wk-space-5);
+  right: var(--wk-space-5);
+  z-index: 10;
+}
+
+@media (max-width: 900px) {
+  .wk-login-wrap {
+    grid-template-columns: 1fr;
+  }
+
+  .wk-login-brand-side {
+    display: none;
+  }
+}
+
+// ---- 统计条（一行多列，保留旧类名） ----
+.wk-stat-row {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--wk-gap-card);
+}
+
+// ---- 响应式：网格降级 ----
+@media (max-width: 1280px) {
+  .wk-grid-6 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .wk-grid-5 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+
+@media (max-width: 1100px) {
+  .wk-grid-4,
+  .wk-grid-5 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .wk-grid-6 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .wk-stat-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .wk-metrics { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+}
+
+@media (max-width: 860px) {
+  .wk-grid-2,
+  .wk-grid-3 { grid-template-columns: 1fr; }
+  // KPI 卡在窄屏保持两列，单列会让 6~8 张卡占满整屏无法对比
+  .wk-grid-4,
+  .wk-grid-5,
+  .wk-grid-6 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .wk-stat-row { grid-template-columns: 1fr; }
+  .wk-kv { grid-template-columns: 1fr; }
+  .wk-page-header { align-items: flex-start; flex-direction: column; }
+}

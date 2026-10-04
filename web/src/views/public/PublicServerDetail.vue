@@ -1,100 +1,228 @@
 <template>
   <!-- ============================================================
-       公开服务器详情页：展示单台服务器脱敏后的实时状态和趋势
-       设计参考 QuantKing：蓝色主色调 + 圆角卡片 + 双主题
+       公开服务器详情页：未登录可见的单机状态与趋势
+       与后台详情页共用图表封装与卡片类，区别只在数据源走 /api/public/*
        ============================================================ -->
-  <div class="detail-page">
-    <!-- 顶部导航：返回按钮 + 管理后台入口 -->
-    <header class="detail-nav">
-      <el-button text @click="router.push('/')">← 全部服务器</el-button>
+  <div class="wk-public-shell">
+    <!-- ---------------- 顶部导航 ---------------- -->
+    <header class="wk-public-nav">
+      <button type="button" class="wk-back-btn" aria-label="返回全部服务器" @click="router.push('/')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M15 18l-6-6 6-6" />
+        </svg>
+        全部服务器
+      </button>
       <el-button type="primary" plain @click="router.push(hasToken ? '/dashboard' : '/login')">
         {{ hasToken ? '管理后台' : '管理登录' }}
       </el-button>
     </header>
 
-    <main class="detail-main">
-      <!-- 加载骨架屏 -->
-      <el-skeleton v-if="loading" :rows="8" animated />
-      <!-- 错误提示 -->
-      <el-result v-else-if="error" icon="warning" title="服务器不存在" :sub-title="error">
-        <template #extra>
+    <main class="wk-public-inner wk-public-main">
+      <!-- ---------------- 加载与错误态 ---------------- -->
+      <div v-if="loading" class="wk-stack">
+        <WkSkeleton height="96px" rounded="var(--wk-radius-lg)" />
+        <WkSkeleton height="120px" rounded="var(--wk-radius-lg)" />
+        <WkSkeleton height="260px" rounded="var(--wk-radius-lg)" />
+      </div>
+
+      <WkEmptyState
+        v-else-if="error"
+        icon="search"
+        :title="error"
+        description="该服务器可能已被删除，或探针尚未完成注册"
+      >
+        <template #action>
           <el-button type="primary" @click="router.push('/')">返回首页</el-button>
         </template>
-      </el-result>
+      </WkEmptyState>
 
       <template v-else-if="server">
-        <!-- 服务器 Hero 区域：状态药丸 + 名称 + 系统信息 + 最后活跃时间 -->
-        <section class="server-hero wk-card">
-          <div>
-            <div :class="['status-pill', server.status]">
-              <span :class="['wk-status-dot', server.status === 'online' ? 'online' : 'offline']" />
+        <!-- ---------------- Hero ---------------- -->
+        <section class="wk-detail-hero">
+          <div style="min-width: 0">
+            <span :class="['wk-status-pill', server.status]">
+              <WkStatusDot
+                :status="dotStatus(server.status)"
+                :size="8"
+                :pulse="server.status === 'online'"
+              />
               {{ statusText(server.status) }}
-            </div>
-            <h1>{{ server.name }}</h1>
-            <p>{{ server.os_version || '系统信息待上报' }}</p>
+            </span>
+            <h1 class="wk-hero-name">{{ server.name }}</h1>
+            <div class="wk-eyebrow">{{ heroMeta }}</div>
           </div>
-          <div class="hero-meta">
-            <span>最后活跃</span>
-            <strong>{{ formatDateTime(server.updated_at || server.last_seen_at) }}</strong>
-          </div>
-        </section>
-
-        <!-- 服务器规格网格 -->
-        <section class="spec-grid wk-card-solid">
-          <div v-for="item in serverSpecs" :key="item.label" class="spec-item">
-            <span>{{ item.label }}</span>
-            <strong>{{ item.value }}</strong>
-          </div>
-        </section>
-
-        <!-- 当前指标卡片网格 -->
-        <section class="metric-grid">
-          <div v-for="item in currentMetrics" :key="item.label" class="metric-card wk-card">
-            <span>{{ item.label }}</span>
-            <strong class="wk-metric-value">{{ item.value }}</strong>
-            <small>{{ item.hint }}</small>
-          </div>
-        </section>
-
-        <!-- 资源趋势图：24h CPU / 内存 / 磁盘 -->
-        <section class="chart-card wk-card-solid">
-          <div class="chart-head">
-            <div>
-              <h2>资源趋势</h2>
-              <p>最近 24 小时 CPU / 内存 / 磁盘使用率</p>
-            </div>
-            <el-button text @click="loadMetrics">刷新</el-button>
-          </div>
-          <el-empty v-if="metricPoints.length === 0" description="趋势数据加载中或暂无数据" />
-          <div v-else ref="chartRef" class="chart" />
-        </section>
-
-        <!-- 网络延迟图：24h Ping 延迟 -->
-        <section class="chart-card wk-card-solid">
-          <div class="chart-head">
-            <div>
-              <h2>网络延迟</h2>
-              <p>最近 24 小时所有运营商 Ping 延迟（不同颜色区分线路）</p>
+          <div class="wk-hero-side">
+            <div class="wk-sub">最近活跃</div>
+            <div class="wk-num wk-hero-time">
+              {{ formatDateTime(server.updated_at || server.last_seen_at) }}
             </div>
           </div>
-          <el-empty v-if="pingISPs.length === 0" description="暂无公开 Ping 线路" />
-          <el-empty v-else-if="Object.keys(pingSeries).length === 0" description="暂无公开 Ping 数据" />
-          <div v-else ref="pingChartRef" class="chart" />
         </section>
+
+        <!-- ---------------- 实时指标 ---------------- -->
+        <section class="wk-grid-6">
+          <WkMetric
+            label="CPU"
+            :value="formatOneDecimal(server.cpu)"
+            unit="%"
+            :tone="toneOf(server.cpu)"
+            :hint="server.cpu_model || '型号待上报'"
+          />
+          <WkMetric
+            label="内存"
+            :value="formatOneDecimal(server.mem)"
+            unit="%"
+            :tone="toneOf(server.mem)"
+            :hint="`共 ${formatBytes(server.mem_total_bytes)}`"
+          />
+          <WkMetric
+            label="磁盘"
+            :value="formatOneDecimal(server.disk)"
+            unit="%"
+            :tone="toneOf(server.disk)"
+            :hint="`共 ${formatBytes(server.disk_total_bytes)}`"
+          />
+          <WkMetric label="上行" :value="formatRate(server.net_up)" tone="primary" :hint="`累计 ${formatBytes(server.net_up_total_bytes)}`" />
+          <WkMetric label="下行" :value="formatRate(server.net_down)" tone="primary" :hint="`累计 ${formatBytes(server.net_down_total_bytes)}`" />
+          <WkMetric
+            label="运行时长"
+            :value="formatDuration(server.uptime_seconds)"
+            :hint="server.boot_time ? `${formatUnixTime(server.boot_time)} 启动` : '启动时间待上报'"
+          />
+        </section>
+
+        <!-- ---------------- 资源趋势 ---------------- -->
+        <WkCard title="资源趋势" :subtitle="`${rangeLabel}内 CPU / 内存 / 磁盘使用率与网络速率`">
+          <template #actions>
+            <div class="wk-chips">
+              <button
+                v-for="option in rangeOptions"
+                :key="option.value"
+                type="button"
+                :class="['wk-chip', { active: range === option.value }]"
+                @click="setRange(option.value)"
+              >
+                {{ option.label }}
+              </button>
+            </div>
+          </template>
+
+          <WkEmptyState
+            v-if="!metricsLoading && metricPoints.length === 0"
+            icon="box"
+            title="暂无趋势数据"
+            description="该时间窗内没有采集记录，稍后自动刷新"
+          />
+          <WkChart
+            v-else
+            :builder="buildResourceOption"
+            :deps="metricPoints"
+            height="300px"
+            :loading="metricsLoading"
+          />
+        </WkCard>
+
+        <!-- ---------------- 网络质量 ---------------- -->
+        <WkCard
+          title="网络质量"
+          :subtitle="`最近 24 小时运营商线路延时；下方色条按分钟粒度显示丢包（${stripBucketLabel}）`"
+        >
+          <WkEmptyState
+            v-if="pingISPs.length === 0"
+            icon="search"
+            title="暂无公开 Ping 线路"
+            description="管理端配置并启用运营商 Ping 目标后，这里会显示延时与丢包"
+          />
+          <WkEmptyState
+            v-else-if="Object.keys(pingSeries).length === 0"
+            icon="search"
+            title="暂无公开 Ping 数据"
+            description="线路已配置，但最近 24 小时还没有探测结果"
+          />
+
+          <template v-else>
+            <!-- 24h 丢包色条：Statuspage 风格，一格一分钟（按桶聚合到 120 格） -->
+            <div class="wk-strips">
+              <div v-for="row in lossStrips" :key="row.name" class="wk-strip-row">
+                <span class="wk-strip-label" :title="row.name">{{ row.name }}</span>
+                <div class="wk-strip">
+                  <span
+                    v-for="(cell, index) in row.cells"
+                    :key="index"
+                    :class="['wk-strip-cell', `is-${cell}`]"
+                    :title="`${row.name} 第 ${index + 1} 段：${cellLabel(cell)}`"
+                  />
+                </div>
+                <span class="wk-strip-value">
+                  均 {{ formatOneDecimal(row.avgLat) }}ms · 丢 {{ row.loss.toFixed(1) }}%
+                </span>
+              </div>
+            </div>
+
+            <WkChart :builder="buildPingOption" :deps="pingSeries" height="320px" />
+          </template>
+        </WkCard>
+
+        <!-- ---------------- 服务器规格（定义列表，一屏读完） ---------------- -->
+        <WkCard title="服务器规格" subtitle="公开接口仅返回脱敏字段，不含出口 IP 与探针密钥">
+          <dl class="wk-kv">
+            <div v-for="item in serverSpecs" :key="item.label" class="wk-kv-item">
+              <dt>{{ item.label }}</dt>
+              <dd :class="item.mono ? 'wk-num' : ''">{{ item.value }}</dd>
+            </div>
+          </dl>
+        </WkCard>
       </template>
     </main>
   </div>
 </template>
 
 <script setup lang="ts">
-// ==================== 依赖导入 ====================
-import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
+// ==================== 公开详情页逻辑 ====================
+// 数据源：/api/public/servers/{id}（状态与规格）、/metrics（趋势）、/ping-agg（网络质量）
+// 全部为脱敏只读接口，不携带 JWT
+import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import WkCard from '@/components/WkCard.vue'
+import WkChart from '@/components/WkChart.vue'
+import WkEmptyState from '@/components/WkEmptyState.vue'
+import WkMetric from '@/components/WkMetric.vue'
+import WkSkeleton from '@/components/WkSkeleton.vue'
+import WkStatusDot from '@/components/WkStatusDot.vue'
 import http from '@/utils/http'
-import * as echarts from 'echarts'
+import { usePolling } from '@/composables/usePolling'
+import { useTheme } from '@/composables/useTheme'
+import {
+  baseCategoryAxis,
+  baseDataZoom,
+  baseGrid,
+  baseLegend,
+  baseTooltip,
+  baseValueAxis,
+  buildLineSeries,
+  readChartTokens,
+  seriesColor,
+  tooltipRow,
+} from '@/utils/charts'
+import {
+  archText,
+  average,
+  cpuText,
+  formatBytes,
+  formatBytesShort,
+  formatClock,
+  formatDateTime,
+  formatDuration,
+  formatHourMinute,
+  formatRate,
+  formatUnixTime,
+  loadLevel,
+  loadText,
+  lossPercent,
+  statusText,
+} from '@/utils/format'
 
 // ==================== 类型定义 ====================
-// 服务器公开信息接口（与公开 API 返回字段对齐）
 interface PublicServer {
   id: string
   name: string
@@ -104,6 +232,8 @@ interface PublicServer {
   updated_at?: string
   os_version?: string
   arch?: string
+  platform?: string
+  region?: string
   cpu?: number
   mem?: number
   disk?: number
@@ -120,14 +250,8 @@ interface PublicServer {
   load15?: number
   net_up_total_bytes?: number
   net_down_total_bytes?: number
-  region?: string
-  platform?: string
 }
 
-// Ping ISP 接口
-interface PingISP { name: string }
-
-// 资源指标点接口
 interface MetricPoint {
   timestamp: string
   cpu: number
@@ -137,7 +261,6 @@ interface MetricPoint {
   net_down: number
 }
 
-// Ping 数据点接口
 interface PingPoint {
   timestamp: string
   count: number
@@ -147,70 +270,74 @@ interface PingPoint {
   loss_rate: number
 }
 
-// ==================== 响应式状态 ====================
+// ==================== 状态 ====================
 const route = useRoute()
 const router = useRouter()
-const server = ref<PublicServer | null>(null)       // 服务器详情数据
-const metricPoints = ref<MetricPoint[]>([])         // 资源趋势数据点
-const pingISPs = ref<PingISP[]>([])                 // Ping ISP 列表
-const pingSeries = ref<Record<string, PingPoint[]>>({})  // Ping 延迟数据
-const loading = ref(false)                          // 加载状态
-const error = ref('')                               // 错误信息
-const chartRef = ref<HTMLDivElement>()              // 资源趋势图 DOM 引用
-const pingChartRef = ref<HTMLDivElement>()          // Ping 延迟图 DOM 引用
-let chart: echarts.ECharts | null = null            // ECharts 资源图实例
-let pingChart: echarts.ECharts | null = null        // ECharts Ping 图实例
-let refreshTimer: ReturnType<typeof setInterval> | null = null
-let metricsTimer: ReturnType<typeof setInterval> | null = null
-let pingTimer: ReturnType<typeof setInterval> | null = null
+const { load: loadTheme } = useTheme()
 
-// 是否已登录（决定按钮显示"管理后台"还是"管理登录"）
+const server = ref<PublicServer | null>(null)
+const metricPoints = ref<MetricPoint[]>([])
+const pingISPs = ref<Array<{ name: string }>>([])
+const pingSeries = ref<Record<string, PingPoint[]>>({})
+const loading = ref(true)
+const metricsLoading = ref(false)
+const error = ref('')
+
 const hasToken = computed(() => Boolean(localStorage.getItem('access_token')))
-// 当前服务器 ID（从路由参数获取）
 const serverID = computed(() => route.params.id as string)
 
-// ==================== 计算属性 ====================
+// ==================== Hero 与派生展示 ====================
+const heroMeta = computed(() => {
+  const item = server.value
+  if (!item) return ''
+  const parts: string[] = []
+  const os = item.platform || item.os_version
+  if (os) parts.push(os)
+  if (item.region) parts.push(item.region)
+  if (item.arch) parts.push(archText(item.arch))
+  if (item.cpu_cores) parts.push(`${item.cpu_cores} 核`)
+  return parts.join(' · ')
+})
 
-// 服务器规格列表（qio.ng 风格展示）
-const serverSpecs = computed(() => [
-  { label: 'Status', value: statusText(server.value?.status || 'unknown') },
-  { label: 'Uptime', value: formatDuration(server.value?.uptime_seconds) },
-  { label: 'Arch', value: archText(server.value?.arch) },
-  { label: 'Mem', value: formatBytes(server.value?.mem_total_bytes) },
-  { label: 'Disk', value: formatBytes(server.value?.disk_total_bytes) },
-  { label: 'Region', value: server.value?.region || '-' },
-  { label: 'System', value: systemText(server.value?.platform || server.value?.os_version) },
-  { label: 'CPU', value: cpuText(server.value) },
-  { label: 'Load', value: loadText(server.value) },
-  { label: 'Upload', value: formatBytes(server.value?.net_up_total_bytes) },
-  { label: 'Download', value: formatBytes(server.value?.net_down_total_bytes) },
-  { label: 'Boot time', value: formatUnixTime(server.value?.boot_time) },
-  { label: 'Last active time', value: formatDateTime(server.value?.updated_at || server.value?.last_seen_at) },
-])
+// 规格定义列表：沿用原 13 项内容，仅改为 label/value 双列排版
+const serverSpecs = computed(() => {
+  const item = server.value
+  return [
+    { label: '状态', value: statusText(item?.status || 'unknown'), mono: false },
+    { label: '运行时长', value: formatDuration(item?.uptime_seconds), mono: true },
+    { label: '架构', value: archText(item?.arch), mono: true },
+    { label: '内存总量', value: formatBytes(item?.mem_total_bytes), mono: true },
+    { label: '磁盘总量', value: formatBytes(item?.disk_total_bytes), mono: true },
+    { label: '区域', value: item?.region || '-', mono: false },
+    { label: '系统', value: item?.platform || item?.os_version || '-', mono: false },
+    { label: 'CPU', value: cpuText(item), mono: false },
+    { label: '负载 1/5/15', value: loadText(item), mono: true },
+    { label: '累计上行', value: formatBytes(item?.net_up_total_bytes), mono: true },
+    { label: '累计下行', value: formatBytes(item?.net_down_total_bytes), mono: true },
+    { label: '启动时间', value: formatUnixTime(item?.boot_time), mono: false },
+    { label: '最近活跃', value: formatDateTime(item?.updated_at || item?.last_seen_at), mono: false },
+  ]
+})
 
-// 当前实时指标卡片
-const currentMetrics = computed(() => [
-  { label: 'CPU', value: formatPercent(server.value?.cpu), hint: '当前使用率' },
-  { label: '内存', value: formatPercent(server.value?.mem), hint: '当前使用率' },
-  { label: '磁盘', value: formatPercent(server.value?.disk), hint: '当前使用率' },
-  { label: '上行', value: `${formatBytes(server.value?.net_up)}/s`, hint: '实时速率' },
-  { label: '下行', value: `${formatBytes(server.value?.net_down)}/s`, hint: '实时速率' },
-])
-
-// ==================== 数据加载 ====================
-
-// 加载站点主题（标题），公开详情页也需要显示站点标题
-async function loadTheme() {
-  try {
-    const res = await http.get(`/api/public/theme?_=${Date.now()}`)
-    if (res.data.title) {
-      localStorage.setItem('site_title', res.data.title)
-      document.title = `服务器详情 - ${res.data.title}`
-    }
-  } catch {}
+function formatOneDecimal(value?: number | null): string {
+  return typeof value === 'number' ? value.toFixed(1) : '-'
 }
 
-// 加载服务器详情，使用公开接口不携带 JWT
+function toneOf(value?: number): 'default' | 'warning' | 'danger' {
+  const level = loadLevel(value)
+  if (level === 'danger') return 'danger'
+  if (level === 'warning') return 'warning'
+  return 'default'
+}
+
+function dotStatus(status: string): 'online' | 'offline' | 'stale' | 'muted' {
+  if (status === 'online') return 'online'
+  if (status === 'stale') return 'stale'
+  if (status === 'offline') return 'offline'
+  return 'muted'
+}
+
+// ==================== 数据加载 ====================
 async function loadServer(showLoading = false) {
   if (showLoading) loading.value = true
   error.value = ''
@@ -225,453 +352,299 @@ async function loadServer(showLoading = false) {
   }
 }
 
-// 加载 24h 资源趋势数据
+// 趋势时间窗：range 直接透传给后端 time.ParseDuration
+const rangeOptions = [
+  { label: '1 小时', value: '1h' as const },
+  { label: '6 小时', value: '6h' as const },
+  { label: '24 小时', value: '24h' as const },
+]
+const range = ref<'1h' | '6h' | '24h'>('24h')
+const rangeLabel = computed(
+  () => rangeOptions.find((item) => item.value === range.value)?.label || ''
+)
+
+function setRange(value: '1h' | '6h' | '24h') {
+  range.value = value
+  loadMetrics()
+}
+
 async function loadMetrics() {
+  metricsLoading.value = true
   try {
-    const res = await http.get(`/api/public/servers/${serverID.value}/metrics?range=24h&step=60&_=${Date.now()}`)
+    const res = await http.get(
+      `/api/public/servers/${serverID.value}/metrics?range=${range.value}&step=60&_=${Date.now()}`
+    )
     metricPoints.value = res.data.points || []
-    await nextTick()
-    renderChart()
   } catch {
     metricPoints.value = []
+  } finally {
+    metricsLoading.value = false
   }
 }
 
-// 加载 Ping 聚合数据
 async function loadPingAgg() {
   if (pingISPs.value.length === 0) {
     pingSeries.value = {}
     return
   }
   try {
-    const results = await Promise.all(pingISPs.value.map(async (isp) => {
-      const res = await http.get(`/api/public/servers/${serverID.value}/ping-agg`, {
-        params: { isp: isp.name, range: '24h', _: Date.now() },
+    const results = await Promise.all(
+      pingISPs.value.map(async (isp) => {
+        const res = await http.get(`/api/public/servers/${serverID.value}/ping-agg`, {
+          params: { isp: isp.name, range: '24h', _: Date.now() },
+        })
+        return [isp.name, (res.data.points || []) as PingPoint[]] as const
       })
-      return [isp.name, res.data.points || []] as const
-    }))
+    )
     pingSeries.value = Object.fromEntries(results.filter(([, points]) => points.length > 0))
-    await nextTick()
-    renderPingChart()
   } catch {
     pingSeries.value = {}
   }
 }
 
-// ==================== ECharts 渲染 ====================
+// ==================== 资源趋势图 ====================
+function buildResourceOption() {
+  const tokens = readChartTokens()
+  const points = metricPoints.value
+  const labeler = range.value === '1h' ? formatClock : formatHourMinute
+  const labels = points.map((item) => labeler(item.timestamp))
+  const netFormatter = (value: number) => formatBytesShort(value)
 
-// 渲染资源趋势图（CPU / 内存 / 磁盘折线图）
-// 配色使用新主题：#3b82f6(蓝) #34d399(绿) #fbbf24(橙)
-function renderChart() {
-  if (!chartRef.value || metricPoints.value.length === 0) return
-  if (!chart) chart = echarts.init(chartRef.value, 'dark')
-  const labels = metricPoints.value.map((item) => formatTime(item.timestamp))
-  chart.setOption({
+  return {
     animation: false,
+    grid: baseGrid(),
     tooltip: {
-      trigger: 'axis', confine: true, transitionDuration: 0,
-      backgroundColor: 'rgba(38, 38, 38, 0.92)',
-      borderColor: 'rgba(59, 130, 246, 0.3)',
-    },
-    legend: { textStyle: { color: 'var(--wk-text-muted)' } },
-    grid: { left: '3%', right: '4%', bottom: '8%', containLabel: true },
-    xAxis: {
-      type: 'category', data: labels,
-      axisLabel: { color: 'var(--wk-text-muted)' },
-      axisLine: { lineStyle: { color: 'var(--wk-chart-grid)' } },
-    },
-    yAxis: {
-      type: 'value', max: 100,
-      axisLabel: { color: 'var(--wk-text-muted)' },
-      splitLine: { lineStyle: { color: 'var(--wk-chart-grid)' } },
-    },
-    dataZoom: [{ type: 'inside', throttle: 80 }, { type: 'slider', height: 18, bottom: 4 }],
-    series: [
-      lineSeries('CPU', metricPoints.value.map((item) => item.cpu), '#3b82f6'),
-      lineSeries('内存', metricPoints.value.map((item) => item.mem), '#34d399'),
-      lineSeries('磁盘', metricPoints.value.map((item) => item.disk), '#fbbf24'),
-    ],
-  }, { notMerge: true, lazyUpdate: true })
-}
-
-// 渲染 Ping 延迟图
-// 配色使用新主题：#3b82f6 #34d399 #fbbf24 #f87171 #8b5cf6 #14b8a6 #ec4899
-function renderPingChart() {
-  if (!pingChartRef.value || Object.keys(pingSeries.value).length === 0) return
-  if (!pingChart) pingChart = echarts.init(pingChartRef.value, 'dark')
-  const colorList = ['#3b82f6', '#34d399', '#fbbf24', '#f87171', '#8b5cf6', '#14b8a6', '#ec4899']
-  const allTimestamps = Array.from(new Set(
-    Object.values(pingSeries.value).flatMap(points => points.map(item => item.timestamp))
-  )).sort()
-  const labels = allTimestamps.map((item) => formatTime(item))
-
-  // 构建每个 ISP 的延时和丢包率时间映射
-  const ispLossByTime = new Map<string, Map<string, number>>()
-  const series = Object.entries(pingSeries.value).map(([isp, points], index) => {
-    const byTime = new Map<string, number>()
-    const lossMap = new Map<string, number>()
-    for (const item of points) {
-      byTime.set(item.timestamp, Number(item.avg_lat || 0))
-      lossMap.set(item.timestamp, Number(item.loss_rate || 0) * 100)
-    }
-    ispLossByTime.set(isp, lossMap)
-    // 图例名称显示最新丢包率概览
-    const lastPoint = points.length > 0 ? points[points.length - 1] : null
-    const lossPercent = lastPoint ? (Number(lastPoint.loss_rate || 0) * 100).toFixed(1) : '0.0'
-    const displayName = `${isp} ${lossPercent}%loss`
-    return {
-      ...lineSeries(displayName, allTimestamps.map(ts => byTime.has(ts) ? byTime.get(ts)! : null), colorList[index % colorList.length]),
-      connectNulls: true,
-      _ispName: isp,
-    }
-  })
-
-  pingChart.setOption({
-    animation: false,
-    tooltip: {
-      trigger: 'axis',
-      confine: true,
-      transitionDuration: 0,
-      backgroundColor: 'rgba(38, 38, 38, 0.92)',
-      borderColor: 'rgba(59, 130, 246, 0.3)',
-      axisPointer: { type: 'cross', lineStyle: { color: 'rgba(59, 130, 246, 0.3)' } },
-      // 自定义 tooltip：显示同一时间点所有运营商的延时和丢包率
+      ...baseTooltip(tokens),
       formatter: (params: any) => {
         if (!Array.isArray(params) || params.length === 0) return ''
-        let html = `<div style="font-size:12px;color:#a3a3a3;margin-bottom:6px;font-weight:600">${params[0].axisValue}</div>`
-        params.forEach((p: any) => {
-          if (p.value === null || p.value === undefined) return
-          const color = p.color || '#3b82f6'
-          const ispName = p.series?._ispName || p.seriesName
-          const lossMap = ispLossByTime.get(ispName)
-          const tsKey = allTimestamps[p.dataIndex]
-          const lossPct = lossMap?.get(tsKey)?.toFixed(1) ?? '0.0'
-          const lat = typeof p.value === 'number' ? `${p.value.toFixed(2)} ms` : `${p.value} ms`
-          html += `<div style="display:flex;align-items:center;gap:8px;font-size:12px;line-height:22px">
-            <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${color};flex-shrink:0"></span>
-            <span style="color:#d4d4d4;min-width:80px">${ispName}</span>
-            <span style="color:#3b82f6;font-weight:600;min-width:70px;text-align:right">${lat}</span>
-            <span style="color:#fbbf24;font-size:11px;min-width:55px;text-align:right">${lossPct}% loss</span>
-          </div>`
+        let html = `<div style="font-size:11px;opacity:.7;margin-bottom:6px;font-weight:600">${params[0].axisValue}</div>`
+        params.forEach((param: any) => {
+          if (param.value === null || param.value === undefined) return
+          const isNet = param.seriesName.includes('行')
+          const text = isNet
+            ? `${netFormatter(param.value)}/s`
+            : `${Number(param.value).toFixed(1)}%`
+          html += tooltipRow(param.color, param.seriesName, text)
         })
         return html
       },
     },
-    legend: { type: 'scroll', textStyle: { color: 'var(--wk-text-muted)' } },
-    grid: { left: '3%', right: '4%', bottom: '8%', containLabel: true },
-    xAxis: {
-      type: 'category', data: labels,
-      axisLabel: { color: 'var(--wk-text-muted)' },
-      axisLine: { lineStyle: { color: 'var(--wk-chart-grid)' } },
-    },
-    yAxis: {
-      type: 'value', name: 'ms',
-      axisLabel: { color: 'var(--wk-text-muted)' },
-      splitLine: { lineStyle: { color: 'var(--wk-chart-grid)' } },
-    },
-    dataZoom: [{ type: 'inside', throttle: 80 }, { type: 'slider', height: 18, bottom: 4 }],
-    series,
-  }, { notMerge: true, lazyUpdate: true })
+    legend: baseLegend(tokens),
+    xAxis: baseCategoryAxis(tokens, labels),
+    yAxis: [
+      baseValueAxis(tokens, { max: 100, formatter: '{value}%' }),
+      {
+        ...baseValueAxis(tokens, { formatter: (value: number) => netFormatter(value) }),
+        splitLine: { show: false },
+      },
+    ],
+    dataZoom: baseDataZoom(tokens),
+    series: [
+      buildLineSeries('CPU', points.map((item) => item.cpu), tokens.palette[0], { area: true }),
+      // 内存粉 / 磁盘橙 / 上行青 / 下行紫：与主色拉开色相，主色自定义时也分得清
+      buildLineSeries('内存', points.map((item) => item.mem), tokens.palette[6]),
+      buildLineSeries('磁盘', points.map((item) => item.disk), tokens.palette[2]),
+      buildLineSeries('上行', points.map((item) => item.net_up), tokens.palette[4], {
+        width: 1.2,
+        yAxisIndex: 1,
+      }),
+      buildLineSeries('下行', points.map((item) => item.net_down), tokens.palette[5], {
+        width: 1.2,
+        yAxisIndex: 1,
+      }),
+    ],
+  }
 }
 
-// 折线图 series 工厂函数
-function lineSeries(name: string, data: Array<number | null>, color: string) {
-  return {
+// ==================== Ping 延时图 + 丢包色条 ====================
+// 色条格数：24h 按分钟最多 1440 个点，聚合到 120 格（每格约 12 分钟）才在窄屏也读得清
+const STRIP_CELLS = 120
+const stripBucketLabel = computed(() => `每格约 ${Math.round((24 * 60) / STRIP_CELLS)} 分钟`)
+
+interface LossStripRow {
+  name: string
+  cells: Array<'ok' | 'warn' | 'bad' | 'none'>
+  avgLat: number
+  loss: number
+}
+
+// 一格取桶内最差丢包：有丢包但不足一半算 warn，半数以上算 bad
+function buildLossStrip(points: PingPoint[]): Array<'ok' | 'warn' | 'bad' | 'none'> {
+  if (points.length === 0) return []
+  const sorted = points.slice().sort((a, b) => a.timestamp.localeCompare(b.timestamp))
+  const start = new Date(sorted[0].timestamp).getTime()
+  const end = new Date(sorted[sorted.length - 1].timestamp).getTime()
+  const span = Math.max(1, end - start)
+  const bucketMs = span / STRIP_CELLS
+  const buckets: number[][] = Array.from({ length: STRIP_CELLS }, () => [] as number[])
+
+  for (const point of sorted) {
+    const offset = new Date(point.timestamp).getTime() - start
+    const index = Math.min(STRIP_CELLS - 1, Math.floor(offset / bucketMs))
+    buckets[index].push(lossPercent(point.loss_rate))
+  }
+
+  return buckets.map((bucket) => {
+    if (bucket.length === 0) return 'none'
+    const worst = Math.max(...bucket)
+    if (worst <= 0) return 'ok'
+    if (worst < 50) return 'warn'
+    return 'bad'
+  })
+}
+
+const lossStrips = computed<LossStripRow[]>(() => {
+  return Object.entries(pingSeries.value).map(([name, points]) => ({
     name,
-    type: 'line',
-    data,
-    smooth: false,
-    sampling: 'lttb',
-    large: true,
-    symbol: 'none',
-    lineStyle: { color, width: 1.8 },
-    areaStyle: { color: `${color}22` },
+    cells: buildLossStrip(points),
+    avgLat: average(points.map((item) => Number(item.avg_lat || 0))) ?? 0,
+    loss: average(points.map((item) => lossPercent(Number(item.loss_rate || 0)))) ?? 0,
+  }))
+})
+
+function cellLabel(cell: string): string {
+  if (cell === 'ok') return '无丢包'
+  if (cell === 'warn') return '部分丢包'
+  if (cell === 'bad') return '严重丢包'
+  return '无数据'
+}
+
+function buildPingOption() {
+  const tokens = readChartTokens()
+  const entries = Object.entries(pingSeries.value)
+  const allTimes = Array.from(
+    new Set(entries.flatMap(([, points]) => points.map((item) => item.timestamp)))
+  ).sort()
+  const labels = allTimes.map((time) => formatHourMinute(time))
+
+  const lossIndex = new Map<string, Map<string, number>>()
+  const series = entries.map(([isp, points], index) => {
+    const latMap = new Map<string, number>()
+    const lossMap = new Map<string, number>()
+    for (const point of points) {
+      latMap.set(point.timestamp, Number(point.avg_lat || 0))
+      lossMap.set(point.timestamp, lossPercent(Number(point.loss_rate || 0)))
+    }
+    lossIndex.set(isp, lossMap)
+    return buildLineSeries(
+      isp,
+      allTimes.map((time) => (latMap.has(time) ? latMap.get(time)! : null)),
+      seriesColor(tokens, index)
+    )
+  })
+
+  return {
+    animation: false,
+    grid: baseGrid(),
+    tooltip: {
+      ...baseTooltip(tokens),
+      formatter: (params: any) => {
+        if (!Array.isArray(params) || params.length === 0) return ''
+        let html = `<div style="font-size:11px;opacity:.7;margin-bottom:6px;font-weight:600">${params[0].axisValue}</div>`
+        params.forEach((param: any) => {
+          if (param.value === null || param.value === undefined) return
+          const lossMap = lossIndex.get(param.seriesName)
+          const lossPct = lossMap?.get(allTimes[param.dataIndex])?.toFixed(1) ?? '0.0'
+          html += tooltipRow(
+            param.color,
+            param.seriesName,
+            `${Number(param.value).toFixed(2)} ms`,
+            `${lossPct}% loss`
+          )
+        })
+        return html
+      },
+    },
+    legend: baseLegend(tokens),
+    xAxis: baseCategoryAxis(tokens, labels),
+    yAxis: baseValueAxis(tokens, { name: 'ms' }),
+    dataZoom: baseDataZoom(tokens),
+    series,
   }
-}
-
-// ==================== 工具函数 ====================
-
-// 状态文本映射
-function statusText(status: string) {
-  return ({ online: '在线', offline: '离线', stale: '数据延迟', unknown: '未知' } as Record<string, string>)[status] || '未知'
-}
-
-// 格式化百分比
-function formatPercent(value?: number) {
-  return typeof value === 'number' ? `${value.toFixed(1)}%` : '-'
-}
-
-// 格式化字节数
-function formatBytes(value?: number) {
-  if (!value) return '0 B'
-  const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB']
-  let size = value
-  let index = 0
-  while (size >= 1024 && index < units.length - 1) {
-    size /= 1024
-    index++
-  }
-  return `${size.toFixed(2)} ${units[index]}`
-}
-
-// 格式化运行时长
-function formatDuration(seconds?: number) {
-  if (!seconds) return '-'
-  const days = Math.floor(seconds / 86400)
-  const hours = Math.floor((seconds % 86400) / 3600)
-  const minutes = Math.floor((seconds % 3600) / 60)
-  return `${days} Days ${hours} Hours ${minutes} Min`
-}
-
-// 格式化 Unix 时间戳
-function formatUnixTime(value?: number) {
-  if (!value) return '-'
-  return new Date(value * 1000).toLocaleString()
-}
-
-// CPU 信息文本
-function cpuText(value?: PublicServer | null) {
-  if (!value) return '-'
-  const model = value.cpu_model || 'CPU'
-  const cores = value.cpu_cores ? `${value.cpu_cores} Virtual Core` : ''
-  return `${model}${cores ? ` ${cores}` : ''}`
-}
-
-// 负载信息文本
-function loadText(value?: PublicServer | null) {
-  if (!value) return '-'
-  return `1m ${formatLoad(value.load1)} / 5m ${formatLoad(value.load5)} / 15m ${formatLoad(value.load15)}`
-}
-
-function formatLoad(value?: number) {
-  return typeof value === 'number' ? value.toFixed(2) : '-'
-}
-
-// 系统信息文本
-function systemText(value?: string) {
-  if (!value) return '-'
-  if (value.includes(' ')) return value.split(' ')[0]
-  return value
-}
-
-// 架构信息文本
-function archText(value?: string) {
-  if (!value) return '-'
-  if (value === 'amd64') return 'x86_64'
-  if (value === 'arm64') return 'aarch64'
-  return value
-}
-
-// 格式化日期时间
-function formatDateTime(value?: string) {
-  if (!value) return '-'
-  return new Date(value).toLocaleString()
-}
-
-// 格式化时间（HH:MM:SS）
-function formatTime(value: string) {
-  const d = new Date(value)
-  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:${String(d.getSeconds()).padStart(2, '0')}`
-}
-
-// 窗口大小变化时重绘图表
-function handleResize() {
-  chart?.resize()
-  pingChart?.resize()
 }
 
 // ==================== 生命周期 ====================
-
-onMounted(() => {
-  // 初始化加载主题和服务器数据
+// 实时指标每秒刷新；趋势与 Ping 每分钟刷新（历史曲线不需要秒级粒度）
+onMounted(async () => {
   loadTheme()
-  loadServer(true).then(() => loadPingAgg())
-  loadMetrics()
-  // 详情页当前指标每秒刷新；趋势图低频刷新
-  refreshTimer = setInterval(() => loadServer(false), 1000)
-  metricsTimer = setInterval(() => loadMetrics(), 60000)
-  pingTimer = setInterval(() => loadPingAgg(), 60000)
-  window.addEventListener('resize', handleResize)
+  await loadServer(true)
+  await Promise.all([loadMetrics(), loadPingAgg()])
 })
 
-onUnmounted(() => {
-  // 清除定时器和 ECharts 实例，避免内存泄漏
-  if (refreshTimer) clearInterval(refreshTimer)
-  if (metricsTimer) clearInterval(metricsTimer)
-  if (pingTimer) clearInterval(pingTimer)
-  chart?.dispose()
-  pingChart?.dispose()
-  window.removeEventListener('resize', handleResize)
-})
+usePolling(() => loadServer(false), 1000)
+usePolling(loadMetrics, 60_000, { immediate: false })
+usePolling(loadPingAgg, 60_000, { immediate: false })
 </script>
 
 <style scoped>
-/* 详情页容器：简洁渐变背景 */
-.detail-page {
-  min-height: 100vh;
-  background:
-    linear-gradient(180deg, color-mix(in srgb, var(--wk-primary) 8%, transparent) 0%, transparent 280px),
-    var(--wk-bg);
-  color: var(--wk-text);
-}
-
-/* 导航栏和主内容区统一宽度居中 */
-.detail-nav,
-.detail-main {
-  width: min(1100px, calc(100% - 32px));
-  margin: 0 auto;
-}
-
-/* 导航栏 */
-.detail-nav {
-  height: 76px;
+.wk-detail-hero {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
+  gap: var(--wk-space-5);
+  padding: var(--wk-space-6) 0 var(--wk-space-4);
 }
 
-/* 服务器 Hero 区域 */
-.server-hero {
-  padding: 32px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 24px;
-}
-
-.server-hero h1 {
-  margin: 16px 0 8px;
-  font-size: clamp(28px, 4vw, 44px);
-  font-weight: 750;
-}
-
-.server-hero p,
-.hero-meta span,
-.metric-card span,
-.metric-card small,
-.chart-head p {
-  color: var(--wk-text-muted);
-}
-
-.hero-meta {
-  text-align: right;
-}
-
-.hero-meta strong {
-  display: block;
-  margin-top: 8px;
-  font-size: 20px;
-  font-family: ui-monospace, 'JetBrains Mono', monospace;
-}
-
-/* 状态药丸 */
-.status-pill {
+.wk-back-btn {
   display: inline-flex;
   align-items: center;
-  border-radius: 999px;
-  padding: 7px 12px;
-  border: 1px solid var(--wk-border);
-  background: var(--wk-bg-soft);
-  font-size: 13px;
-  font-weight: 600;
-}
-
-.status-pill.online { color: var(--wk-success); }
-.status-pill.offline { color: var(--wk-danger); }
-.status-pill.stale,
-.status-pill.unknown { color: var(--wk-warning); }
-
-/* 规格网格 */
-.spec-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 16px;
-  padding: 20px;
-  margin: 18px 0;
-}
-
-.spec-item {
-  display: grid;
-  gap: 6px;
-  min-width: 0;
-}
-
-.spec-item span {
+  gap: 4px;
+  height: var(--wk-ctl-md);
+  padding: 0 10px 0 4px;
+  border: none;
+  border-radius: var(--wk-radius-sm);
+  background: transparent;
   color: var(--wk-text-muted);
-  font-size: 11px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: .03em;
+  font-size: var(--wk-fs-base);
 }
 
-.spec-item strong {
-  font-size: 14px;
-  word-break: break-word;
+.wk-back-btn:hover {
+  color: var(--wk-text);
+  background: var(--wk-bg-soft);
 }
 
-/* 当前指标卡片网格 */
-.metric-grid {
-  display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 16px;
-  margin: 18px 0;
+.wk-back-btn svg {
+  width: 16px;
+  height: 16px;
 }
 
-.metric-card {
-  padding: 18px;
-  margin-bottom: 0;
+.wk-hero-name {
+  font-size: var(--wk-fs-3xl);
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  line-height: 1.15;
+  margin: var(--wk-space-3) 0 var(--wk-space-2);
 }
 
-.metric-card strong {
-  display: block;
-  margin: 10px 0 6px;
+.wk-hero-side {
+  text-align: right;
+  flex-shrink: 0;
 }
 
-/* 图表卡片 */
-.chart-card {
-  padding: 24px;
-  margin-top: 18px;
+.wk-hero-time {
+  font-size: var(--wk-fs-base);
+  color: var(--wk-text-secondary);
+  margin-top: 2px;
 }
 
-.chart-head {
-  display: flex;
-  justify-content: space-between;
-  gap: 16px;
-  margin-bottom: 18px;
+/* 丢包色条区与图表之间留一档间距，避免视觉上粘连 */
+.wk-strips {
+  margin-bottom: var(--wk-space-4);
 }
 
-.chart-head h2 {
-  margin: 0 0 8px;
-  font-size: 16px;
-  font-weight: 650;
+/* 统计文本强制单行，窄屏下也不会出现行尾多一个分隔符的挂列 */
+.wk-strip-value {
+  width: 168px;
+  white-space: nowrap;
 }
 
-.chart {
-  height: 380px;
-}
-
-/* 响应式 */
 @media (max-width: 860px) {
-  .server-hero,
-  .chart-head {
+  .wk-detail-hero {
     flex-direction: column;
-    align-items: flex-start;
   }
-  .hero-meta {
-    text-align: left;
-  }
-  .metric-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-  .spec-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-}
 
-@media (max-width: 640px) {
-  .metric-grid,
-  .spec-grid {
-    grid-template-columns: 1fr;
+  .wk-hero-side {
+    text-align: left;
   }
 }
 </style>
