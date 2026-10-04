@@ -1,5 +1,10 @@
 name: Docker 构建并推送 GHCR
 
+# 多架构构建策略（2026-10-05 改造）：
+# 旧做法是单 job + QEMU 模拟交叉构建，arm64 层要在 x86 上模拟编译 Go+CGO，
+# 一次构建要 10~25 分钟。GitHub 已提供免费的 ubuntu-24.04-arm 原生 ARM runner，
+# 改成"每种架构各跑一个原生 job → 按 digest 推送 → merge job 合并 manifest"，
+# 两种架构并行且都是原生编译，整体耗时降到 3~5 分钟。
 on:
   push:
     branches: [main]
@@ -11,22 +16,27 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
+  # ---------- 每种架构各一个原生 runner，按 digest 推送（不能直接推 tag） ----------
   build:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-24.04
+            arch: amd64
+          - platform: linux/arm64
+            # 原生 ARM runner：不再需要 QEMU，避免模拟编译 Go/CGO 的数十分钟开销
+            runner: ubuntu-24.04-arm
+            arch: arm64
+    name: 构建 ${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
       packages: write
-
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
-
-      - name: 登录 GHCR
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: 提取元数据
         id: meta
@@ -39,26 +49,98 @@ jobs:
             type=semver,pattern={{major}}.{{minor}}
             type=sha,prefix=commit-
 
-      - name: 设置 QEMU（交叉编译用）
-        uses: docker/setup-qemu-action@v3
+      - name: 登录 GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: 设置 Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: 构建并推送镜像
+      - name: 按 digest 构建并推送本架构镜像
+        id: build
         uses: docker/build-push-action@v6
         with:
           context: .
           file: deploy/Dockerfile
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
+          platforms: ${{ matrix.platform }}
+          # 只按 digest 推送，tag 留给后面的 merge job 统一打到多架构 manifest 上；
+          # 直接 push tag 会让两个 job 互相覆盖成单架构镜像。
+          # 注：push 必须写在 outputs 里，与顶层 push: 同时用会被 build-push-action 报冲突
+          outputs: type=image,name=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=true
           labels: ${{ steps.meta.outputs.labels }}
-          # 必须显式声明多平台：不写时 buildx 只构宿主架构（amd64），
-          # 导致 arm64 生产机 docker pull 报 "no matching manifest for linux/arm64/v8"
-          platforms: linux/amd64,linux/arm64
           build-args: |
             VERSION=${{ github.sha }}
             COMMIT=${{ github.sha }}
             BUILD_TIME=${{ github.run_id }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # cache scope 按架构隔离：Go 构建产物不能跨架构复用
+          cache-from: type=gha,scope=build-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=build-${{ matrix.arch }}
+
+      - name: 导出镜像 digest
+        run: |
+          mkdir -p /tmp/digests
+          digest="${{ steps.build.outputs.digest }}"
+          touch "/tmp/digests/${digest#sha256:}"
+
+      - name: 上传 digest 产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: digests-${{ matrix.arch }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  # ---------- 合并两种架构为一个多架构 manifest，并打上 tag ----------
+  merge:
+    name: 合并多架构 manifest
+    runs-on: ubuntu-24.04
+    needs: build
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: 下载各架构 digest
+        uses: actions/download-artifact@v4
+        with:
+          path: /tmp/digests
+          merge-multiple: true
+
+      - name: 登录 GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 设置 Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: 检出代码（取 tag 元数据）
+        uses: actions/checkout@v4
+
+      - name: 提取元数据
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,prefix=commit-
+
+      - name: 创建并推送多架构 manifest
+        working-directory: /tmp/digests
+        run: |
+          # 把各架构 digest 拼成 imagetools 的输入，再用 metadata 的 tags 一次性打标签
+          docker buildx imagetools create \
+            $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
+            $(printf '${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@sha256:%s ' *)
+        env:
+          DOCKER_METADATA_OUTPUT_JSON: ${{ steps.meta.outputs.json }}
+
+      - name: 校验多架构清单
+        run: docker buildx imagetools inspect ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
