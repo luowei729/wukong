@@ -1252,7 +1252,10 @@ func (h *Handler) handleTestTelegram(w http.ResponseWriter, r *http.Request) {
 	// 直接使用当前表单值或数据库值发送测试消息，验证 Telegram 网络、token 和 chat_id 是否可用。
 	n := notify.NewTelegramNotifier(botToken, chatID)
 	if err := n.Send(&notify.Message{Title: "wukong 测试通知", Body: "这是一条来自 wukong 后台的 Telegram 测试消息。", Level: "info"}); err != nil {
-		writeError(w, http.StatusBadGateway, fmt.Sprintf("测试通知发送失败: %v", err))
+		// 用 424 而不是 502：本站点在 Cloudflare 背盾，源站返回 502/503/504 时 CF 会把响应体
+		// 替换成它自己的错误页（实测只能拿到 "error code: 502"），前端就看不到真实失败原因。
+		// 424 Failed Dependency 属于 4xx，CF 原样透传，且 axios 仍归为错误分支，前端无需改动。
+		writeError(w, http.StatusFailedDependency, fmt.Sprintf("测试通知发送失败: %v", err))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"message": "测试通知已发送"})
@@ -1376,7 +1379,9 @@ func (h *Handler) handleTestPushplus(w http.ResponseWriter, r *http.Request) {
 	if err := n.Send(msg); err != nil {
 		// 把 pushplus 业务码原样回传，用户对照文档就能分清是令牌填错(903)、
 		// 未实名(905)还是账号受限(900)，不用去翻主控日志。
-		writeError(w, http.StatusBadGateway, fmt.Sprintf("测试通知发送失败: %v", err))
+		// 状态码用 424 而非 502：Cloudflare 会拦截源站 5xx 并换成自己的错误页，
+		// 导致前端只能看到 "error code: 502" 而丢掉真实原因（本次已实测到）。
+		writeError(w, http.StatusFailedDependency, fmt.Sprintf("测试通知发送失败: %v", err))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{

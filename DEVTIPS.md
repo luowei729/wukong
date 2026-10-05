@@ -207,6 +207,12 @@ docker run --rm -v /root/wukong:/src -v wukong-gomod:/go/pkg/mod -w /src \
 
 ### Cloudflare 与 gRPC 的硬限制（重要）
 
+**源站绝对不要用 502/503/504 作为业务错误状态码**：CF 会把这三种响应的 body 替换成它自己的错误页
+（实测前端只能拿到 `error code: 502` 纯文本），后端精心拼的失败原因全部丢失。
+需要表达“上游依赖（第三方 API）调用失败”时用 **424 Failed Dependency**（或其他 4xx），
+CF 原样透传，axios 仍归为错误分支，前端不用改。受影响的 `POST /api/telegram/test` 与
+`POST /api/pushplus/test` 已统一改为 424；以后新增“代理调用外部服务”的接口都要遵守这条。
+
 - 橙云（Proxied）记录 **不能把 gRPC 代理到明文源站**：探针连 `server.lkz.pub:443` 会拿到
   `403 Forbidden` + `content-type: text/html`（gRPC 报 `PermissionDenied`），因为 Flexible 回源只会用 HTTP/1.1，
   h2/gRPC 被降级。因此 `agent_server_addr` 必须给 **直连源站的 `IP:64443`**（非 443 端口时代码走明文 gRPC），
