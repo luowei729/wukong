@@ -20,7 +20,9 @@
       </div>
     </header>
 
-    <main class="wk-public-inner wk-public-main">
+    <!-- wk-public-sections：让各板块按 --wk-gap-section 拉开，否则 main 是普通 block，
+         hero / 指标 / 趋势 / 网络质量 / 规格全部紧贴叠在一起 -->
+    <main class="wk-public-inner wk-public-main wk-public-sections">
       <!-- ---------------- 加载与错误态 ---------------- -->
       <div v-if="loading" class="wk-stack">
         <WkSkeleton height="96px" rounded="var(--wk-radius-lg)" />
@@ -531,7 +533,9 @@ usePolling(loadPingAgg, 60_000, { immediate: false })
   align-items: flex-start;
   justify-content: space-between;
   gap: var(--wk-space-5);
-  padding: var(--wk-space-6) 0 var(--wk-space-4);
+  /* 上下留白交给父容器的 gap 统一控制，这里只留一点与 sticky 顶栏之间的呼吸空间，
+     否则 gap + padding 叠加会让首屏间距明显偏大 */
+  padding: var(--wk-space-2) 0 0;
 }
 
 .wk-back-btn {
@@ -591,7 +595,7 @@ usePolling(loadPingAgg, 60_000, { immediate: false })
   /* 详情页首屏：手机上收紧留白与字号，让实时指标卡能进入首屏，
      否则只能看到节点名与时间，要滚一屏才能看到数据 */
   .wk-detail-hero {
-    padding: var(--wk-space-4) 0 var(--wk-space-3);
+    padding: 0;
     gap: var(--wk-space-3);
   }
 

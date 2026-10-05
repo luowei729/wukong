@@ -362,3 +362,18 @@
 .el-tooltip__popper {
   font-size: var(--wk-fs-sm);
 }
+
+// ---- 手机端表格密度（≤ 640）----
+// 必须放在本文件（而不是 components.scss）：`index.scss` 的 @use 顺序是
+// variables → base → layout → components → element，element 里的 `.el-table .cell`
+// 与媒体查询同特异度且靠后，写在前面会被覆盖（390px 实测 padding 仍为 12px）。
+// el-table 自身已有横向滚动，这里只收紧单元格留白与行高，避免整页被撑宽。
+@media (max-width: 640px) {
+  .el-table .cell {
+    padding: 0 8px;
+  }
+
+  .el-table td.el-table__cell {
+    padding: 7px 0;
+  }
+}

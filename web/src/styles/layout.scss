@@ -451,6 +451,15 @@
   padding-bottom: var(--wk-space-10);
 }
 
+// 公开详情页的板块节奏：main 本身是普通 block，不加 gap 时各 section / WkCard
+// 会直接紧贴在一起（用户反馈“板块叠在一起”），这里用与后台 .wk-container-inner
+// 相同的 --wk-gap-section 令牌，保证两个入口的分区间距一致
+.wk-public-sections {
+  display: flex;
+  flex-direction: column;
+  gap: var(--wk-gap-section);
+}
+
 // ---- 响应式 ----
 @media (max-width: 1080px) {
   .wk-header-metrics {

@@ -114,6 +114,17 @@ canvas **不解析** `var(--x)`。任何 `axisLabel: { color: 'var(--wk-text-mut
   `Unexpected '/'. Escaping special characters with \ may help.`）；只有 `lang="scss"` 块才能用 `//`。
   改完样式先 `npx vite build` 跑一次再提交。
 
+### 接口字段名与 CSS 覆盖顺序（两个静默失效的坑）
+
+- **同一类数据在两套接口里字段名不同**：历史趋势点在管理接口 `store.RawSystemMetric` 里是
+  `json:"ts"`，在公开接口 `webapi/public.go` 里是 `json:"timestamp"`。前端读错就整条轴变 `undefined`，
+  而且只有其中一个页面出错、另一个页面正常，极易误判成"某个节点数据坏了"。
+  写图表取时间一律用 `item.ts ?? item.timestamp`，并依赖 `formatClock`/`formatHourMinute` 的
+  `-` 兜底（非法值不再 `String(value)` 输出 "undefined"）。
+- **`index.scss` 的 @use 顺序决定覆盖结果**：variables → base → layout → components → element。
+  后引入文件里的同特异度规则会覆盖先引入文件里的**媒体查询**（媒体查询不增加特异度）。
+  所以覆盖 Element Plus 组件的手机端规则必须写在 `element.scss` 内，放 `components.scss` 会静默失效。
+
 ### 可访问性与动效
 
 - 图标按钮必须有 `aria-label`；`:focus-visible` 统一用 `--wk-ring`。

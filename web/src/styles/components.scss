@@ -1052,12 +1052,7 @@
     width: 56px;
   }
 
-  // 表格：el-table 自带横向滚动，这里只减少单元格左右留白与行高，避免整页被撑宽
-  .el-table .cell {
-    padding: 0 8px;
-  }
-
-  .el-table td.el-table__cell {
-    padding: 7px 0;
-  }
+  // 注：el-table 的手机端密度规则不在这里写——element.scss 在 `index.scss` 里排在
+  // components.scss 之后，`.el-table .cell { padding: 0 12px }` 同特异度会覆盖本文件的媒体查询，
+  // 已移到 element.scss 末尾（390px 实测发现 padding 仍为 12px 就是这个原因）
 }

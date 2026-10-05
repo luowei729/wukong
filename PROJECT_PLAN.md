@@ -346,3 +346,23 @@ IPv6 目标一键选节点与列表作用域列。
 - `vue-tsc` 零错误；`vite build` 首次失败（`//` 注释写进了 `<style scoped>` 纯 CSS 块），
   改 `/* */` 并全库扫描后通过。
 - 待部署后以 390px 视口实测：顶栏与正文对齐、卡片信息不被裁、无高度跳动。
+
+## 十九、2026-10-06 07:21（北京时间）X 轴 undefined 与板块间距修复
+
+### 改动前总结
+用户补报两个 bug：后台节点详情「资源趋势」X 轴整条显示 `undefined`；公开详情页各板块之间没有
+间隔、卡片紧贴。390px 视口实测另发现上一轮写在 `components.scss` 的手机端表格规则未生效。
+
+### 改动后总结
+- X 轴根因是字段名：管理接口 `RawSystemMetric` 序列化为 `ts`，前端读 `timestamp` → undefined；
+  公开接口用的是 `timestamp`，所以只有后台页面出错。改为 `item.ts ?? item.timestamp`。
+- `formatClock` / `formatHourMinute` 对 null/空/Invalid Date 统一返回 `-`，不再 `String(value)`
+  把 "undefined" 画上图表，避免同类问题继续伪装成数据异常。
+- 公开详情页 main 新增 `.wk-public-sections`（flex column + `--wk-gap-section`），与后台
+  `.wk-container-inner` 同令牌；`.wk-detail-hero` 去掉自身上下 padding 防止与 gap 叠加。
+- 手机端 el-table 密度规则从 `components.scss` 移到 `element.scss` 末尾：`index.scss` 的 @use
+  顺序让 element 的同特异度规则靠后覆盖媒体查询，写在前面会静默失效。
+
+### 验证结果
+`vue-tsc` 零错误、`vite build` 成功；产物 CSS 实测 640 覆盖规则位于基础 12px 规则之后（生效），
+`.wk-public-sections` 已进入产物。待部署后核对 ff1 趋势轴显示真实时间与详情页板块间距。

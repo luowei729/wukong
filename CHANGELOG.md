@@ -2,6 +2,37 @@
 
 所有变更记录使用北京时间（UTC+8）。
 
+## [2026-10-06 07:21] - 修复趋势图 X 轴 undefined 与公开详情页板块无间距
+
+### 改动前总结
+用户补报两个 bug：① 后台节点详情页「资源趋势」整条 X 轴画成 `undefined`（ff1 截图）；
+② 公开详情页各板块之间没有间隔、卡片边框紧贴叠在一起（tk3 截图）。
+另外 390px 视口实测还发现：我上一轮写在 `components.scss` 的手机端表格规则**完全没生效**
+（`.el-table .cell` 的 padding 仍是 12px）。
+
+### 改动后总结
+- **X 轴 undefined 根因是字段名不一致**：后端 `store.RawSystemMetric` 的序列化 tag 是
+  `json:"ts"`，而管理端前端读的是 `item.timestamp` → 永远 undefined；公开接口
+  （`public.go`）用的又是 `json:"timestamp"`，所以公开详情页正常、只有后台错。
+  修复：`NodeDetail.vue` 改为 `item.ts ?? item.timestamp`（两套字段都兼容，注释写明来源）。
+- **兜底防复发**：`formatClock` / `formatHourMinute` 旧代码在非法时间时 `return String(value)`，
+  正是它把字面量 `"undefined"` 画上轴的；现改为 null/undefined/空串/Invalid Date 一律返回 `-`。
+  以后任何字段名错都会显示成一片 `-`（一眼可见），不会再伪装成"数据内容"。
+- **板块间距**：公开详情页 `main` 是普通 block，各 section/WkCard 之间没有任何 gap。
+  新增 `.wk-public-sections { display:flex; column; gap: var(--wk-gap-section) }` 挂到该页 main，
+  与后台 `.wk-container-inner` 用同一令牌，两个入口分区节奏一致；同时把 `.wk-detail-hero` 原有的
+  上下 padding 收掉，避免 gap + padding 叠加。
+- **表格规则不生效的根因是 @use 顺序**：`index.scss` 里 element.scss 排在 components.scss 之后，
+  element 的 `.el-table .cell{padding:0 12px}` 与媒体查询同特异度且靠后 → 覆盖了我的 640 规则。
+  已把手机端表格规则移到 `element.scss` 末尾，并在两处都留下说明注释。
+
+### 验证
+- `vue-tsc` 零错误、`vite build` 成功；产物 CSS 实测确认：640 覆盖规则位置(375359) 在基础
+  12px 规则(370577) **之后** → 生效；`.wk-public-sections` 已进产物。
+- 本轮又踩一次 `<style scoped>` 里写 `//` 注释导致 build 失败，已改 `/* */`（该教训上一轮刚记进 DEVTIPS）。
+- 待部署后核对：后台 ff1 节点详情 X 轴显示真实时间、公开详情页板块之间有明显间隔。
+
+
 ## [2026-10-06 06:53] - 公开页顶栏对齐正文 + 手机端（≤640）布局体系
 
 ### 改动前总结

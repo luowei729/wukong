@@ -180,9 +180,12 @@ export function formatUnixTime(seconds?: number | null): string {
 }
 
 /** 图表 X 轴时间标签：HH:mm:ss（秒级 ping 数据需要到秒） */
-export function formatClock(value: string | number | Date): string {
+export function formatClock(value: string | number | Date | null | undefined): string {
+  // 空值必须显式兜底：旧写法 `return String(value)` 会把字面量 "undefined"
+  // 直接画上图表轴（ff1 节点详情整条 X 轴变成 undefined 就是这个）
+  if (value === null || value === undefined || value === "") return "-"
   const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return String(value)
+  if (Number.isNaN(date.getTime())) return "-"
   const hh = String(date.getHours()).padStart(2, "0")
   const mm = String(date.getMinutes()).padStart(2, "0")
   const ss = String(date.getSeconds()).padStart(2, "0")
@@ -190,9 +193,11 @@ export function formatClock(value: string | number | Date): string {
 }
 
 /** 图表 X 轴时间标签：HH:mm（长区间趋势用，避免轴标签过密） */
-export function formatHourMinute(value: string | number | Date): string {
+export function formatHourMinute(value: string | number | Date | null | undefined): string {
+  // 同 formatClock：非法时间统一返回 "-"，不把 "undefined" 泄到界面上
+  if (value === null || value === undefined || value === "") return "-"
   const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return String(value)
+  if (Number.isNaN(date.getTime())) return "-"
   const hh = String(date.getHours()).padStart(2, "0")
   const mm = String(date.getMinutes()).padStart(2, "0")
   return `${hh}:${mm}`

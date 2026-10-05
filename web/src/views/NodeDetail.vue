@@ -348,7 +348,10 @@ function buildResourceOption() {
   const points = metricPoints.value
   // 短窗口用秒级标签，长窗口用分钟标签，避免轴标签重叠
   const labeler = range.value === '1h' ? formatClock : formatHourMinute
-  const labels = points.map((item) => labeler(item.timestamp))
+  // 字段名必须是 ts：后端 RawSystemMetric 的序列化 tag 就是 `json:"ts"`，
+  // 之前读 item.timestamp 永远拿不到值，导致整条 X 轴被画成 "undefined"（ff1 实测）。
+  // 兼容 timestamp 以防其他数据源复用本函数。
+  const labels = points.map((item) => labeler(item.ts ?? item.timestamp))
 
   const netFormatter = (value: number) => formatBytesShort(value)
 
