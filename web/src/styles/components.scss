@@ -991,3 +991,73 @@
   .wk-kv { grid-template-columns: 1fr; }
   .wk-page-header { align-items: flex-start; flex-direction: column; }
 }
+
+// ---- 手机端（≤ 640）----
+// 原则：信息不被裁掉 > 密度 > 美观；任何“折行”必须同时锁高度，否则每秒变化的
+// 文本宽度会让卡片在 1↔2 行之间反复跳动（本项目已反复踩过这个坑）
+@media (max-width: 640px) {
+  // 手机上节点卡单列排满宽度（minmax(272px) 是桌面行为，不显式覆盖会偶尔出现半列空隙）
+  .wk-node-grid {
+    grid-template-columns: 1fr;
+    gap: var(--wk-space-3);
+  }
+
+  .wk-node-card {
+    padding: var(--wk-space-3);
+  }
+
+  // 卡片底行“↑速率 ↓速率 uptime 时间”一行放不下会被 overflow:hidden 裁掉；
+  // 直接放开折行又会按内容宽窄在 1↔2 行之间跳。固定折成两行 + 锁 min-height，
+  // 高度恒定后网格行高一致，既不裁信息也不跳动。
+  .wk-node-card-foot {
+    flex-wrap: wrap;
+    white-space: normal;
+    overflow: visible;
+    row-gap: 4px;
+    min-height: 34px;
+  }
+
+  .wk-node-card-foot .wk-node-card-time {
+    margin-left: 0;
+    width: 100%;
+    overflow: visible;
+  }
+
+  // KPI 卡在 375px 屏下两列各自只有 ~170px，收紧留白与数值字号
+  .wk-metric {
+    padding: var(--wk-space-3);
+  }
+
+  .wk-metric-value {
+    font-size: var(--wk-fs-xl);
+  }
+
+  .wk-metric-hint {
+    font-size: var(--wk-fs-xs);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  // 丢包色条的线路名列在窄屏占比过高，压缩后色条才有可读长度
+  .wk-strip-row {
+    gap: var(--wk-space-2);
+  }
+
+  .wk-strip-label {
+    width: 72px;
+  }
+
+  .wk-strip-value {
+    width: 56px;
+  }
+
+  // 表格：el-table 自带横向滚动，这里只减少单元格左右留白与行高，避免整页被撑宽
+  .el-table .cell {
+    padding: 0 8px;
+  }
+
+  .el-table td.el-table__cell {
+    padding: 7px 0;
+  }
+}

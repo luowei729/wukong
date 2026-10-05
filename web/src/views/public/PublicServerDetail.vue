@@ -6,15 +6,18 @@
   <div class="wk-public-shell">
     <!-- ---------------- 顶部导航 ---------------- -->
     <header class="wk-public-nav">
-      <button type="button" class="wk-back-btn" aria-label="返回全部服务器" @click="router.push('/')">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M15 18l-6-6 6-6" />
-        </svg>
-        全部服务器
-      </button>
-      <el-button type="primary" plain @click="router.push(hasToken ? '/dashboard' : '/login')">
-        {{ hasToken ? '管理后台' : '管理登录' }}
-      </el-button>
+      <!-- 与首页同样：顶栏内容套进 1240px 居中容器，与下方正文左边缘对齐 -->
+      <div class="wk-public-inner wk-public-nav-row">
+        <button type="button" class="wk-back-btn" aria-label="返回全部服务器" @click="router.push('/')">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M15 18l-6-6 6-6" />
+          </svg>
+          <span class="wk-back-text">全部服务器</span>
+        </button>
+        <el-button type="primary" plain @click="router.push(hasToken ? '/dashboard' : '/login')">
+          {{ hasToken ? '管理后台' : '管理登录' }}
+        </el-button>
+      </div>
     </header>
 
     <main class="wk-public-inner wk-public-main">
@@ -582,6 +585,23 @@ usePolling(loadPingAgg, 60_000, { immediate: false })
 .wk-strip-value {
   width: 168px;
   white-space: nowrap;
+}
+
+@media (max-width: 640px) {
+  /* 详情页首屏：手机上收紧留白与字号，让实时指标卡能进入首屏，
+     否则只能看到节点名与时间，要滚一屏才能看到数据 */
+  .wk-detail-hero {
+    padding: var(--wk-space-4) 0 var(--wk-space-3);
+    gap: var(--wk-space-3);
+  }
+
+  .wk-hero-name {
+    font-size: var(--wk-fs-xl);
+  }
+
+  .wk-hero-time {
+    font-size: var(--wk-fs-base);
+  }
 }
 
 @media (max-width: 860px) {

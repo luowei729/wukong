@@ -6,16 +6,21 @@
   <div class="wk-public-shell">
     <!-- ---------------- 顶部导航 ---------------- -->
     <header class="wk-public-nav">
-      <div class="wk-row" style="gap: 10px; min-width: 0">
-        <span class="wk-brand-mark" style="width: 32px; height: 32px; font-size: 15px">悟</span>
-        <div style="min-width: 0">
-          <strong style="font-size: var(--wk-fs-md)">{{ siteTitle }}</strong>
-          <div class="wk-sub">公开服务器状态</div>
+      <!-- 顶栏内容必须套上与正文同一个 1240px 居中容器：
+           之前 header 直接 space-between 贴视口两侧，而下方内容是居中的，
+           导致品牌名与登录按钮跑到屏幕边缘、与正文不对齐（用户反馈布局不合理） -->
+      <div class="wk-public-inner wk-public-nav-row">
+        <div class="wk-row" style="gap: 10px; min-width: 0">
+          <span class="wk-brand-mark" style="width: 32px; height: 32px; font-size: 15px">悟</span>
+          <div style="min-width: 0">
+            <strong class="wk-public-nav-title">{{ siteTitle }}</strong>
+            <div class="wk-sub wk-public-nav-sub">公开服务器状态</div>
+          </div>
         </div>
+        <el-button type="primary" plain @click="goAdmin">
+          {{ hasToken ? '管理后台' : '管理登录' }}
+        </el-button>
       </div>
-      <el-button type="primary" plain @click="goAdmin">
-        {{ hasToken ? '管理后台' : '管理登录' }}
-      </el-button>
     </header>
 
     <main class="wk-public-inner wk-public-main">
@@ -114,7 +119,8 @@
           <el-option label="按磁盘" value="disk" />
         </el-select>
 
-        <span class="wk-sub" style="margin-left: auto">点击卡片查看单台服务器详情</span>
+        <!-- 操作提示在手机上占用整行，隐藏（卡片可点击是通用交互） -->
+        <span class="wk-sub wk-toolbar-hint">点击卡片查看单台服务器详情</span>
       </div>
 
       <!-- ---------------- 服务器卡片 ---------------- -->
@@ -445,14 +451,50 @@ function goAdmin() {
 }
 
 @media (max-width: 640px) {
+  /* 手机上标题与在线率环并排（环缩到 64px 靠右），
+     而不是上下堆叠——堆叠会让首屏只看到标题和一块空白 */
   .wk-hero {
-    flex-direction: column;
-    align-items: flex-start;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--wk-space-4);
+    padding: var(--wk-space-4) 0 var(--wk-space-3);
+  }
+
+  .wk-hero-title {
+    font-size: var(--wk-fs-2xl);
+  }
+
+  .wk-avail-ring {
+    width: 64px;
+    height: 64px;
+  }
+
+  .wk-avail-ring::before {
+    inset: 7px;
+  }
+
+  .wk-avail-value {
+    font-size: var(--wk-fs-base);
+  }
+
+  .wk-avail-unit {
+    bottom: 15px;
+    font-size: 9px;
   }
 
   .wk-grid-6 {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+
+  .wk-toolbar-hint {
+    display: none;
+  }
+}
+
+/* 工具栏右侧提示：桌面靠右对齐，手机上隐藏 */
+.wk-toolbar-hint {
+  margin-left: auto;
 }
 
 /* 页脚 */

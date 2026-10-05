@@ -1,6 +1,6 @@
 # wukong 监控系统 - 开发规范与提示
 
-> 最后更新: 2026-10-05 08:20 (北京时间)
+> 最后更新: 2026-10-06 06:53 (北京时间)
 
 ## 开发原则
 
@@ -117,6 +117,8 @@ wukong/
 - **2026-10-05 06:30（北京时间）**：一轮 UI/告警细节修复，留下六条长期约束：① 卡片/指标区的文本**一律不留空格**（`relativeTime` 输出“5分钟前”、`formatRateShort` 输出“745B/s”、`formatDuration` 输出“22d18h32m”）+ `white-space:nowrap`，否则带空格文本在窄卡里折行、每秒文本宽度变化会造成 1↔2 行跳动。② **节点新鲜度一律用主控时钟 `last_seen_at`**，不要用 `updated_at`：后者是探针自报的 `sys.Timestamp`，实测 ff1 法兰克福机器时钟慢 5.6 分钟，导致“后台在线、公开页离线”。③ 告警抑制期只能压制重复触发，**绝不能 `return` 掉恢复判定**（否则改完目标后旧告警最长 30 分钟不恢复）；改完影响探针的配置要 `AgentServer.InvalidateAgentConfigs()` 标脏、由 stream 自己的 goroutine 重发（gRPC stream 不能并发 SendMsg）。④ **多系列取值差一个量级就拆图而不是共轴**（Ping 5.4ms vs 5.6ms 在 0~60 轴上只差 0.3% 高度，对数刻度也无效）；最终按用户要求只保留叠加对比 + 每线路统计摘要行（`WkPingChart.vue`，两页共用）。⑤ 覆盖 Element Plus 浮层必须**背景、文字色、箭头三者一起接管**且选择器含 `.is-dark/.is-light`，否则浅色主题下白底白字看起来像一个“空白悬窗”；ECharts 图例在左上时**不要写 `yAxis.name`**（轴名也画在左上，会盖住图例）。⑥ 列表默认**按名称排序**（`localeCompare` 中文序），前后端口径统一用 `utils/format.ts` 的 `nodeState()`。另：本机无 Go 但有 docker，用 `docker run -v wukong-gomod:/go/pkg/mod golang:1.25 go vet ./...` 就能本地把关编译，不必等 CI。
 
 - **2026-10-05 08:20（北京时间）**：新增**微信推送渠道（pushplus 中转）**，渠道覆盖微信 ClawBot / 公众号 / 企业微信应用 / QQ / 邮件。关键结论：① **不走直连 iLink 协议**（要自己维护扫码凭证和 `context_token`）；② 告警出口已收敛为 `Engine.notifyChannels(msg)`，Telegram 逐条即时、pushplus 走 `notify.AlertAggregator` 合并节流（空闲第一条立即发 → 进 5 分钟窗口→窗口结束合成一条），因为 **ClawBot 每 10 条/每 24h 需用户在微信里主动发消息激活**，且 pushplus 自身有 1 分钟 5 次 / 相同内容 1 小时 3 条 / 单日超 1000 次封号 7 天的硬红线；**想避开 10 条限制就换渠道（`wechat`）而不是做多账号轮换**，后者违反风控会封号，禁止实现。③ `pushplus` 接口是**异步**的，`code=200` 只代表已受理（实测假令牌也是 `HTTP=200` + `code:903`），必须看业务码；900/903/905/888 类错误**不得重试**（`notify.retryableError` 接口）。④ 设置项 `pushplus_*` 写入 SQLite 固化，`pushplus_token` **不进 `allowedSettingKeys` 白名单**且永不回显（与 `telegram_bot_token` 同标准）。⑤ 详情链接依赖 `site_domain`；未配置则不输出链接。
+
+- **2026-10-06 06:53（北京时间）**：公开页顶栏对齐 + 手机端布局体系。① 顶栏“太靠边”的根因是 `<header class="wk-public-nav">` 没套 `.wk-public-inner`（正文套了 `width:min(1240px,100%-32px); margin:0 auto`），space-between 直接贴视口边缘；现在结构是“外层通铺 sticky 背景 + 内层 `.wk-public-inner .wk-public-nav-row`”，两个公开页一致。**新增任何全宽 header/nav 都要套同一个 inner 容器**。② 断点固定三档：≤1080 / ≤860 / ≤640，手机规则集中在 `styles/components.scss` 末尾，**不要再发明新断点数值**。③ 窄屏下“不裁信息”和“不跳动”必须一起解决：节点卡底行原来是 `nowrap+overflow:hidden`（手机直接裁掉），改成 `flex-wrap:wrap` 又会每秒 1↔2 行跳；最终方案是**固定折两行 + 锁 `min-height:34px`**，高度恒定后网格行高一致。凡“每秒变化的文本”在窄容器里换行都要用这个套路。④ `<style scoped>` 是纯 CSS，写 `//` 注释会让 `vite build` 直接失败（`Unexpected '/'`），只有 `lang="scss"` 块能用 `//`；改完样式必须先本地 `npx vite build`。
 
 ## 部署相关长期提示
 

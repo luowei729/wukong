@@ -98,6 +98,22 @@ canvas **不解析** `var(--x)`。任何 `axisLabel: { color: 'var(--wk-text-mut
 - 窄列（≤96px）里放 `WkProgressBar` 时用 `.wk-cell-meter`（Nodes.vue 内）改成"数值在上、4px 条在下"；横向布局会把进度条压到 0 高度（纵向 flex 里 `track` 必须 `flex: none`）。
 - 列总宽（各 `min-width` 之和）控制在 1150px 以内，1440 视口减去侧栏后不需要横向滚动。
 
+### 响应式断点与手机适配（2026-10-06）
+
+断点统一用三档，**不要再发明新数值**：`≤1080`（隐藏顶栏指标）、`≤860`（侧栏转抽屉、网格降列）、
+`≤640`（手机：卡片收紧、单列、顶栏收缩）。手机规则集中在 `styles/components.scss` 末尾一段。
+
+- **顶栏必须与正文套同一个容器**。`.wk-public-inner`（`width: min(1240px, 100%-32px); margin:0 auto`）
+  是内容宽度约束；header 想背景通铺就用“外层通铺 + 内层套 `.wk-public-inner`”的结构，
+  否则 `space-between` 会贴视口边缘，与正文左对不齐（用户反馈的“太靠边”就是这个）。
+- **窄屏下“不裁信息”与“不跳动”必须同时解决**：`nowrap + overflow:hidden` 会直接裁掉内容，
+  改 `wrap` 又会被每秒变化的文本宽度带着在 1↔2 行之间跳。正确做法是**固定折行结果 + 锁 `min-height`**
+  （节点卡底行：`flex-wrap:wrap` + `row-gap:4px` + `min-height:34px`，时间行 `width:100%`）。
+- sticky 顶栏一定要给半透背景 + `backdrop-filter`，否则卡片滚过时会穿帮。
+- `<style scoped>` 是**纯 CSS**，写 `//` 注释会直接让 `vite build` 失败（报
+  `Unexpected '/'. Escaping special characters with \ may help.`）；只有 `lang="scss"` 块才能用 `//`。
+  改完样式先 `npx vite build` 跑一次再提交。
+
 ### 可访问性与动效
 
 - 图标按钮必须有 `aria-label`；`:focus-visible` 统一用 `--wk-ring`。

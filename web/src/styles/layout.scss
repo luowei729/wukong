@@ -417,11 +417,34 @@
 }
 
 .wk-public-nav {
-  height: 68px;
+  // 顶栏本身通铺整宽（背景与 hairline 分隔线要拉满），
+  // 内容交给 .wk-public-nav-row 去对齐正文的 1240px 容器
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  border-bottom: 1px solid var(--wk-border);
+  // sticky 顶栏必须半透 + 模糊，否则下方卡片滚过时会被透规看到穿帮
+  background: color-mix(in srgb, var(--wk-bg) 82%, transparent);
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+}
+
+.wk-public-nav-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: var(--wk-space-4);
+  height: 68px;
+}
+
+.wk-public-nav-title {
+  font-size: var(--wk-fs-md);
+  font-weight: var(--wk-fw-semibold);
+  letter-spacing: -0.015em;
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .wk-public-main {
@@ -432,6 +455,32 @@
 @media (max-width: 1080px) {
   .wk-header-metrics {
     display: none;
+  }
+}
+
+// 手机端：公开页顶栏与正文容器收窄，顶栏副标题信息冗余可隐藏
+@media (max-width: 640px) {
+  .wk-public-inner {
+    width: min(1240px, calc(100% - 24px));
+  }
+
+  .wk-public-nav-row {
+    height: 56px;
+    gap: var(--wk-space-2);
+  }
+
+  // “公开服务器状态”在手机上与页面内容重复，让位给可能很长的站点名
+  .wk-public-nav-sub {
+    display: none;
+  }
+
+  // 返回按钮只留箭头，靠 aria-label 与 title 保证可理解性
+  .wk-back-text {
+    display: none;
+  }
+
+  .wk-public-nav .el-button {
+    padding: 0 12px;
   }
 }
 
