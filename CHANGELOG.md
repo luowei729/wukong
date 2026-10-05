@@ -2,6 +2,30 @@
 
 所有变更记录使用北京时间（UTC+8）。
 
+## [2026-10-06 07:43] - 仓库卫生：停止跟踪前端构建产物，dist 只留 .gitkeep 占位
+
+### 改动前总结
+`internal/webapi/dist/` 本应由构建生成，但仓库里残留了早期误提交的文件，而且已经**自相矛盾**：
+上一次提交删掉了唯一被跟踪的 `assets/index-73vta-8R.js`，`index.html` 却引用未入库的
+`index-B5UCCBZT.js` / `index-BWd7ThXf.css`。后果是干净检出后 `go build` 出的二进制必然白屏，
+而 CI 一直正常（Dockerfile 用 `COPY --from=frontend-builder` 取现场构建的 dist），所以没人察觉。
+
+### 改动后总结
+- `git rm -r --cached internal/webapi/dist`：解除跟踪，**本地文件不动**，当前开发不受影响。
+- `.gitignore` 把 `internal/webapi/dist/` 改成 `internal/webapi/dist/*` + `!internal/webapi/dist/.gitkeep`。
+  **必须排除内容而不是目录**：Git 不会进入被忽略的目录，目录级排除会让子文件例外完全失效。
+- 新增 `dist/.gitkeep`：`//go:embed all:dist` 要求目录至少有一个文件。实测删掉整个 dist 后
+  `go build` 直接失败（`pattern all:dist: no matching files found`）；有占位文件则编译通过，
+  且 `embed.go` 的 `init()` 检测不到 `index.html` 时会走 `PlaceholderHandler` 引导页
+  （提示运行 `make build-frontend`），**不再是白屏**。
+
+### 验证
+- 真实干净检出验证：`git clone file://` 到临时目录 → `dist/` 内只有 `.gitkeep` →
+  `go build ./cmd/server` 与 `go vet ./...` 均 exit 0。
+- `git check-ignore` 确认 `.gitkeep` 命中取反规则可入库，其余产物（index.html / assets/* / favicon.svg）仍被忽略。
+- CI 构建结果见下一次检查（Dockerfile 不依赖仓库里的 dist，预期不受影响）。
+
+
 ## [2026-10-06 07:21] - 修复趋势图 X 轴 undefined 与公开详情页板块无间距
 
 ### 改动前总结

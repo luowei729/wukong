@@ -1,6 +1,6 @@
 # wukong 监控系统 - 开发规范与提示
 
-> 最后更新: 2026-10-06 07:21 (北京时间)
+> 最后更新: 2026-10-06 07:43 (北京时间)
 
 ## 开发原则
 
@@ -121,6 +121,8 @@ wukong/
 - **2026-10-06 06:53（北京时间）**：公开页顶栏对齐 + 手机端布局体系。① 顶栏“太靠边”的根因是 `<header class="wk-public-nav">` 没套 `.wk-public-inner`（正文套了 `width:min(1240px,100%-32px); margin:0 auto`），space-between 直接贴视口边缘；现在结构是“外层通铺 sticky 背景 + 内层 `.wk-public-inner .wk-public-nav-row`”，两个公开页一致。**新增任何全宽 header/nav 都要套同一个 inner 容器**。② 断点固定三档：≤1080 / ≤860 / ≤640，手机规则集中在 `styles/components.scss` 末尾，**不要再发明新断点数值**。③ 窄屏下“不裁信息”和“不跳动”必须一起解决：节点卡底行原来是 `nowrap+overflow:hidden`（手机直接裁掉），改成 `flex-wrap:wrap` 又会每秒 1↔2 行跳；最终方案是**固定折两行 + 锁 `min-height:34px`**，高度恒定后网格行高一致。凡“每秒变化的文本”在窄容器里换行都要用这个套路。④ `<style scoped>` 是纯 CSS，写 `//` 注释会让 `vite build` 直接失败（`Unexpected '/'`），只有 `lang="scss"` 块能用 `//`；改完样式必须先本地 `npx vite build`。
 
 - **2026-10-06 07:21（北京时间）**：修 X 轴 `undefined` 与公开详情页板块无间距。① **趋势点字段名两套接口不一样**：管理接口 `store.RawSystemMetric` 是 `json:"ts"`，公开接口 `public.go` 是 `json:"timestamp"`，读错就整条 X 轴变 `undefined`（且只有一个页面出错，容易误判为数据问题）；前端取时间统一 `item.ts ?? item.timestamp`。② `formatClock`/`formatHourMinute` 对非法值**必须返回 `-`**，旧代码 `String(value)` 会把 "undefined" 画上图表轴——所有"看起来像数据其实是字段名错"的问题都源于此。③ 公开详情页 `main` 是普通 block，板块之间必须挂 `.wk-public-sections`（flex column + `--wk-gap-section`），与后台 `.wk-container-inner` 同令牌。④ **媒体查询不增加特异度**：`index.scss` 顺序是 variables→base→layout→components→element，覆盖 Element Plus 的手机端规则只能写在 `element.scss`，放 `components.scss` 会被靠后的同特异度规则静默覆盖。
+
+- **2026-10-06 07:43（北京时间）**：仓库卫生——`internal/webapi/dist/` **不再跟踪构建产物**，只留 `.gitkeep`。三条必须知道的规则：① 已跟踪文件不受 `.gitignore` 影响（`git check-ignore` 对它们报"未忽略"是 Git 行为不是规则错），解除跟踪必须 `git rm -r --cached`（本地文件不会被删）。② `.gitignore` 里**目录级排除会让子文件取反失效**（Git 不进入已忽略目录），必须写 `internal/webapi/dist/*` + `!internal/webapi/dist/.gitkeep`。③ **`//go:embed all:dist` 要求目录非空**：整个 dist 不在时 `go build` 直接报 `pattern all:dist: no matching files found`，所以不能彻底清空，要留占位；缺 `index.html` 时 `embed.go` 的 `init()` + `PlaceholderHandler` 会显示"请运行 make build-frontend"引导页而不是白屏。CI 不受影响（Dockerfile 用 `COPY --from=frontend-builder` 取现场构建产物）。本地构建走 `make all` / `make dev`（都已串 `build-frontend`）。
 
 ## 部署相关长期提示
 

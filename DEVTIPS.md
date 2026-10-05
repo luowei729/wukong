@@ -158,9 +158,25 @@ docker run --rm -v /root/wukong:/src -v wukong-gomod:/go/pkg/mod -w /src \
   该目录**本身不参与发布**：镜像里的前端是 CI 在 `node:22-alpine` 阶段从源码重新构建的。
 - Go 侧用 `//go:embed all:dist`，`all:` 前缀不能少（Vite 会生成 `_` 开头的资源）。
 - 新增静态资源放 `web/public/`（如 `favicon.svg`），Vite 会原样复制进 `dist/`。
-- `internal/webapi/dist/` 已被 `.gitignore` 排除，但仓库里还残留两个早期误提交的跟踪文件
-  （`dist/index.html` 与一个旧 js）。改前端后 **不要只提交这两个文件**（会留下指向未跟踪资源的破状态），
-  镜像里的前端是 CI 从源码重新构建的；建议后续单独一次 `git rm --cached internal/webapi/dist` 清理。
+- `internal/webapi/dist/` **不再跟踪构建产物**（2026-10-06 已清理，规则见下一小节），
+  改前端后不要提交 dist 里的任何文件。
+
+
+### 构建产物不入库，但要留 embed 占位（2026-10-06）
+
+- `internal/webapi/dist/` 是**构建产物**，仓库里只保留 `.gitkeep`。CI 走
+  `Dockerfile` 的 `COPY --from=frontend-builder`，与仓库里的 dist 无关；本地用
+  `make build-frontend` / `make all` / `make dev` 生成。
+- **`//go:embed all:dist` 要求目录非空**：整个 dist 不存在时 `go build` 直接报
+  `pattern all:dist: no matching files found`（连 `go vet ./...` 都会红）。所以必须跟踪一个
+  占位文件，而不是把目录彻底清空。
+- **Git 忽略规则的关键坑**：`.gitignore` 里写 `internal/webapi/dist/`（目录级）会让
+  `!internal/webapi/dist/.gitkeep` **完全失效**，因为 Git 不会进入已被忽略的目录。
+  正确写法是排除内容 `internal/webapi/dist/*` 再取反 `!.../.gitkeep`。
+- 已跟踪的文件不受 `.gitignore` 影响：`git check-ignore <已跟踪文件>` 会告诉你"没被忽略"，
+  这不是规则没写对，而是 Git 的行为。要解除跟踪必须 `git rm --cached`（本地文件保留）。
+- 缺前端产物时不会白屏：`webapi/embed.go` 的 `init()` 检测 `dist/index.html`，缺失时
+  `PlaceholderHandler` 会显示"请运行 make build-frontend"的引导页。
 
 ## 运营商 Ping 目标的作用域（2026-10-05）
 

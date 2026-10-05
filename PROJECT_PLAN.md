@@ -366,3 +366,21 @@ IPv6 目标一键选节点与列表作用域列。
 ### 验证结果
 `vue-tsc` 零错误、`vite build` 成功；产物 CSS 实测 640 覆盖规则位于基础 12px 规则之后（生效），
 `.wk-public-sections` 已进入产物。待部署后核对 ff1 趋势轴显示真实时间与详情页板块间距。
+
+## 二十、2026-10-06 07:43（北京时间）停止跟踪前端构建产物
+
+### 改动前总结
+`internal/webapi/dist/` 里残留早期误提交的构建产物，且状态自相矛盾：上一次提交删掉唯一被跟踪的
+`assets/index-73vta-8R.js`，而 `index.html` 引用的是未入库的 `index-B5UCCBZT.js` /
+`index-BWd7ThXf.css`。干净检出后 `go build` 出的二进制必然白屏；CI 一直正常所以无人察觉。
+
+### 改动后总结
+- `git rm -r --cached internal/webapi/dist` 解除跟踪（本地文件保留）。
+- `.gitignore` 改为 `internal/webapi/dist/*` + `!internal/webapi/dist/.gitkeep`：
+  目录级排除会让子文件取反失效，必须排除内容。
+- 新增 `dist/.gitkeep`：`//go:embed all:dist` 要求目录非空，否则 `go build` 直接失败；
+  缺 `index.html` 时由 `PlaceholderHandler` 显示引导页而不是白屏。
+
+### 验证结果
+`git clone file://` 模拟干净检出：`dist/` 内只有 `.gitkeep`，`go build ./cmd/server` 与
+`go vet ./...` 均 exit 0；`git check-ignore` 确认其余产物仍被忽略。CI 不依赖仓库内 dist。
