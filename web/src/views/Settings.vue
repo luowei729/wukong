@@ -306,6 +306,61 @@
         </div>
       </WkCard>
 
+      <!-- ================= 5.5 微信推送（pushplus 中转） ================= -->
+      <WkCard
+        v-show="activeSection === 'pushplus'"
+        title="微信推送（pushplus 中转）"
+        subtitle="支持微信 ClawBot / 公众号 / 企业微信应用，令牌只写后端不回显"
+      >
+        <el-alert
+          title="使用步骤：① 打开 pushplus 官网，关注公众号，在「个人中心 → 渠道配置」绑定对应渠道；② 把「我的凭证」里的用户令牌粘到下面；③ 点发送测试通知后到微信确认是否收到。"
+          type="info"
+          :closable="false"
+          style="margin-bottom: var(--wk-space-3)"
+        />
+        <el-alert
+          title="微信 ClawBot 官方限制：每下发 10 条消息、或每隔 24 小时，都需要你在微信里主动给 ClawBot 发一条消息才能继续下发。因此本渠道只推 warning/critical 触发与恢复通知，并把一个窗口内的多条告警合并成一条（第一条仍立即发）。若不想受此限制，把渠道改成「微信公众号」即可，它没有条数激活限制。"
+          type="warning"
+          :closable="false"
+          style="margin-bottom: var(--wk-space-3)"
+        />
+        <el-alert
+          v-if="ppForm.has_token"
+          title="已保存 pushplus 令牌。为避免泄露页面不回显；留空保存表示保留原令牌。"
+          type="success"
+          :closable="false"
+          style="margin-bottom: var(--wk-space-4)"
+        />
+
+        <el-form label-position="top" autocomplete="off" class="wk-narrow">
+          <el-form-item label="启用微信推送">
+            <el-switch v-model="ppForm.enabled" />
+          </el-form-item>
+          <el-form-item label="用户令牌（Token）">
+            <el-input
+              v-model="ppForm.token"
+              name="wukong-pushplus-token"
+              autocomplete="off"
+              placeholder="pushplus「我的凭证」里的那串 token；留空则保留已保存令牌"
+            />
+          </el-form-item>
+          <el-form-item label="推送渠道">
+            <el-select v-model="ppForm.channel" style="width: 100%">
+              <el-option v-for="c in PUSHPLUS_CHANNELS" :key="c.value" :label="c.label" :value="c.value" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="告警合并窗口（分钟）">
+            <el-input-number v-model="ppForm.merge_minutes" :min="1" :max="60" />
+            <span class="wk-sub" style="margin-left: 10px">窗口内多条告警合并为一条，1~60 分钟</span>
+          </el-form-item>
+        </el-form>
+
+        <div class="wk-set-actions">
+          <el-button type="primary" :loading="pushplusSaving" @click="savePushplus">保存</el-button>
+          <el-button :loading="pushplusTesting" @click="testPushplus">发送测试通知</el-button>
+        </div>
+      </WkCard>
+
       <!-- ================= 6. 修改密码 ================= -->
       <WkCard v-show="activeSection === 'security'" title="修改管理员密码" subtitle="bcrypt hash 写入 SQLite，重启后仍使用新密码">
         <el-form label-position="top" class="wk-narrow">
@@ -424,6 +479,26 @@ const passwordSaving = ref(false)
 const tgForm = reactive({ bot_token: '', chat_id: '', has_bot_token: false })
 const telegramSaving = ref(false)
 const telegramTesting = ref(false)
+
+// ===== 微信推送（pushplus 中转） =====
+// 只列出免费且无需额外 option 配置就能直达个人的渠道，与后端 pushplusChannelSet 保持一致
+const PUSHPLUS_CHANNELS = [
+  { value: 'clawbot', label: '微信 ClawBot（个人微信；每 10 条需主动激活一次）' },
+  { value: 'wechat', label: '微信公众号（无条数激活限制，日常推荐）' },
+  { value: 'cp', label: '企业微信应用' },
+  { value: 'cmcc', label: '新消息 ClawBot（仅中国移动用户）' },
+  { value: 'qq', label: 'QQ 机器人' },
+  { value: 'mail', label: '邮件' },
+]
+const ppForm = reactive({
+  enabled: false,
+  token: '',
+  has_token: false,
+  channel: 'clawbot',
+  merge_minutes: 5,
+})
+const pushplusSaving = ref(false)
+const pushplusTesting = ref(false)
 
 // ===== 告警阈值 =====
 const thresholds = reactive<Record<string, number>>({
@@ -561,6 +636,11 @@ const navGroups = [
         key: 'telegram',
         label: 'Telegram',
         icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linejoin="round"><path d="M21 4L3 11l6 2 2 6 3-4 5 3z"/></svg>',
+      },
+      {
+        key: 'pushplus',
+        label: '微信推送',
+        icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linejoin="round"><path d="M4 17l-2 4 4.5-1.5A9 9 0 1 0 4 17z"/></svg>',
       },
       {
         key: 'security',
@@ -719,6 +799,56 @@ async function testTelegram() {
   }
 }
 
+// ===== 微信推送（pushplus）=====
+async function loadPushplus() {
+  try {
+    const res = await http.get(`/api/pushplus?_=${Date.now()}`)
+    ppForm.enabled = Boolean(res.data.enabled)
+    // 令牌不回显，永远从空开始；留空保存代表保留库里已有值
+    ppForm.token = ''
+    ppForm.has_token = Boolean(res.data.has_token)
+    ppForm.channel = res.data.channel || 'clawbot'
+    ppForm.merge_minutes = res.data.merge_minutes || 5
+  } catch {}
+}
+
+async function savePushplus() {
+  pushplusSaving.value = true
+  try {
+    await http.put('/api/pushplus', {
+      enabled: ppForm.enabled,
+      token: ppForm.token,
+      channel: ppForm.channel,
+      merge_minutes: ppForm.merge_minutes,
+    })
+    ppForm.token = ''
+    await loadPushplus()
+    ElMessage.success('微信推送配置已保存')
+  } catch (e: any) {
+    ElMessage.error(e.response?.data?.error || '保存微信推送配置失败')
+  } finally {
+    pushplusSaving.value = false
+  }
+}
+
+async function testPushplus() {
+  pushplusTesting.value = true
+  try {
+    const res = await http.post('/api/pushplus/test', { token: ppForm.token, channel: ppForm.channel })
+    // pushplus 接口是异步的，200 只代表“已受理”，所以直接展示后端那段提醒文本，开久一点
+    ElMessage({ type: 'success', message: res.data?.message || '测试请求已发出', duration: 15000, showClose: true })
+  } catch (e: any) {
+    ElMessage({
+      type: 'error',
+      message: e.response?.data?.error || '测试通知发送失败',
+      duration: 15000,
+      showClose: true,
+    })
+  } finally {
+    pushplusTesting.value = false
+  }
+}
+
 // ===== 探针升级信息（只读） =====
 async function loadUpgradeSettings() {
   try {
@@ -870,6 +1000,7 @@ onMounted(async () => {
 
   await Promise.all([
     loadTelegram(),
+    loadPushplus(),
     loadThresholds(),
     loadISPTargets(),
     loadUpgradeSettings(),

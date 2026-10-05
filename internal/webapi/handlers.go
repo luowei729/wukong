@@ -1258,6 +1258,133 @@ func (h *Handler) handleTestTelegram(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"message": "测试通知已发送"})
 }
 
+// ==================== 微信 ClawBot / pushplus 通知渠道 ====================
+
+// pushplusChannelSet 允许配置的渠道白名单。
+// 原因：pushplus 还有 webhook / voice / sms 等渠道，但 webhook 需要 option 指向预先
+// 配好的机器人、voice/sms 是付费且会烧积分，开放给用户填只会造成“配了收不到”，
+// 所以只放开免费、无需额外 option 就能直达个人的几个渠道。
+var pushplusChannelSet = map[string]bool{
+	"clawbot": true, // 微信 ClawBot（默认）
+	"wechat":  true, // 微信公众号（无 10 条激活限制，需关注 pushplus 服务号）
+	"cp":      true, // 企业微信应用
+	"qq":      true, // QQ 机器人
+	"cmcc":    true, // 新消息 ClawBot（仅中国移动用户）
+	"mail":    true, // 邮件
+}
+
+func (h *Handler) handleGetPushplus(w http.ResponseWriter, r *http.Request) {
+	token, _ := h.store.GetSetting("pushplus_token")
+	channel, _ := h.store.GetSetting("pushplus_channel")
+	if strings.TrimSpace(channel) == "" {
+		channel = "clawbot"
+	}
+	mergeMinutes, _ := h.store.GetSetting("pushplus_merge_minutes")
+	enabled, _ := h.store.GetSetting("pushplus_enabled")
+
+	// 与 Telegram 一致：已保存的令牌不回显到前端，只告知是否已配置，
+	// 避免浏览器插件/密码管理器把推送令牌存进云端。
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"enabled":       enabled == "true" || enabled == "1",
+		"token":         "",
+		"has_token":     strings.TrimSpace(token) != "",
+		"channel":       channel,
+		"merge_minutes": intSettingValue(mergeMinutes, 5),
+	})
+}
+
+func (h *Handler) handleUpdatePushplus(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Enabled      bool   `json:"enabled"`
+		Token        string `json:"token"`
+		Channel      string `json:"channel"`
+		MergeMinutes int    `json:"merge_minutes"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "请求体解析失败")
+		return
+	}
+
+	channel := strings.TrimSpace(req.Channel)
+	if channel == "" {
+		channel = "clawbot"
+	}
+	if !pushplusChannelSet[channel] {
+		writeError(w, http.StatusBadRequest, "不支持的推送渠道，可选：clawbot/wechat/cp/qq/cmcc/mail")
+		return
+	}
+	// 合并窗口限制在 1~60 分钟：小于 1 分钟起不到节流作用，大于 1 小时告警已经没时效价值
+	if req.MergeMinutes < 1 || req.MergeMinutes > 60 {
+		writeError(w, http.StatusBadRequest, "合并窗口必须是 1~60 分钟")
+		return
+	}
+
+	// 令牌留空表示保留已有值：避免每次改渠道/窗口都要重新粘一遍敏感令牌
+	if token := strings.TrimSpace(req.Token); token != "" {
+		if err := h.store.SetSetting("pushplus_token", token); err != nil {
+			writeError(w, http.StatusInternalServerError, "保存 pushplus 令牌失败")
+			return
+		}
+	}
+	if err := h.store.SetSetting("pushplus_channel", channel); err != nil {
+		writeError(w, http.StatusInternalServerError, "保存 pushplus 渠道失败")
+		return
+	}
+	if err := h.store.SetSetting("pushplus_merge_minutes", strconv.Itoa(req.MergeMinutes)); err != nil {
+		writeError(w, http.StatusInternalServerError, "保存合并窗口失败")
+		return
+	}
+	if err := h.store.SetSetting("pushplus_enabled", strconv.FormatBool(req.Enabled)); err != nil {
+		writeError(w, http.StatusInternalServerError, "保存启用状态失败")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"message": "pushplus 配置已保存"})
+}
+
+func (h *Handler) handleTestPushplus(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Token   string `json:"token"`
+		Channel string `json:"channel"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&req)
+
+	token := strings.TrimSpace(req.Token)
+	if token == "" {
+		stored, _ := h.store.GetSetting("pushplus_token")
+		token = strings.TrimSpace(stored)
+	}
+	if token == "" {
+		writeError(w, http.StatusBadRequest, "请先填写 pushplus 用户令牌")
+		return
+	}
+	channel := strings.TrimSpace(req.Channel)
+	if channel == "" {
+		stored, _ := h.store.GetSetting("pushplus_channel")
+		channel = strings.TrimSpace(stored)
+	}
+
+	siteDomain, _ := h.store.GetSetting("site_domain")
+	n := notify.NewPushplusNotifier(token, channel)
+	n.SiteURL = strings.TrimSpace(siteDomain)
+	// 测试消息不走合并器，直接发，否则用户点了按钮要等一个窗口才能验证配置
+	msg := &notify.Message{
+		Title: "wukong 测试通知",
+		Body:  "这是一条来自 wukong 后台的 pushplus 测试消息，收到即表示该渠道配置可用。",
+		Level: "info",
+	}
+	if err := n.Send(msg); err != nil {
+		// 把 pushplus 业务码原样回传，用户对照文档就能分清是令牌填错(903)、
+		// 未实名(905)还是账号受限(900)，不用去翻主控日志。
+		writeError(w, http.StatusBadGateway, fmt.Sprintf("测试通知发送失败: %v", err))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{
+		"message": "请求已受理。注意：接口返回成功只代表 pushplus 已收到排队请求，请到微信确认是否真的收到；" +
+			"若未收到，通常是微信 ClawBot 未激活——先在微信里给 ClawBot 主动发一条消息再重试。",
+	})
+}
+
 func intSettingValue(raw string, fallback int) int {
 	if v, err := strconv.Atoi(strings.TrimSpace(raw)); err == nil {
 		return v

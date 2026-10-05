@@ -138,6 +138,10 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/telegram", h.authMiddleware(h.handleGetTelegram))
 	mux.HandleFunc("PUT /api/telegram", h.authMiddleware(h.handleUpdateTelegram))
 	mux.HandleFunc("POST /api/telegram/test", h.authMiddleware(h.handleTestTelegram))
+	// 微信 ClawBot / pushplus 渠道：令牌不回显，走专用接口而非通用 settings 白名单
+	mux.HandleFunc("GET /api/pushplus", h.authMiddleware(h.handleGetPushplus))
+	mux.HandleFunc("PUT /api/pushplus", h.authMiddleware(h.handleUpdatePushplus))
+	mux.HandleFunc("POST /api/pushplus/test", h.authMiddleware(h.handleTestPushplus))
 	mux.HandleFunc("GET /api/alert-settings", h.authMiddleware(h.handleGetAlertSettings))
 	mux.HandleFunc("PUT /api/alert-settings", h.authMiddleware(h.handleUpdateAlertSettings))
 

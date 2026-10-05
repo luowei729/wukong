@@ -2,6 +2,50 @@
 
 所有变更记录使用北京时间（UTC+8）。
 
+## [2026-10-05 08:20] - 新增微信推送渠道（pushplus 中转，支持微信 ClawBot）
+
+### 改动前总结
+告警只能推 Telegram（`Engine.sendTelegramNotification` 是唯一硬出口），国内环境访问 Telegram 不可靠。
+用户要求对接微信 ClawBot。调研结论：微信官方 ClawBot 直连需自己维护扫码凭证与 `context_token`，
+并且“每下发 10 条 / 每 24 小时”必须用户在微信里主动发一条消息才能继续下发；改走 pushplus 中转后
+主控侧只是一次 HTTP POST，风险面小得多（已经用户确认选择 pushplus + 只推关键告警合并 + 纯文本带链接 + 设置页入口）。
+
+### 改动后总结
+- **新增 `internal/notify/pushplus.go`**：`PushplusNotifier`，`POST {base}/send/{token}`，
+  body `{token,title,content,channel,template:txt,topic?}`，默认 `https://www.pushplus.plus`（不用文档里的 http，
+  避免令牌明文过公网）。content 为纯文本 + 节点详情链接（依赖 `site_domain`，未配置则不输出链接）。
+  **关键：接口是异步的，`code=200` 只代表已受理**，所以成功日志里带上返回的消息流水号（shortCode）供事后查投递结果。
+- **新增 `internal/notify/aggregator.go`（AlertAggregator）**：节流+合并，语义对齐 Alertmanager：
+  空闲时第一条立即发（保证 critical 即时），随后进入合并窗口（默认 5 分钟，后台可改 1~60），
+  窗口内新告警只缓存，窗口结束时合成一条汇总（最多列 10 条，多余折叠为“另有 N 条”，
+  超出 200 条缓存上限的部分也如实告知）；`Run(ctx)` 退出时 `Close()` 同步 flush，不丢告警。
+- **`internal/notify/notify.go`**：`Message` 新增 `Kind`（firing/resolved/summary），因为恢复通知是 info 级
+  但必须送达，不能只按 Level 过滤；新增 `retryableError` 接口与 `SendWithRetry` 导出，
+  并把 4xx/429 判定改成基于 `HTTPStatus()` 接口，不再硬写 `*telegramAPIError` 类型断言。
+  **为什么需要 `Retryable()`**：pushplus 的 900（账号受限）/903（无效令牌）/905（未实名）重试无用，
+  而且官方明确说继续请求会加重限制（单日超 1000 次封 7 天），必须不重试。
+- **`internal/alert/engine.go`**：`sendTelegramNotification` 调用点收敛为 `notifyChannels`（Telegram 逐条即时 +
+  pushplus 走合并器）；新增 `sendPushplus`（每次发送时读最新设置，改配置热生效）、`pushplusWindow`、
+  `pushplusAccept`（只推 warning/critical 触发 + 全部恢复）、`settingString`/`settingBool`。
+- **`internal/webapi`**：新增 `GET/PUT /api/pushplus` 与 `POST /api/pushplus/test`（JWT 鉴权）；
+  设置项 `pushplus_enabled`/`pushplus_token`/`pushplus_channel`/`pushplus_merge_minutes` 写入 SQLite 固化；
+  **`pushplus_token` 故意不加入 `allowedSettingKeys` 白名单**，只能走专用接口且永不回显；
+  渠道白名单 `clawbot/wechat/cp/qq/cmcc/mail`（排除需额外 option 的 webhook 与付费的 sms/voice）；
+  测试接口不走合并器，失败时把业务码原样回传（用户对照文档就能分清令牌错还是账号受限）。
+- **`web/src/views/Settings.vue`**：新增“微信推送”节（启用开关 + 令牌不回显 + 渠道下拉 + 合并窗口 + 测试），
+  并把 ClawBot 的 10 条激活限制、使用步骤、以及“改成微信公众号可避开该限制”写在页面上。
+
+### 验证
+- `go vet ./...` 本地通过（无 Go 工具链，用 `docker run golang:1.25` + 共享 module 缓存跑）；`vue-tsc` 零错误、`vite build` 成功。
+- **已真实探测 pushplus 接口**（假令牌）：返回 `{"code":903,"data":"无效的用户token","msg":"用户令牌不正确"}` 与 `HTTP=200`，
+  证明 https 可用、路径正确，并证实“只看 HTTP 状态码会误判失败”这个设计判断。
+- 待用户提供 pushplus 令牌后在后台填写并点“发送测试通知”做端到端确认。
+
+### 遗留
+- 未做自动“查投递结果”（需 pushplus 开放接口 AccessKey，额外凭证），目前靠日志流水号 + 微信侧人工确认。
+- 告警引擎当前只有 `alertLevel()` 产出的 warning（资源类）/critical（离线），所以“只推关键”过滤实际上
+  主要靠合并窗口节流；若以后引入 info 级事件，过滤器会直接生效。
+
 ## [2026-10-05 08:02] - 去掉 Ping 图纵轴单位名，修复与图例文字重叠
 
 ### 改动前总结

@@ -1,6 +1,6 @@
 # wukong 监控系统 - 开发规范与提示
 
-> 最后更新: 2026-10-05 04:13 (北京时间)
+> 最后更新: 2026-10-05 08:20 (北京时间)
 
 ## 开发原则
 
@@ -113,6 +113,10 @@ wukong/
 - **2026-10-05 05:10（北京时间）**：生产已迁到 **arm64 机 `146.56.173.198`**（容器 `wukong`，`-p 64443:64443` 对公网 + `-v /opt/wukong/data:/opt/wukong/data` + `--env-file /opt/wukong/wukong.env`），入口 `https://server.lkz.pub`（Cloudflare 橙云→回源 64443 明文）。三条必须知道的结论：① **Cloudflare 橙云不能代理 gRPC 到明文源站**（实测 403 + text/html），所以 SQLite `agent_server_addr` 定为 `146.56.173.198:64443` 直连源站，只有网页走 CDN；② CI 已改为 **amd64/arm64 各跑一个原生 runner（`ubuntu-24.04-arm`）按 digest 推送 + merge job 合并 manifest**，约 2.5 分钟；不要再回到 QEMU 方案（超 10 分钟），也不要在 `Dockerfile` 里写死 `GOARCH`（用 `TARGETARCH`）；`download-artifact` 必须限定 `pattern: digests-*`，否则会把 buildx 的 `*.dockerbuild` artifact 一起下载并失败；③ 安装脚本已改为“先 `systemctl stop wukong-agent` + 下载到 `.new` 再 `mv -f`”；**直接 `curl -o` 覆盖运行中的二进制会被内核拒（ETXTBSY，curl 报 error 23）**，写任何“覆盖已安装二进制”的脚本都要用 rename 而不是原地写。另：`AGENTS.md` 历史上把管理员密码明文写进了公开仓库，已记入 `DEPLOY_CREDENTIALS.md` 待处理，新节点接入统一用一次性 token 的安装命令。
 
 - **2026-10-05 05:52（北京时间）**：运营商 Ping 目标改为**可按节点设作用域**。`isp_targets` 新增 `scope`（`all`/`include`/`exclude`）与 `agent_ids`（逗号串，已加 ALTER TABLE 迁移，旧库自动升级且默认 `all`）；判定入口统一用 `store.ISPTarget.AppliesTo(agentID)`，**过滤只在主控下发时做**（`enabledPingTargetsFor(agentID)`，包括注册响应与 `buildConfigFrame` 两处），探针不改也不升级。约束：`validateISPTarget` 要求 include/exclude 至少选一个节点，否则“仅选中”会静默退化成“全部节点”。公开详情页的 `publicPingISPs(agentID)` 也只列该节点实际会测的线路，避免空行。典型用途：IPv6 目标（如上海移动 `2409:8088::a`）必须排除无公网 IPv6 出口的节点（现网 hk2香港、sh1上海），否则这些节点上该线路永远 100% 丢包并误告警；设置页目标地址含冒号时会提供“选中有/无 IPv6 出口节点”一键选择（依据探针自报的 `ip_v6`）。
+
+- **2026-10-05 06:30（北京时间）**：一轮 UI/告警细节修复，留下六条长期约束：① 卡片/指标区的文本**一律不留空格**（`relativeTime` 输出“5分钟前”、`formatRateShort` 输出“745B/s”、`formatDuration` 输出“22d18h32m”）+ `white-space:nowrap`，否则带空格文本在窄卡里折行、每秒文本宽度变化会造成 1↔2 行跳动。② **节点新鲜度一律用主控时钟 `last_seen_at`**，不要用 `updated_at`：后者是探针自报的 `sys.Timestamp`，实测 ff1 法兰克福机器时钟慢 5.6 分钟，导致“后台在线、公开页离线”。③ 告警抑制期只能压制重复触发，**绝不能 `return` 掉恢复判定**（否则改完目标后旧告警最长 30 分钟不恢复）；改完影响探针的配置要 `AgentServer.InvalidateAgentConfigs()` 标脏、由 stream 自己的 goroutine 重发（gRPC stream 不能并发 SendMsg）。④ **多系列取值差一个量级就拆图而不是共轴**（Ping 5.4ms vs 5.6ms 在 0~60 轴上只差 0.3% 高度，对数刻度也无效）；最终按用户要求只保留叠加对比 + 每线路统计摘要行（`WkPingChart.vue`，两页共用）。⑤ 覆盖 Element Plus 浮层必须**背景、文字色、箭头三者一起接管**且选择器含 `.is-dark/.is-light`，否则浅色主题下白底白字看起来像一个“空白悬窗”；ECharts 图例在左上时**不要写 `yAxis.name`**（轴名也画在左上，会盖住图例）。⑥ 列表默认**按名称排序**（`localeCompare` 中文序），前后端口径统一用 `utils/format.ts` 的 `nodeState()`。另：本机无 Go 但有 docker，用 `docker run -v wukong-gomod:/go/pkg/mod golang:1.25 go vet ./...` 就能本地把关编译，不必等 CI。
+
+- **2026-10-05 08:20（北京时间）**：新增**微信推送渠道（pushplus 中转）**，渠道覆盖微信 ClawBot / 公众号 / 企业微信应用 / QQ / 邮件。关键结论：① **不走直连 iLink 协议**（要自己维护扫码凭证和 `context_token`）；② 告警出口已收敛为 `Engine.notifyChannels(msg)`，Telegram 逐条即时、pushplus 走 `notify.AlertAggregator` 合并节流（空闲第一条立即发 → 进 5 分钟窗口→窗口结束合成一条），因为 **ClawBot 每 10 条/每 24h 需用户在微信里主动发消息激活**，且 pushplus 自身有 1 分钟 5 次 / 相同内容 1 小时 3 条 / 单日超 1000 次封号 7 天的硬红线；**想避开 10 条限制就换渠道（`wechat`）而不是做多账号轮换**，后者违反风控会封号，禁止实现。③ `pushplus` 接口是**异步**的，`code=200` 只代表已受理（实测假令牌也是 `HTTP=200` + `code:903`），必须看业务码；900/903/905/888 类错误**不得重试**（`notify.retryableError` 接口）。④ 设置项 `pushplus_*` 写入 SQLite 固化，`pushplus_token` **不进 `allowedSettingKeys` 白名单**且永不回显（与 `telegram_bot_token` 同标准）。⑤ 详情链接依赖 `site_domain`；未配置则不输出链接。
 
 ## 部署相关长期提示
 

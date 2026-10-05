@@ -34,6 +34,24 @@ type Message struct {
 	Level   string `json:"level"` // info/warning/critical
 	AgentID string `json:"agent_id"`
 	Metric  string `json:"metric"`
+	// Kind 消息种类：firing（触发）/ resolved（恢复）。
+	// 原因：微信 ClawBot 这类渠道有严格条数上限，必须按"级别 + 种类"过滤；
+	// 恢复通知的 Level 是 info，但运维上必须送达，只按 Level 判断会把它误杀。
+	Kind string `json:"kind"`
+}
+
+// retryableError 渠道错误可以自行声明"这次失败到底值不值得重试"。
+// 原因：pushplus 的 900（账号受限）/903（无效令牌）/905（未实名）属于账号层面不可用，
+// 官方明确说明继续请求会加重限制甚至封号，按 HTTP 状态码一律重试反而会适得其反。
+type retryableError interface {
+	Retryable() bool
+}
+
+// SendWithRetry 供外部（如告警引擎）复用的带退避重试发送。
+// 原因：告警引擎是按渠道逐个构造 Notifier 的，不走 Manager 的注册列表，
+// 但重试策略必须与 Manager 一致，否则各渠道的可靠性行为会分叉。
+func SendWithRetry(n Notifier, msg *Message) error {
+	return sendWithRetry(n, msg)
 }
 
 // Manager 通知管理器
@@ -78,6 +96,11 @@ func sendWithRetry(n Notifier, msg *Message) error {
 		if lastErr == nil {
 			return nil
 		}
+		// 渠道自己声明不可重试时立即返回：例如 pushplus 返回账号受限/令牌无效，
+		// 再打三次只会加重账号限制，不如直接失败并记日志。
+		if re, ok := lastErr.(retryableError); ok && !re.Retryable() {
+			return lastErr
+		}
 		// 如果是 4xx 客户端错误（除 429 限流外），不重试，因为请求本身有问题
 		if isClientError(lastErr) && !isRateLimitError(lastErr) {
 			return lastErr
@@ -86,20 +109,30 @@ func sendWithRetry(n Notifier, msg *Message) error {
 	return lastErr
 }
 
+// httpStatusOf 从各渠道错误类型里取出 HTTP 语义状态码。
+// 原因：新增渠道（pushplus 用业务码而非 HTTP 码表达失败）时不必再改重试判定，
+// 只要错误类型实现 HTTPStatus() 即可复用同一套退避逻辑。
+func httpStatusOf(err error) (int, bool) {
+	if te, ok := err.(*telegramAPIError); ok {
+		return te.statusCode, true
+	}
+	type statuser interface{ HTTPStatus() int }
+	if se, ok := err.(statuser); ok {
+		return se.HTTPStatus(), true
+	}
+	return 0, false
+}
+
 // isClientError 判断是否为 4xx 客户端错误（不需要重试）
 func isClientError(err error) bool {
-	if te, ok := err.(*telegramAPIError); ok {
-		return te.statusCode >= 400 && te.statusCode < 500
-	}
-	return false
+	code, ok := httpStatusOf(err)
+	return ok && code >= 400 && code < 500
 }
 
 // isRateLimitError 判断是否为 429 限流错误（需要重试）
 func isRateLimitError(err error) bool {
-	if te, ok := err.(*telegramAPIError); ok {
-		return te.statusCode == 429
-	}
-	return false
+	code, ok := httpStatusOf(err)
+	return ok && code == 429
 }
 
 // TelegramNotifier Telegram 通知渠道
@@ -129,6 +162,11 @@ type telegramAPIError struct {
 
 func (e *telegramAPIError) Error() string {
 	return fmt.Sprintf("Telegram API 返回 %d: %s", e.statusCode, e.body)
+}
+
+// HTTPStatus 让 Telegram 错误复用 notify 包统一的 4xx/429 判定
+func (e *telegramAPIError) HTTPStatus() int {
+	return e.statusCode
 }
 
 func (t *TelegramNotifier) Send(msg *Message) error {

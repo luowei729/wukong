@@ -115,6 +115,16 @@ cd web && npx vite               # http://127.0.0.1:5173，登录接受任意账
 
 改后端接口字段时，记得同步这个 mock，否则 UI 验证会失真。
 
+**Go 侧现在也能本地验了**：本机没装 Go 但**有 docker**，用共享 module 缓存跑 vet/build 即可，
+不必再等 GHCR 构建才发现编译错误（一次浪费 ~6 分钟）：
+
+```bash
+docker run --rm -v /root/wukong:/src -v wukong-gomod:/go/pkg/mod -w /src \
+  -e CGO_ENABLED=1 golang:1.25 sh -c 'go vet ./... ; echo VET_EXIT=$?'
+```
+
+注意 `mattn/go-sqlite3` 需要 CGO，跑 `go build` 时不要随手加 `CGO_ENABLED=0`（vet 不链接，无所谓）。
+
 ### 构建产物与嵌入
 
 - `cd web && npm run build` → 产物输出到 `internal/webapi/dist/`（`vite.config.ts` 的 `build.outDir`）。
@@ -156,6 +166,42 @@ cd web && npx vite               # http://127.0.0.1:5173，登录接受任意账
   未注入时仅影响下发时效，不会报错。
 - `ping_intv` 下限曾是 5 秒，与“默认 1 秒”的决策矛盾，会让节点详情页保存 1 直接 400；
   改默认值时要回头检查校验区间是否跟着改了。
+
+## 通知渠道与微信推送（2026-10-05）
+
+### 告警分发出口
+
+`Engine.notifyChannels(msg)` 是唯一出口（fire / resolve 两处都调它）：
+- **Telegram 逐条即时**（不走合并器）；
+- **pushplus（微信 ClawBot 等）走 `AlertAggregator` 合并节流**。
+加新渠道只改 `notifyChannels`，不要去改调用点。
+
+### 为什么微信必须做合并节流（长期约束）
+
+- 微信 ClawBot 官方限制：**每下发 10 条、或每隔 24 小时，需用户在微信里主动发一条消息激活**，否则直接失败；
+- pushplus 自身红线（与渠道无关）：实名用户 **1 分钟 5 次**、**相同内容 1 小时 3 条**、
+  单日超 1000 次**封号 7 天**（返回码 900，官方明确说继续请求会加重限制）；
+- 本项目 1 秒采集 + 5 秒一轮告警检查，一次网络抖动就能几十个节点同时超阈，
+  逐条推必然打满配额，结果是“最关键的告警反而发不出去”。
+所以 `AlertAggregator` 语义对齐 Alertmanager：空闲时第一条立即发，然后进窗口（默认 5 分钟，
+后台可改 1~60），窗口结束时把缓存合成一条汇总并续开窗口。要避开 10 条限制就**换渠道而不是做轮换**
+（`wechat` 公众号渠道无条数激活限制，渠道已是可配下拉，改配置即可，不用改代码）。
+多 token/多账号轮换、脚本模拟“用户主动对话”属于规避风控，会触发 900 封号，**禁止实现**。
+
+### pushplus 接入三个坑
+
+1. **接口是异步的**：`code=200` 只代表“已受理排队”，不代表微信送达；必须看业务码而不是 HTTP 状态码。
+   已实测：假令牌返回 `HTTP=200` + `{"code":903,"msg":"用户令牌不正确"}`。成功时 `data` 是消息流水号，
+   失败时 `data` 是错误描述，所以日志里要留流水号供事后查投递结果（自动查需开放接口 AccessKey，未做）。
+2. **部分错误绝不能重试**：900/903/905/888 都是账号或配置问题，为此 `notify` 包加了 `retryableError`
+   接口，`pushplusError.Retryable()` 只对 500/600 返回 true；新渠道遇到同类情况请实现这个接口而不是改重试函数。
+3. **只用 `template=txt`**：ClawBot 只支持纯文本，其他模板会被压成摘要，详情要用户点链接才看得到。
+   默认地址用 `https://www.pushplus.plus`（文档写的是 http，不要把令牌明文发上公网）。
+
+### 敏感令牌存储约定
+
+`pushplus_token` 与 `telegram_bot_token` 一样：**不回显、留空表示保留原值**，并且**故意不加入
+`allowedSettingKeys` 白名单**（否则通用 `GET /api/setting/{key}` 能把令牌读走），只能走专用接口。
 
 ## 生产部署与 CI（2026-10-05 迁移后）
 

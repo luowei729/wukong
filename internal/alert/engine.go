@@ -33,10 +33,14 @@ type Engine struct {
 	silencedAgents map[string]struct{}
 	// 静默分组 map[groupID]struct{}
 	silencedGroups map[string]struct{}
+	// pushplusAgg 微信 ClawBot 等 pushplus 渠道的合并节流器。
+	// 原因：这类渠道有严格条数上限（ClawBot 每 10 条要人工激活，pushplus 自身还有分钟/日频次红线），
+	// 逐条推送会在告警风暴时瞬间打满配额，导致最关键的告警反而发不出去。
+	pushplusAgg *notify.AlertAggregator
 }
 
 func NewEngine(s store.MetricsStore, cfg *config.ServerConfig) *Engine {
-	return &Engine{
+	e := &Engine{
 		store:          s,
 		cfg:            cfg,
 		suppressed:     make(map[string]time.Time),
@@ -44,6 +48,55 @@ func NewEngine(s store.MetricsStore, cfg *config.ServerConfig) *Engine {
 		silencedAgents: make(map[string]struct{}),
 		silencedGroups: make(map[string]struct{}),
 	}
+	// 合并器的三个回调都指向 Engine 方法：
+	// 窗口时长和发送动作都要在发送当时读最新设置，后台改了立即生效，不需要重启主控。
+	e.pushplusAgg = notify.NewAlertAggregator(e.pushplusWindow, pushplusAccept, e.sendPushplus)
+	return e
+}
+
+// pushplusWindow 读取合并窗口分钟数（默认 5 分钟），并限制在 1~60 分钟。
+// 原因：填 0 或负数会让每条告警都立即发送，失去节流意义；
+// 超过 1 小时则告警压得太久，运维价值已经消失，所以两侧都兜底。
+func (e *Engine) pushplusWindow() time.Duration {
+	minutes := e.settingInt("pushplus_merge_minutes", 5)
+	if minutes < 1 {
+		minutes = 1
+	}
+	if minutes > 60 {
+		minutes = 60
+	}
+	return time.Duration(minutes) * time.Minute
+}
+
+// pushplusAccept 只推关键消息：warning/critical 的触发 + 全部恢复通知。
+// 原因：ClawBot 每 10 条需要用户在微信里主动发一条消息激活，配额必须留给真正需要人处理的消息；
+// 恢复通知的 Level 是 info，但"已恢复"直接决定用户要不要继续排查，所以按 Kind 放行。
+func pushplusAccept(msg *notify.Message) bool {
+	if msg.Kind == "resolved" || msg.Kind == "summary" {
+		return true
+	}
+	return msg.Level == "warning" || msg.Level == "critical"
+}
+
+// settingString 读取字符串型设置，出错一律当空处理（推送链路不能因为读配置失败而 panic）
+func (e *Engine) settingString(key string) string {
+	value, err := e.store.GetSetting(key)
+	if err != nil {
+		return ""
+	}
+	return value
+}
+
+func (e *Engine) settingBool(key string, fallback bool) bool {
+	value, err := e.store.GetSetting(key)
+	if err != nil || strings.TrimSpace(value) == "" {
+		return fallback
+	}
+	v, err := strconv.ParseBool(strings.TrimSpace(value))
+	if err != nil {
+		return fallback
+	}
+	return v
 }
 
 // ThresholdConfig 单个指标的阈值配置
@@ -91,6 +144,10 @@ func (e *Engine) Run(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
+			// 退出前把合并窗口里缓存的告警一次性发出，不能因为进程结束而静默丢失
+			if e.pushplusAgg != nil {
+				e.pushplusAgg.Close()
+			}
 			log.Println("告警引擎已停止")
 			return
 		case <-ticker.C:
@@ -257,12 +314,13 @@ func (e *Engine) fireAlert(agent *store.Agent, metric string, threshold, value f
 	}
 	log.Printf("告警引擎: 触发告警 id=%d agent=%s metric=%s value=%.1f threshold=%.1f",
 		id, agent.Name, metric, value, threshold)
-	e.sendTelegramNotification(&notify.Message{
+	e.notifyChannels(&notify.Message{
 		Title:   fmt.Sprintf("%s 触发%s告警", agent.Name, metricName(metric)),
 		Body:    fmt.Sprintf("当前值 %.1f，阈值 %.1f", value, threshold),
 		Level:   alertLevel(metric),
 		AgentID: agent.ID,
 		Metric:  metric,
+		Kind:    "firing", // 触发类：pushplus 渠道按级别判定是否推送
 	})
 }
 
@@ -283,13 +341,44 @@ func (e *Engine) resolveAlert(agent *store.Agent, metric string, value float64) 
 	delete(e.suppressed, agent.ID+":"+metric)
 	delete(e.exceedDuration, agent.ID+":"+metric)
 	e.mu.Unlock()
-	e.sendTelegramNotification(&notify.Message{
+	e.notifyChannels(&notify.Message{
 		Title:   fmt.Sprintf("%s %s已恢复", agent.Name, metricName(metric)),
 		Body:    fmt.Sprintf("当前值 %.1f，告警已恢复", value),
 		Level:   "info",
 		AgentID: agent.ID,
 		Metric:  metric,
+		Kind:    "resolved", // 恢复通知：不受级别过滤，pushplus 渠道必须送达
 	})
+}
+
+// notifyChannels 把一条告警分发给所有已配置渠道。
+// 原因：原来只有 sendTelegramNotification 一个硬出口，加新渠道就要改每个调用点；
+// 收敛成一个分发函数后渠道之间互不影响：Telegram 保持逐条即时，pushplus 走合并节流。
+func (e *Engine) notifyChannels(msg *notify.Message) {
+	e.sendTelegramNotification(msg)
+	if e.pushplusAgg != nil {
+		e.pushplusAgg.Submit(msg)
+	}
+}
+
+// sendPushplus 通过 pushplus 中转推送（微信 ClawBot / 公众号 / 企业微信应用等）。
+// 每次发送时才读设置：渠道、令牌、站点域名在后台改完立即生效，不需要重启主控。
+func (e *Engine) sendPushplus(msg *notify.Message) {
+	token := strings.TrimSpace(e.settingString("pushplus_token"))
+	if token == "" {
+		return
+	}
+	// 未启用时直接跳过：设置页允许先存令牌再开关试推
+	if !e.settingBool("pushplus_enabled", false) {
+		return
+	}
+	channel := strings.TrimSpace(e.settingString("pushplus_channel"))
+	n := notify.NewPushplusNotifier(token, channel)
+	// 详情链接依赖 site_domain；未配置时 Notifier 内部会自动不输出链接
+	n.SiteURL = strings.TrimSpace(e.settingString("site_domain"))
+	if err := notify.SendWithRetry(n, msg); err != nil {
+		log.Printf("告警引擎: %s 通知发送失败: %v", n.Name(), err)
+	}
 }
 
 func (e *Engine) sendTelegramNotification(msg *notify.Message) {

@@ -289,3 +289,37 @@ IPv6 目标一键选节点与列表作用域列。
 - 线上验收项：新增“上海移动IPv6”并排除无 IPv6 节点后，有 v6 出口的节点日志 `Ping目标数` 为 4，
   hk2/sh1 仍为 3；公开详情页不再出现无数据线路行。
 
+## 十七、2026-10-05 08:20（北京时间）新增微信推送渠道（pushplus 中转）
+
+### 改动前总结
+告警通知只有 Telegram 一条路（`Engine.sendTelegramNotification` 是唯一硬出口），国内环境访问不稳定。
+用户要求对接微信 ClawBot。调研后确认两条路径差异很大：直连微信官方 iLink ClawBot 协议需要主控自己
+维护扫码凭证与 `context_token`，还要处理"每下发 10 条 / 每 24 小时需用户主动在微信发一条消息"的激活
+续期，状态脆弱；改走 pushplus 中转后主控侧只是一次 HTTP POST，且渠道可随时在微信 ClawBot / 公众号 /
+企业微信应用之间切换。用户确认：pushplus 中转 + 只推关键告警并合并 + 纯文本带详情链接 + 配置入口放设置页。
+
+### 改动后总结
+- `internal/notify/pushplus.go`：`PushplusNotifier`（`POST https://www.pushplus.plus/send/{token}`，
+  `template=txt`，正文含 `site_domain` 拼出的节点详情链接）；业务码非 200 视为失败，成功日志记录消息流水号。
+- `internal/notify/aggregator.go`：`AlertAggregator` 合并节流器（第一条立即发 → 5 分钟窗口 → 窗口结束合成
+  一条汇总并续窗；汇总最多列 10 条，缓存上限 200，退出时同步 flush）。
+- `internal/notify/notify.go`：`Message.Kind`（firing/resolved/summary）、`retryableError` 接口、
+  `SendWithRetry` 导出、4xx/429 判定改为基于 `HTTPStatus()` 接口，不再只认 `*telegramAPIError`。
+- `internal/alert/engine.go`：新增 `notifyChannels` 统一出口（Telegram 逐条即时、pushplus 走合并器）、
+  `sendPushplus`（发送时读最新设置，热生效）、`pushplusWindow`、`pushplusAccept`、`settingString`/`settingBool`。
+- `internal/webapi`：`GET/PUT /api/pushplus`、`POST /api/pushplus/test`；设置项 `pushplus_enabled`/
+  `pushplus_token`/`pushplus_channel`/`pushplus_merge_minutes` 固化进 SQLite；渠道白名单校验；
+  令牌不进通用 settings 白名单也不回显。
+- `web/src/views/Settings.vue`：新增"微信推送"节（启用开关、令牌、渠道下拉、合并窗口、测试按钮），
+  页面上写明 ClawBot 的 10 条激活限制与"改用公众号渠道可避开"。
+
+### 验证结果
+- `go vet ./...` 本机通过（改用 `docker run -v wukong-gomod:/go/pkg/mod golang:1.25`，本机无 Go 也能把关）；
+  `vue-tsc` 零错误、`vite build` 成功。
+- 真实探测 pushplus 接口（假令牌）：`HTTP=200` + `{"code":903,"msg":"用户令牌不正确"}`，
+  证实 https 与路径可用，并证实"只看 HTTP 状态码会把失败误判成成功"。
+- 待用户在后台填入 pushplus 令牌并点"发送测试通知"完成端到端确认。
+
+### 后续可选
+- 接 pushplus 开放接口（AccessKey）自动查投递状态（`sendStatus` 3=发送失败），把"未激活"明确暴露到 UI。
+- 若告警量继续增长，可增加"每日配额闸门"与按分组绑定不同渠道（决策 #17 的分组路由目前仍未真正生效）。
