@@ -1,0 +1,2 @@
+# 该文件仅用于让 //go:embed all:dist 在干净检出时仍能编译通过。
+# 真正的前端产物由 `make build-frontend`（或 CI 的 node 阶段）生成，不入库。

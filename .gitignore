@@ -21,7 +21,12 @@ bin/
 # 前端依赖与构建产物：依赖通过 package-lock.json 复现，构建产物由发布流程生成。
 web/node_modules/
 web/dist/
-internal/webapi/dist/
+# 注意：这里用 `dist/*` 而不是 `dist/`。Git 不会进入被忽略的目录，
+# 所以目录级排除会让下面的 .gitkeep 例外完全失效（实测踩过）。
+internal/webapi/dist/*
+# 保留 .gitkeep 占位：//go:embed all:dist 要求目录至少有一个文件，
+# 否则干净检出后 go build 会直接报 `pattern all:dist: no matching files found`。
+!internal/webapi/dist/.gitkeep
 
 # 编辑器和系统文件：避免把个人环境配置提交到项目。
 .vscode/
