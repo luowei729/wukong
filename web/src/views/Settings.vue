@@ -234,40 +234,107 @@
         </el-table>
       </WkCard>
 
-      <!-- ================= 4. 告警阈值 ================= -->
-      <WkCard v-show="activeSection === 'thresholds'" title="告警阈值" subtitle="固定 6 项指标 + 持续时间，支持探针 / 分组 / 全局三级回退">
-        <div class="wk-set-grid">
-          <div class="wk-set-field">
-            <label class="wk-eyebrow">离线报警阈值（秒）</label>
-            <el-input-number v-model="thresholds.offline_seconds" :min="5" :max="3600" :step="5" />
-            <div class="form-tip">节点最后心跳超过该秒数后触发离线告警。</div>
-          </div>
-
-          <div class="wk-set-field">
-            <label class="wk-eyebrow">资源告警持续时间（秒）</label>
-            <el-input-number v-model="thresholds.metric_duration_seconds" :min="1" :max="3600" :step="5" />
-            <div class="form-tip">指标持续超过阈值多久后才告警，用于滞回防抖。</div>
-          </div>
+      <!-- ================= 4. 告警规则（每项独立开关与参数）================= -->
+      <WkCard
+        v-show="activeSection === 'thresholds'"
+        title="告警规则"
+        subtitle="6 项告警各自独立开关；阈值、持续时间、恢复滞回、抑制期按项单独调节"
+      >
+        <div v-if="rulesLoading && ruleCards.length === 0" class="wk-sub">
+          正在加载告警规则…
         </div>
 
-        <!-- 百分比阈值统一用滑杆，输入框联动，比纯数字更容易设定区间 -->
-        <div class="wk-slider-group">
-          <div v-for="item in sliderThresholds" :key="item.key" class="wk-slider-row">
-            <span class="wk-slider-label">{{ item.label }}</span>
-            <el-slider v-model="thresholds[item.key]" :min="1" :max="100" show-input :show-input-controls="false" />
-          </div>
-        </div>
+        <!-- 一张卡一个告警项：开关就在标题行，参数收在卡内，关掉就置灰 -->
+        <div class="wk-rule-grid">
+          <div
+            v-for="card in ruleCards"
+            :key="card.metric"
+            :class="['wk-rule', { 'is-off': !card.rule.enabled }]"
+          >
+            <div class="wk-rule-head">
+              <div class="wk-rule-titles">
+                <span class="wk-rule-title">{{ card.spec.label }}</span>
+                <span class="wk-rule-unit">{{ card.spec.unit }}</span>
+              </div>
+              <el-switch v-model="card.rule.enabled" />
+            </div>
 
-        <div class="wk-set-grid" style="margin-top: var(--wk-space-4)">
-          <div class="wk-set-field">
-            <label class="wk-eyebrow">Ping 延迟告警阈值 (ms)</label>
-            <el-input-number v-model="thresholds.ping_latency" :min="1" :max="10000" :step="10" />
-            <div class="form-tip">任一运营商线路最近延迟持续超过该阈值时触发。</div>
+            <div class="wk-rule-body">
+              <div class="wk-rule-field">
+                <span class="wk-eyebrow">告警阈值</span>
+                <el-slider
+                  v-model="card.rule.warning"
+                  :min="card.spec.min"
+                  :max="card.spec.max"
+                  :step="card.spec.step"
+                  :disabled="!card.rule.enabled"
+                />
+                <el-input-number
+                  v-model="card.rule.warning"
+                  :min="card.spec.min"
+                  :max="card.spec.max"
+                  :step="card.spec.step"
+                  size="small"
+                  :controls="false"
+                  :disabled="!card.rule.enabled"
+                  class="wk-rule-num"
+                />
+              </div>
+
+              <!-- 离线项没有“持续时间”语义（阈值本身就是无心跳秒数），按后端 spec 控制隐现 -->
+              <div v-if="card.spec.has_duration" class="wk-rule-field">
+                <span class="wk-eyebrow">持续时间（秒）</span>
+                <el-input-number
+                  v-model="card.rule.duration"
+                  :min="1"
+                  :max="3600"
+                  :step="5"
+                  size="small"
+                  :disabled="!card.rule.enabled"
+                />
+              </div>
+
+              <div v-if="card.spec.has_recovery" class="wk-rule-field">
+                <span class="wk-eyebrow">恢复滞回</span>
+                <el-input-number
+                  v-model="card.rule.recovery"
+                  :min="0"
+                  :max="card.spec.max"
+                  :step="card.spec.step"
+                  size="small"
+                  :disabled="!card.rule.enabled"
+                />
+              </div>
+
+              <div class="wk-rule-field">
+                <span class="wk-eyebrow">抑制期（分钟）</span>
+                <el-input-number
+                  v-model="card.rule.suppress_min"
+                  :min="1"
+                  :max="1440"
+                  :step="5"
+                  size="small"
+                  :disabled="!card.rule.enabled"
+                />
+              </div>
+            </div>
+
+            <div class="wk-rule-tip">
+              <span v-if="!card.spec.has_duration">
+                最后心跳超过阈值秒数则告警；重新上线自动恢复。
+              </span>
+              <span v-else>
+                指标持续超阈达持续时间后告警，回落到滞回值以下才恢复；抑制期内不重复推送。
+              </span>
+            </div>
           </div>
         </div>
 
         <div class="wk-set-actions">
-          <el-button type="primary" :loading="thresholdSaving" @click="saveThresholds">保存阈值</el-button>
+          <el-button type="primary" :loading="rulesSaving" @click="saveAlertRules">
+            保存告警规则
+          </el-button>
+          <span class="wk-sub">保存后下一轮检查（≤5 秒）即生效，不需重启主控</span>
         </div>
       </WkCard>
 
@@ -500,25 +567,47 @@ const ppForm = reactive({
 const pushplusSaving = ref(false)
 const pushplusTesting = ref(false)
 
-// ===== 告警阈值 =====
-const thresholds = reactive<Record<string, number>>({
-  cpu: 90,
-  mem: 90,
-  disk: 90,
-  ping_latency: 200,
-  ping_loss: 20,
-  offline_seconds: 30,
-  metric_duration_seconds: 60,
-})
-const thresholdSaving = ref(false)
+// ===== 告警规则（每项独立开关与参数）=====
+// spec / rule 的结构与后端 alert.RuleSpec / alert.Rule 一一对应；
+// 默认值、取值范围、单位都由后端 spec 下发，前端不再写死一套数字。
+interface RuleSpec {
+  metric: string
+  label: string
+  unit: string
+  min: number
+  max: number
+  step: number
+  default_warning: number
+  default_duration: number
+  default_recovery: number
+  has_duration: boolean
+  has_recovery: boolean
+}
 
-// 滑杆型阈值（百分比语义）单独列出，渲染成统一的滑杆行
-const sliderThresholds: Array<{ key: string; label: string }> = [
-  { key: 'cpu', label: 'CPU (%)' },
-  { key: 'mem', label: '内存 (%)' },
-  { key: 'disk', label: '磁盘 (%)' },
-  { key: 'ping_loss', label: 'Ping 丢包 (%)' },
-]
+interface Rule {
+  metric: string
+  enabled: boolean
+  warning: number
+  duration: number
+  recovery: number
+  suppress_min: number
+}
+
+const ruleSpecs = ref<RuleSpec[]>([])
+const ruleList = ref<Rule[]>([])
+const rulesLoading = ref(false)
+const rulesSaving = ref(false)
+
+// 把 spec 与 rule 配成渲染用的卡片列表。
+// 注意：rule 直接引用 ruleList 里的对象而不是复制，否则卡片里 v-model 改不到源数据。
+const ruleCards = computed(() =>
+  ruleSpecs.value
+    .map((spec) => {
+      const rule = ruleList.value.find((item) => item.metric === spec.metric)
+      return rule ? { metric: spec.metric, spec, rule } : null
+    })
+    .filter((card): card is { metric: string; spec: RuleSpec; rule: Rule } => card !== null)
+)
 
 // ===== 探针升级（只读展示，保留字段兼容） =====
 const upgradeForm = reactive({ target_version: '', upgrade_url: '' })
@@ -624,7 +713,7 @@ const navGroups = [
       },
       {
         key: 'thresholds',
-        label: '告警阈值',
+        label: '告警规则',
         icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"><path d="M4 18V9M10 18V4M16 18v-7M22 18h-20"/></svg>',
       },
     ],
@@ -861,30 +950,32 @@ async function loadUpgradeSettings() {
   } catch {}
 }
 
-// ===== 告警阈值 =====
-async function loadThresholds() {
+// ===== 告警规则 =====
+async function loadAlertRules() {
+  rulesLoading.value = true
   try {
-    const res = await http.get(`/api/alert-settings?_=${Date.now()}`)
-    thresholds.cpu = res.data.cpu ?? thresholds.cpu
-    thresholds.mem = res.data.mem ?? thresholds.mem
-    thresholds.disk = res.data.disk ?? thresholds.disk
-    thresholds.ping_latency = res.data.ping_latency ?? thresholds.ping_latency
-    thresholds.ping_loss = res.data.ping_loss ?? thresholds.ping_loss
-    thresholds.offline_seconds = res.data.offline_seconds ?? thresholds.offline_seconds
-    thresholds.metric_duration_seconds =
-      res.data.metric_duration_seconds ?? thresholds.metric_duration_seconds
-  } catch {}
+    const res = await http.get(`/api/alert-rules?_=${Date.now()}`)
+    ruleSpecs.value = Array.isArray(res.data.specs) ? res.data.specs : []
+    ruleList.value = Array.isArray(res.data.rules) ? res.data.rules : []
+  } catch (e: any) {
+    ElMessage.error(e.response?.data?.error || '加载告警规则失败')
+  } finally {
+    rulesLoading.value = false
+  }
 }
 
-async function saveThresholds() {
-  thresholdSaving.value = true
+async function saveAlertRules() {
+  rulesSaving.value = true
   try {
-    await http.put('/api/alert-settings', thresholds)
-    ElMessage.success('告警阈值已保存')
+    const res = await http.put('/api/alert-rules', { rules: ruleList.value })
+    // 用后端规范化后的值回填：范围夹紧、离线项 duration=0 等清洗以服务端结果为准，
+    // 避免界面显示的是用户输入的原始值而与实际生效值不一致
+    if (Array.isArray(res.data.rules)) ruleList.value = res.data.rules
+    ElMessage.success('告警规则已保存')
   } catch (e: any) {
-    ElMessage.error(e.response?.data?.error || '保存告警阈值失败')
+    ElMessage.error(e.response?.data?.error || '保存告警规则失败')
   } finally {
-    thresholdSaving.value = false
+    rulesSaving.value = false
   }
 }
 
@@ -1001,7 +1092,7 @@ onMounted(async () => {
   await Promise.all([
     loadTelegram(),
     loadPushplus(),
-    loadThresholds(),
+    loadAlertRules(),
     loadISPTargets(),
     loadUpgradeSettings(),
     // 作用域选择需要节点列表，与其他配置并行拉取
@@ -1189,24 +1280,88 @@ onMounted(async () => {
   line-height: 1.7;
 }
 
-/* 阈值滑杆行 */
-.wk-slider-group {
+/* 告警规则卡：一张卡一个告警项，开关就在标题行 */
+.wk-rule-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: var(--wk-space-4);
+  margin-top: var(--wk-space-2);
+}
+
+.wk-rule {
   display: flex;
   flex-direction: column;
-  gap: var(--wk-space-2);
-  margin-top: var(--wk-space-5);
+  gap: var(--wk-space-3);
+  padding: var(--wk-space-4);
+  background: var(--wk-bg-soft);
+  border: 1px solid var(--wk-border);
+  border-radius: var(--wk-radius-lg);
+  transition: opacity var(--wk-dur-fast) var(--wk-ease);
 }
 
-.wk-slider-row {
-  display: grid;
-  grid-template-columns: 120px minmax(0, 1fr);
+/* 关掉后置灰而不是隐藏：参数仍然可读，知道“下次开起来是什么值” */
+.wk-rule.is-off {
+  opacity: 0.55;
+}
+
+.wk-rule-head {
+  display: flex;
   align-items: center;
-  gap: var(--wk-space-4);
+  justify-content: space-between;
+  gap: var(--wk-space-3);
 }
 
-.wk-slider-label {
-  font-size: var(--wk-fs-base);
-  color: var(--wk-text-secondary);
+.wk-rule-titles {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+
+.wk-rule-title {
+  font-size: var(--wk-fs-md);
+  font-weight: var(--wk-fw-semibold);
+  letter-spacing: -0.012em;
+}
+
+.wk-rule-unit {
+  font-size: var(--wk-fs-xs);
+  color: var(--wk-text-muted);
+}
+
+.wk-rule-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--wk-space-3);
+}
+
+/* 字段内部：标题占满一行，滑杆与数字框同行，避免数字框单独占一整行拉高卡片 */
+.wk-rule-field {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: var(--wk-space-3);
+  row-gap: 6px;
+}
+
+.wk-rule-field .wk-eyebrow {
+  grid-column: 1 / -1;
+}
+
+/* 没有滑杆的字段（持续/滞回/抑制）把输入框放在左列，不靠右拉开空白 */
+.wk-rule-field > .el-input-number:not(.wk-rule-num) {
+  grid-column: 1;
+  justify-self: start;
+}
+
+.wk-rule-num {
+  width: 96px;
+}
+
+.wk-rule-tip {
+  font-size: var(--wk-fs-xs);
+  color: var(--wk-text-muted);
+  line-height: 1.5;
 }
 
 /* ISP 内联表单：换行留白 */
@@ -1265,9 +1420,13 @@ onMounted(async () => {
     grid-template-columns: 1fr;
   }
 
-  .wk-slider-row {
-    grid-template-columns: 1fr;
-    gap: var(--wk-space-1);
+  /* 手机上规则卡已经由 auto-fill 降为单列，这里只处理卡内滑杆与数字框的堆叠 */
+  .wk-rule-field {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .wk-rule-num {
+    width: 72px;
   }
 }
 </style>

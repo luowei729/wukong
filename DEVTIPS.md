@@ -210,6 +210,23 @@ docker run --rm -v /root/wukong:/src -v wukong-gomod:/go/pkg/mod -w /src \
 - `ping_intv` 下限曾是 5 秒，与“默认 1 秒”的决策矛盾，会让节点详情页保存 1 直接 400；
   改默认值时要回头检查校验区间是否跟着改了。
 
+### 告警规则模型（2026-10-07 00:53）
+
+- 六项告警（offline/cpu/mem/disk/ping_latency/ping_loss）**各自一条规则**，存
+  `settings.alert_rule_<metric>` 的 JSON：`enabled / warning / duration / recovery / suppress_min`。
+- **所有默认值、范围、单位、"哪一项有持续时间/滞回"只写在 `alert.ruleSpecs` 一处**，
+  引擎兜底、API 校验、前端渲染都从 `GET /api/alert-rules` 的 specs 取。
+  加新告警项只需往 `ruleSpecs` 加一条 + 引擎里加一次 `checkMetric`，前端零改动。
+- **离线项特殊**：`warning` 的含义是"无心跳秒数"，`has_duration=false`、`has_recovery=false`
+  （恢复=重新上线，没有滞回可言），`normalize` 会把这两个字段强制置 0，前端按 spec 不渲染。
+- **滞回必须低于阈值**：`normalize` 里 `recovery >= warning` 会回退到默认值，`ValidateRule` 也会拒绝，
+  否则 `value <= recovery` 永远不成立、告警无法自动恢复。
+- **关闭某项要清理遗留 firing**：`Engine.ruleEnabled` 记录上一轮开关，只在"启用→关闭"这一次
+  调 `resolveMetricAlerts` 静默 resolve（不发通知，否则十几个节点一起推会打爆微信配额）。
+  关掉后不处理的话，告警中心会永远挂着这条 firing。
+- 旧接口 `/api/alert-settings` 保留兼容：GET 从规则派生，PUT 只改 warning/duration
+  并回写旧扁平 key。**新前端一律用 `/api/alert-rules`**。
+
 ## 通知渠道与微信推送（2026-10-05）
 
 ### 告警分发出口

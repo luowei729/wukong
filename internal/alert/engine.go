@@ -37,6 +37,9 @@ type Engine struct {
 	// 原因：这类渠道有严格条数上限（ClawBot 每 10 条要人工激活，pushplus 自身还有分钟/日频次红线），
 	// 逐条推送会在告警风暴时瞬间打满配额，导致最关键的告警反而发不出去。
 	pushplusAgg *notify.AlertAggregator
+	// ruleEnabled 记录上一轮各项规则的开关，用于捕捉"启用→关闭"的瞬间。
+	// 原因：关掉某项告警后引擎不再检查它，如果不清理，已存在的 firing 记录会永远挂在告警中心。
+	ruleEnabled map[string]bool
 }
 
 func NewEngine(s store.MetricsStore, cfg *config.ServerConfig) *Engine {
@@ -47,6 +50,7 @@ func NewEngine(s store.MetricsStore, cfg *config.ServerConfig) *Engine {
 		exceedDuration: make(map[string]time.Duration),
 		silencedAgents: make(map[string]struct{}),
 		silencedGroups: make(map[string]struct{}),
+		ruleEnabled:    make(map[string]bool),
 	}
 	// 合并器的三个回调都指向 Engine 方法：
 	// 窗口时长和发送动作都要在发送当时读最新设置，后台改了立即生效，不需要重启主控。
@@ -163,13 +167,31 @@ func (e *Engine) checkAlerts() {
 		return
 	}
 
+	// 每轮开头读一次规则（6 条 setting，开销远小于逐节点重复读）。
+	// 从 SQLite 而不是配置文件取值：后台改完下一轮（≤5s）就生效，不需要重启主控。
+	rules := LoadRules(e.store, e.cfg.AlertSuppressMinutes)
+	for _, spec := range RuleSpecs() {
+		rule := rules[spec.Metric]
+		prev, seen := e.ruleEnabled[spec.Metric]
+		e.ruleEnabled[spec.Metric] = rule.Enabled
+		if !rule.Enabled {
+			// 只在"启用→关闭"这一次做清理，避免每 5 秒重复扫活跃告警
+			if seen && prev {
+				e.resolveMetricAlerts(spec.Metric)
+			}
+		}
+	}
+
 	for _, agent := range agents {
 		if !agent.Online {
-			e.handleOffline(agent)
+			if rules[MetricOffline].Enabled {
+				e.handleOffline(agent, rules[MetricOffline])
+			}
 			continue
 		}
 
 		// 节点恢复在线时，必须恢复 offline 告警并发送恢复通知。
+		// 即使离线告警被关掉也要清理，否则记录会永远挂在 firing。
 		e.resolveAlert(agent, "offline", 0)
 
 		// 获取最新指标
@@ -178,21 +200,59 @@ func (e *Engine) checkAlerts() {
 			continue
 		}
 
-		// 检查各指标，阈值和持续时间优先使用 SQLite settings 表，后台保存后立即生效。
-		duration := e.settingInt("alert_metric_duration_seconds", 60)
-		e.checkMetric(agent, "cpu", metrics.CPU, e.settingFloat("alert_cpu_threshold", 90), 85, duration)
-		e.checkMetric(agent, "mem", metrics.Mem, e.settingFloat("alert_mem_threshold", 90), 85, duration)
-		e.checkMetric(agent, "disk", metrics.Disk, e.settingFloat("alert_disk_threshold", 90), 85, e.settingInt("alert_disk_duration_seconds", 300))
-		e.checkPingMetrics(agent, duration)
+		// 资源类指标：每项用自己的规则（阈值/持续/滞回/抑制期），关掉就完全跳过
+		if rules[MetricCPU].Enabled {
+			e.checkMetric(agent, "cpu", metrics.CPU, rules[MetricCPU])
+		}
+		if rules[MetricMem].Enabled {
+			e.checkMetric(agent, "mem", metrics.Mem, rules[MetricMem])
+		}
+		if rules[MetricDisk].Enabled {
+			e.checkMetric(agent, "disk", metrics.Disk, rules[MetricDisk])
+		}
+		e.checkPingMetrics(agent, rules)
 	}
 }
 
-func (e *Engine) handleOffline(agent *store.Agent) {
+// resolveMetricAlerts 在某项告警被关闭时，静默清理它遗留的 firing 记录。
+// 不发恢复通知的原因：一次开关可能涉及十几个节点，全部推送会瞬间打爆
+// 微信 ClawBot 的条数配额，而且"用户自己关掉的规则"本来也不需要通知。
+func (e *Engine) resolveMetricAlerts(metric string) {
+	active, err := e.store.ListActiveAlerts()
+	if err != nil {
+		log.Printf("告警引擎: 清理已关闭告警 %s 时查询活跃记录失败: %v", metric, err)
+		return
+	}
+	count := 0
+	for _, alert := range active {
+		if alert == nil || alert.Metric != metric {
+			continue
+		}
+		if err := e.store.ResolveAlert(alert.AgentID, metric); err != nil {
+			log.Printf("告警引擎: 清理告警记录失败 agent=%s metric=%s err=%v", alert.AgentID, metric, err)
+			continue
+		}
+		// 同步清掉内存状态，重新开启时不会被旧抑制期挡住
+		key := alert.AgentID + ":" + metric
+		e.mu.Lock()
+		delete(e.suppressed, key)
+		delete(e.exceedDuration, key)
+		e.mu.Unlock()
+		count++
+	}
+	if count > 0 {
+		log.Printf("告警引擎: 已关闭 %s 告警，静默清理 %d 条活跃记录", metric, count)
+	}
+}
+
+func (e *Engine) handleOffline(agent *store.Agent, rule Rule) {
 	key := agent.ID + ":offline"
+	// 离线告警的抑制期也改成该项自己的配置，不再共用一个全局值
+	suppressWindow := time.Duration(rule.SuppressMin) * time.Minute
 	e.mu.RLock()
 	firedAt, suppressed := e.suppressed[key]
 	e.mu.RUnlock()
-	if suppressed && time.Since(firedAt) < time.Duration(e.cfg.AlertSuppressMinutes)*time.Minute {
+	if suppressed && time.Since(firedAt) < suppressWindow {
 		return
 	}
 	if suppressed {
@@ -202,8 +262,11 @@ func (e *Engine) handleOffline(agent *store.Agent) {
 		e.mu.Unlock()
 	}
 
-	// 离线告警按最后心跳时间和后台配置的离线阈值判断，避免节点刚短暂重连就立刻报警。
-	offlineSeconds := e.settingInt("alert_offline_seconds", e.cfg.HeartbeatTimeout)
+	// 离线阈值就是"最后心跳超过多少秒算离线"，按后台配置判断，避免节点刚短暂重连就立刻报警。
+	offlineSeconds := int(rule.Warning)
+	if offlineSeconds <= 0 {
+		offlineSeconds = e.cfg.HeartbeatTimeout
+	}
 	if agent.LastSeenAt != nil && time.Since(*agent.LastSeenAt) < time.Duration(offlineSeconds)*time.Second {
 		return
 	}
@@ -214,7 +277,13 @@ func (e *Engine) handleOffline(agent *store.Agent) {
 	e.mu.Unlock()
 }
 
-func (e *Engine) checkPingMetrics(agent *store.Agent, durationSec int) {
+func (e *Engine) checkPingMetrics(agent *store.Agent, rules map[string]Rule) {
+	latencyRule := rules[MetricPingLatency]
+	lossRule := rules[MetricPingLoss]
+	// 两项都关掉时直接返回，连 ISP 目标列表和聚合查询都不用发
+	if !latencyRule.Enabled && !lossRule.Enabled {
+		return
+	}
 	targets, err := e.store.ListISPTargets()
 	if err != nil {
 		log.Printf("告警引擎: 获取 Ping 目标失败: %v", err)
@@ -241,14 +310,21 @@ func (e *Engine) checkPingMetrics(agent *store.Agent, durationSec int) {
 			worstLoss = lossPercent
 		}
 	}
-	latencyThreshold := e.settingFloat("alert_ping_latency_threshold", 200)
-	lossThreshold := e.settingFloat("alert_ping_loss_threshold", 20)
-	e.checkMetric(agent, "ping_latency", worstLatency, latencyThreshold, latencyThreshold*0.8, durationSec)
-	e.checkMetric(agent, "ping_loss", worstLoss, lossThreshold, lossThreshold*0.5, durationSec)
+	// 延迟与丢包各自用自己的规则：旧版共用资源告警的持续时间、滞回还是写成阈值乘系数，
+	// 现在两项参数完全独立（滞回默认 150ms / 5%，均可在后台改）
+	if latencyRule.Enabled {
+		e.checkMetric(agent, "ping_latency", worstLatency, latencyRule)
+	}
+	if lossRule.Enabled {
+		e.checkMetric(agent, "ping_loss", worstLoss, lossRule)
+	}
 }
 
-func (e *Engine) checkMetric(agent *store.Agent, metric string, value, threshold, recovery float64, durationSec int) {
+func (e *Engine) checkMetric(agent *store.Agent, metric string, value float64, rule Rule) {
 	key := agent.ID + ":" + metric
+	threshold := rule.Warning
+	recovery := rule.Recovery
+	durationSec := rule.Duration
 	shouldFire := false
 	shouldResolve := false
 
@@ -256,9 +332,10 @@ func (e *Engine) checkMetric(agent *store.Agent, metric string, value, threshold
 	// 抑制期只用于压制“重复触发/重复通知”，绝不能跳过恢复判断。
 	// 旧实现在抑制期内直接 return，导致改了运营商目标、指标早已回落到 0% 丢包后，
 	// 告警记录仍挂 firing 最长 30 分钟（用户反馈的“改了 IP 还在报警”）。
+	// 抑制期改成按该项规则取值，不同告警可以有不同的防抖节奏。
 	suppressed := false
 	if firedAt, ok := e.suppressed[key]; ok {
-		if time.Since(firedAt) < time.Duration(e.cfg.AlertSuppressMinutes)*time.Minute {
+		if time.Since(firedAt) < time.Duration(rule.SuppressMin)*time.Minute {
 			suppressed = true
 		} else {
 			delete(e.suppressed, key)

@@ -1,6 +1,6 @@
 # wukong 监控系统 - 开发规范与提示
 
-> 最后更新: 2026-10-06 07:43 (北京时间)
+> 最后更新: 2026-10-07 00:53 (北京时间)
 
 ## 开发原则
 
@@ -123,6 +123,8 @@ wukong/
 - **2026-10-06 07:21（北京时间）**：修 X 轴 `undefined` 与公开详情页板块无间距。① **趋势点字段名两套接口不一样**：管理接口 `store.RawSystemMetric` 是 `json:"ts"`，公开接口 `public.go` 是 `json:"timestamp"`，读错就整条 X 轴变 `undefined`（且只有一个页面出错，容易误判为数据问题）；前端取时间统一 `item.ts ?? item.timestamp`。② `formatClock`/`formatHourMinute` 对非法值**必须返回 `-`**，旧代码 `String(value)` 会把 "undefined" 画上图表轴——所有"看起来像数据其实是字段名错"的问题都源于此。③ 公开详情页 `main` 是普通 block，板块之间必须挂 `.wk-public-sections`（flex column + `--wk-gap-section`），与后台 `.wk-container-inner` 同令牌。④ **媒体查询不增加特异度**：`index.scss` 顺序是 variables→base→layout→components→element，覆盖 Element Plus 的手机端规则只能写在 `element.scss`，放 `components.scss` 会被靠后的同特异度规则静默覆盖。
 
 - **2026-10-06 07:43（北京时间）**：仓库卫生——`internal/webapi/dist/` **不再跟踪构建产物**，只留 `.gitkeep`。三条必须知道的规则：① 已跟踪文件不受 `.gitignore` 影响（`git check-ignore` 对它们报"未忽略"是 Git 行为不是规则错），解除跟踪必须 `git rm -r --cached`（本地文件不会被删）。② `.gitignore` 里**目录级排除会让子文件取反失效**（Git 不进入已忽略目录），必须写 `internal/webapi/dist/*` + `!internal/webapi/dist/.gitkeep`。③ **`//go:embed all:dist` 要求目录非空**：整个 dist 不在时 `go build` 直接报 `pattern all:dist: no matching files found`，所以不能彻底清空，要留占位；缺 `index.html` 时 `embed.go` 的 `init()` + `PlaceholderHandler` 会显示"请运行 make build-frontend"引导页而不是白屏。CI 不受影响（Dockerfile 用 `COPY --from=frontend-builder` 取现场构建产物）。本地构建走 `make all` / `make dev`（都已串 `build-frontend`）。
+
+- **2026-10-07 00:53（北京时间）**：告警从"扁平阈值"升级为"**每项一条独立规则**"。六项（offline/cpu/mem/disk/ping_latency/ping_loss）各自有 开关/阈值/持续时间/恢复滞回/抑制期，存 `settings.alert_rule_<metric>` JSON。关键约束：① **默认值、范围、单位、"哪一项有持续时间/滞回"只定义在 `internal/alert/rules.go` 的 `ruleSpecs` 一处**，引擎兜底、API 校验、前端渲染都从这里取（`GET /api/alert-rules` 同时下发 specs+rules），前端不许再写死数字；新增告警项只加一条 spec + 一次 `checkMetric` 调用。② 首次读取会从旧扁平 key **自动迁移**并落库，不会抹掉用户已配的阈值；改模型时必须保留这条迁移路径。③ 离线项 `has_duration/has_recovery` 都是 false（warning 语义就是"无心跳秒数"），`normalize` 强制置零。④ **滞回必须低于阈值**，否则 `value <= recovery` 永不成立、告警无法恢复，`normalize` 与 `ValidateRule` 双侧拦截。⑤ **关闭某项会静默清理它遗留的 firing 记录**（只在"启用→关闭"那次执行，不发通知，避免十几个节点一起推打爆微信配额）。⑥ `/api/alert-settings` 保留向后兼容（PUT 只改 warning/duration 并回写旧 key），新前端一律用 `/api/alert-rules`。⑦ 卡片副标题原先写的"探针/分组/全局三级回退"从未实现（store 里没有节点/分组级告警字段），已按实际行为改描述。
 
 ## 部署相关长期提示
 

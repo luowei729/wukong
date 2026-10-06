@@ -2,6 +2,50 @@
 
 所有变更记录使用北京时间（UTC+8）。
 
+## [2026-10-07 00:53] - 告警规则化改造：6 项告警各自独立开关 + 独立参数
+
+### 改动前总结
+用户要求"每种报警都要支持单独开关、单独调节每项的详细参数"。现状核对结论：
+- 每项只有一个阈值 key，**持续时间全局共用** `alert_metric_duration_seconds`（只有磁盘单独，且是引擎里硬编码的 key）
+- **恢复滞回硬编码 85**（`checkMetric(..., 85, duration)`），界面没有入口
+- **抑制期只有配置文件一个全局值**，界面显示但不落库
+- `ThresholdConfig.Enabled` 字段定义了但**引擎从未读取** → 实际上任何一项告警都关不掉
+- 卡片副标题写"支持探针/分组/全局三级回退"，但 store 里没有任何节点/分组级告警字段，实际只有全局一份（描述与实现不符）
+
+经确认采用：只做全局一份规则表 + 每项 5 个参数（开关/阈值/持续时间/恢复滞回/抑制期）+ 设置页 6 张独立卡片。
+
+### 改动后总结
+- **新增 `internal/alert/rules.go`**：`Rule`（enabled/warning/duration/recovery/suppress_min）+
+  `RuleSpec` 定义表。六项的默认值、取值范围、单位、"哪一项有持续时间/滞回"、旧 key 全部集中在
+  `ruleSpecs` 一处，引擎兜底、API 校验、前端渲染共用同一份，不再两边写死数字然后漂移。
+  存储为 `settings.alert_rule_<metric>` 一条 JSON（一项规则字段天然成组，整体读写不会出现"改了阈值没改滞回"的半更新）。
+- **自动迁移**：`LoadRules` 发现某项没有新 key 时，从旧扁平 key 取值（CPU/内存/磁盘/Ping 阈值、
+  `alert_offline_seconds`、磁盘专属 `alert_disk_duration_seconds`、共用的 `alert_metric_duration_seconds`），
+  `enabled=true`、滞回用默认值，并立即落库 —— **用户已配好的阈值不会被改版抹掉**。
+- **引擎 `engine.go`**：`checkAlerts` 每轮开头读一次规则；每项按 `Enabled` 决定是否检查；
+  `checkMetric` 签名改为接收 `Rule`（阈值/滞回/持续/抑制期都来自该项自己），
+  `handleOffline(agent, rule)`、`checkPingMetrics(agent, rules)` 同步改造；
+  两项 Ping 都关掉时直接 return，连 ISP 列表和聚合查询都不发。
+- **关掉某项时静默清理遗留 firing**：`resolveMetricAlerts(metric)` 只在"启用→关闭"这一次执行
+  （用 `Engine.ruleEnabled` 记录上一轮状态），把该项活跃告警 resolve 掉并清内存抑制标记。
+  **不发恢复通知**：一次开关可能涉及十几个节点，全推会瞬间打爆微信配额，而且用户自己关的规则不需要通知。
+- **API**：新增 `GET/PUT /api/alert-rules`（GET 同时下发 specs+rules；PUT 先全量校验再落库，避免存一半）。
+  旧 `GET/PUT /api/alert-settings` **保留兼容**：GET 从新模型派生，PUT 只改对应规则的 warning/duration
+  并保留该项开关/滞回/抑制期，同时回写旧扁平 key，外部脚本与手工 SQL 查询都不会拿到陈值。
+- **前端 `Settings.vue`**：告警阈值节改为 6 张独立卡片（开关在标题行，关掉整卡置灰而不是隐藏，
+  参数仍可读）；离线卡按后端 `has_duration/has_recovery` 自动不显示这两个字段；
+  保存后用后端规范化返回值回填。侧栏标签、告警中心提示、设置页副标题统一改为"告警规则"。
+
+### 验证
+- `go vet ./...` 通过、`gofmt` 干净（docker golang:1.25 本地把关）；`vue-tsc` 零错误、`vite build` 成功。
+- 待部署后核对：`GET /api/alert-rules` 返回 6 条且值等于迁移前的生产配置；关掉某项后该项不再产生新告警且
+  日志出现"已关闭 X 告警，静默清理 N 条活跃记录"。
+
+### 遗留
+- 节点级/分组级覆盖未做（本次确认只做全局）；卡片副标题原先承诺的"三级回退"仍未实现，已把描述改为实际行为。
+- `critical` 二级阈值与"按项恢复通知开关"未做（用户选的是 5 参数方案）。
+
+
 ## [2026-10-06 07:43] - 仓库卫生：停止跟踪前端构建产物，dist 只留 .gitkeep 占位
 
 ### 改动前总结

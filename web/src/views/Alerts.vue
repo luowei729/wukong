@@ -65,10 +65,10 @@
         icon="shield"
         ok
         title="暂无告警"
-        description="所有节点指标都在阈值范围内；阈值与持续时间可在「系统设置 → 告警阈值」调整"
+        description="所有节点指标都在阈值范围内；阈值与持续时间可在「系统设置 → 告警规则」按项调整"
       >
         <template #action>
-          <el-button @click="router.push('/settings')">调整告警阈值</el-button>
+          <el-button @click="router.push('/settings')">调整告警规则</el-button>
         </template>
       </WkEmptyState>
 

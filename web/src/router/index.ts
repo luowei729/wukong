@@ -56,7 +56,7 @@ const router = createRouter({
           path: 'settings',
           name: 'Settings',
           component: () => import('@/views/Settings.vue'),
-          meta: { title: '系统设置', subtitle: '主题、安装、运营商 Ping、通知与告警阈值', icon: 'Setting', requiresAuth: true },
+          meta: { title: '系统设置', subtitle: '主题、安装、运营商 Ping、通知与告警规则', icon: 'Setting', requiresAuth: true },
         },
       ],
     },

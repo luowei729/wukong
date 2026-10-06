@@ -144,6 +144,9 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/pushplus/test", h.authMiddleware(h.handleTestPushplus))
 	mux.HandleFunc("GET /api/alert-settings", h.authMiddleware(h.handleGetAlertSettings))
 	mux.HandleFunc("PUT /api/alert-settings", h.authMiddleware(h.handleUpdateAlertSettings))
+	// 告警规则：每项独立开关与参数（新接口，/api/alert-settings 仅作向后兼容保留）
+	mux.HandleFunc("GET /api/alert-rules", h.authMiddleware(h.handleGetAlertRules))
+	mux.HandleFunc("PUT /api/alert-rules", h.authMiddleware(h.handleUpdateAlertRules))
 
 	// 上传 Logo
 	mux.HandleFunc("POST /api/upload/logo", h.authMiddleware(h.handleUploadLogo))

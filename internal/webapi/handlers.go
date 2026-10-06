@@ -18,6 +18,7 @@ import (
 	"strings"
 	"time"
 
+	"wukong/internal/alert"
 	"wukong/internal/auth"
 	"wukong/internal/notify"
 	"wukong/internal/store"
@@ -507,24 +508,24 @@ func validateISPTarget(target *store.ISPTarget) error {
 // 原因：旧代码 handleGetSetting/handleSetSetting 接受任意 key，
 // 攻击者可通过 /api/settings/admin_password_hash 读取或覆盖敏感配置。
 var allowedSettingKeys = map[string]bool{
-	"site_domain":                    true,
-	"agent_server_addr":              true,
-	"agent_target_version":           true,
-	"agent_upgrade_url":              true,
-	"theme_preset":                   true,
-	"theme_primary_color":            true,
-	"theme_site_title":               true,
-	"theme_footer_text":              true,
-	"theme_logo_url":                 true,
-	"telegram_bot_token":             true,
-	"telegram_chat_id":               true,
-	"alert_cpu_threshold":            true,
-	"alert_mem_threshold":            true,
-	"alert_disk_threshold":           true,
-	"alert_offline_seconds":          true,
-	"alert_ping_latency_threshold":   true,
-	"alert_ping_loss_threshold":      true,
-	"alert_metric_duration_seconds":  true,
+	"site_domain":                   true,
+	"agent_server_addr":             true,
+	"agent_target_version":          true,
+	"agent_upgrade_url":             true,
+	"theme_preset":                  true,
+	"theme_primary_color":           true,
+	"theme_site_title":              true,
+	"theme_footer_text":             true,
+	"theme_logo_url":                true,
+	"telegram_bot_token":            true,
+	"telegram_chat_id":              true,
+	"alert_cpu_threshold":           true,
+	"alert_mem_threshold":           true,
+	"alert_disk_threshold":          true,
+	"alert_offline_seconds":         true,
+	"alert_ping_latency_threshold":  true,
+	"alert_ping_loss_threshold":     true,
+	"alert_metric_duration_seconds": true,
 }
 
 func (h *Handler) handleGetSetting(w http.ResponseWriter, r *http.Request) {
@@ -1404,25 +1405,26 @@ func floatSettingValue(raw string, fallback float64) float64 {
 	return fallback
 }
 
+// handleGetAlertSettings 兼容旧接口：从新的规则模型派生。
+// 保留是为了不打断可能存在的外部脚本；新前端请用 /api/alert-rules。
 func (h *Handler) handleGetAlertSettings(w http.ResponseWriter, r *http.Request) {
-	cpu, _ := h.store.GetSetting("alert_cpu_threshold")
-	mem, _ := h.store.GetSetting("alert_mem_threshold")
-	disk, _ := h.store.GetSetting("alert_disk_threshold")
-	offline, _ := h.store.GetSetting("alert_offline_seconds")
-	duration, _ := h.store.GetSetting("alert_metric_duration_seconds")
-
-	pingLatency, _ := h.store.GetSetting("alert_ping_latency_threshold")
-	pingLoss, _ := h.store.GetSetting("alert_ping_loss_threshold")
+	rules := alert.LoadRules(h.store, h.cfg.AlertSuppressMinutes)
+	cpu := rules[alert.MetricCPU]
+	mem := rules[alert.MetricMem]
+	disk := rules[alert.MetricDisk]
+	offline := rules[alert.MetricOffline]
+	pingLatency := rules[alert.MetricPingLatency]
+	pingLoss := rules[alert.MetricPingLoss]
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"cpu":                     floatSettingValue(cpu, 90),
-		"mem":                     floatSettingValue(mem, 90),
-		"disk":                    floatSettingValue(disk, 90),
-		"ping_latency":            floatSettingValue(pingLatency, 200),
-		"ping_loss":               floatSettingValue(pingLoss, 20),
-		"offline_seconds":         intSettingValue(offline, h.cfg.HeartbeatTimeout),
-		"metric_duration_seconds": intSettingValue(duration, 60),
-		"suppress_minutes":        h.cfg.AlertSuppressMinutes,
+		"cpu":                     cpu.Warning,
+		"mem":                     mem.Warning,
+		"disk":                    disk.Warning,
+		"ping_latency":            pingLatency.Warning,
+		"ping_loss":               pingLoss.Warning,
+		"offline_seconds":         int(offline.Warning),
+		"metric_duration_seconds": cpu.Duration,
+		"suppress_minutes":        cpu.SuppressMin,
 	})
 }
 
@@ -1440,12 +1442,8 @@ func (h *Handler) handleUpdateAlertSettings(w http.ResponseWriter, r *http.Reque
 		writeError(w, http.StatusBadRequest, "请求体解析失败")
 		return
 	}
-	if req.PingLatency == 0 {
-		req.PingLatency = 200
-	}
-	if req.PingLoss == 0 {
-		req.PingLoss = 20
-	}
+	// 先拿到现有规则，旧接口保存时才能“只改阈值与持续时间”而不碰其他字段
+	rules := alert.LoadRules(h.store, h.cfg.AlertSuppressMinutes)
 	if req.CPU <= 0 || req.CPU > 100 || req.Mem <= 0 || req.Mem > 100 || req.Disk <= 0 || req.Disk > 100 {
 		writeError(w, http.StatusBadRequest, "CPU/内存/磁盘阈值必须在 1-100 之间")
 		return
@@ -1463,23 +1461,121 @@ func (h *Handler) handleUpdateAlertSettings(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	settings := map[string]string{
-		"alert_cpu_threshold":           fmt.Sprintf("%.1f", req.CPU),
-		"alert_mem_threshold":           fmt.Sprintf("%.1f", req.Mem),
-		"alert_disk_threshold":          fmt.Sprintf("%.1f", req.Disk),
-		"alert_ping_latency_threshold":  fmt.Sprintf("%.1f", req.PingLatency),
-		"alert_ping_loss_threshold":     fmt.Sprintf("%.1f", req.PingLoss),
-		"alert_offline_seconds":         strconv.Itoa(req.OfflineSeconds),
-		"alert_metric_duration_seconds": strconv.Itoa(req.MetricDurationSeconds),
-	}
-	for key, value := range settings {
-		if err := h.store.SetSetting(key, value); err != nil {
+	// 旧接口只带阈值与一个共用持续时间：写回对应规则时只改这两个字段，
+	// 保留该项已有的开关、滞回与抑制期，避免旧脚本一保存就把新能力默默重置。
+	for _, item := range []struct {
+		metric   string
+		warning  float64
+		duration int
+		hasDur   bool
+	}{
+		{alert.MetricCPU, req.CPU, req.MetricDurationSeconds, true},
+		{alert.MetricMem, req.Mem, req.MetricDurationSeconds, true},
+		{alert.MetricDisk, req.Disk, req.MetricDurationSeconds, true},
+		{alert.MetricPingLatency, req.PingLatency, req.MetricDurationSeconds, true},
+		{alert.MetricPingLoss, req.PingLoss, req.MetricDurationSeconds, true},
+		{alert.MetricOffline, float64(req.OfflineSeconds), 0, false},
+	} {
+		rule := rules[item.metric]
+		rule.Warning = item.warning
+		if item.hasDur {
+			rule.Duration = item.duration
+		}
+		if err := alert.SaveRule(h.store, rule, h.cfg.AlertSuppressMinutes); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		// 同步写一份旧扁平 key：万一还有地方直接读它（例如运维手册里的 SQL 查询），不会拿到陈值
+		if err := h.store.SetSetting(alertSpecLegacyKey(item.metric), formatRuleWarning(item.warning)); err != nil {
 			writeError(w, http.StatusInternalServerError, "保存告警阈值失败")
 			return
 		}
 	}
 
 	writeJSON(w, http.StatusOK, map[string]string{"message": "告警阈值已保存"})
+}
+
+// alertSpecLegacyKey 取某项对应的旧扁平 key（与 alert.RuleSpecs 里的 LegacyKey 一致）
+func alertSpecLegacyKey(metric string) string {
+	if spec, ok := alert.SpecOf(metric); ok {
+		return spec.LegacyKey
+	}
+	return ""
+}
+
+// formatRuleWarning 阈值序列化：整数值不留小数点，避免把 90 写成 "90.0"
+func formatRuleWarning(v float64) string {
+	if v == float64(int64(v)) {
+		return strconv.FormatInt(int64(v), 10)
+	}
+	return strconv.FormatFloat(v, 'f', 1, 64)
+}
+
+// ==================== 告警规则（每项独立开关与参数）====================
+
+// handleGetAlertRules 同时下发“规则定义”和“当前规则”。
+// 原因：默认值/取值范围/单位/哪些项有持续时间这些元信息只存在 alert.ruleSpecs 一处，
+// 前端按 spec 渲染，避免同一套数字在 Go 和 Vue 两边各写一份然后漂移。
+func (h *Handler) handleGetAlertRules(w http.ResponseWriter, r *http.Request) {
+	specs := alert.RuleSpecs()
+	rules := alert.LoadRules(h.store, h.cfg.AlertSuppressMinutes)
+	list := make([]alert.Rule, 0, len(specs))
+	for _, spec := range specs {
+		// 按定义表顺序输出，前端不需要再排序
+		list = append(list, rules[spec.Metric])
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"specs":            specs,
+		"rules":            list,
+		"default_suppress": h.cfg.AlertSuppressMinutes,
+	})
+}
+
+// handleUpdateAlertRules 批量保存规则。
+// 先全部校验再落库：避免保存了一半、前几项生效后几项失败的不一致状态。
+func (h *Handler) handleUpdateAlertRules(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Rules []alert.Rule `json:"rules"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "请求体解析失败")
+		return
+	}
+	if len(req.Rules) == 0 {
+		writeError(w, http.StatusBadRequest, "没有需要保存的告警规则")
+		return
+	}
+	for _, rule := range req.Rules {
+		if err := alert.ValidateRule(rule); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
+	for _, rule := range req.Rules {
+		if err := alert.SaveRule(h.store, rule, h.cfg.AlertSuppressMinutes); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		// 同步回写旧扁平 key，保持与兼容接口、外部查询的一致
+		if key := alertSpecLegacyKey(rule.Metric); key != "" {
+			if err := h.store.SetSetting(key, formatRuleWarning(rule.Warning)); err != nil {
+				writeError(w, http.StatusInternalServerError, "保存告警规则失败")
+				return
+			}
+		}
+	}
+
+	// 返回保存后的规范化结果：范围夹紧、不适用字段置零等清洗都在后端，前端直接用返回值
+	specs := alert.RuleSpecs()
+	rules := alert.LoadRules(h.store, h.cfg.AlertSuppressMinutes)
+	list := make([]alert.Rule, 0, len(specs))
+	for _, spec := range specs {
+		list = append(list, rules[spec.Metric])
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"message": "告警规则已保存",
+		"rules":   list,
+	})
 }
 
 // ---- 上传 Logo ----

@@ -384,3 +384,28 @@ IPv6 目标一键选节点与列表作用域列。
 ### 验证结果
 `git clone file://` 模拟干净检出：`dist/` 内只有 `.gitkeep`，`go build ./cmd/server` 与
 `go vet ./...` 均 exit 0；`git check-ignore` 确认其余产物仍被忽略。CI 不依赖仓库内 dist。
+
+## 二十一、告警规则化改造（每项独立开关与独立参数）
+
+### 改动前总结
+用户要求每种告警都能单独开关、单独调参数。核对发现：每项只有一个阈值 key、持续时间全局共用一个、
+恢复滞回在引擎里硬编码 85 且无界面入口、抑制期只有配置文件一个值、`ThresholdConfig.Enabled`
+定义了但引擎从未读取（所以任何一项都关不掉），而卡片副标题写的"探针/分组/全局三级回退"从未实现。
+与用户确认：只做全局一份规则表，每项 5 个参数，设置页 6 张独立卡片。
+
+### 改动后总结
+- 新增 `internal/alert/rules.go`：`Rule` + `RuleSpec` 定义表（默认值/范围/单位/旧 key/是否含持续与滞回），
+  存储为 `settings.alert_rule_<metric>` JSON，首次读取自动从旧扁平 key 迁移并落库。
+- 引擎 `checkAlerts` 每轮读一次规则，按 `Enabled` 决定是否检查；`checkMetric` 改为接收 `Rule`；
+  离线与 Ping 两项同步改造；关闭某项时 `resolveMetricAlerts` 静默清理遗留 firing（不发通知）。
+- API 新增 `GET/PUT /api/alert-rules`（GET 同时下发 specs+rules，PUT 先全量校验再落库）；
+  旧 `/api/alert-settings` 保留兼容并回写旧扁平 key。
+- 设置页告警节改为 6 张独立卡片（开关在标题行、关掉整卡置灰、离线卡按 spec 不显示持续/滞回），
+  侧栏与相关文案统一改为"告警规则"。
+
+### 验证结果
+`go vet ./...` 与 `gofmt` 本地通过（docker golang:1.25），`vue-tsc` 零错误、`vite build` 成功。
+部署后需核对：规则值等于迁移前生产配置、关闭某项后不再产生新告警且日志有静默清理记录。
+
+### 后续可选
+节点级/分组级覆盖（真正落实三级回退）、critical 二级阈值分级、按项恢复通知开关。
