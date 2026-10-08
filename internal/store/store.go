@@ -5,6 +5,8 @@ package store
 
 import (
 	"time"
+
+	"wukong/internal/netutil"
 )
 
 // ============ 元数据类型 ============
@@ -85,6 +87,28 @@ func (t *ISPTarget) AppliesTo(agentID string) bool {
 	default:
 		return true
 	}
+}
+
+// AppliesToAgent 判断该目标是否应该下发给指定节点：在人工作用域之外，
+// 再加一层“节点自身能力”判定 —— IPv6 目标只下发给确实具备可用公网 IPv6 出口的节点。
+//
+// 原因：作用域是人工勾选后存下来的列表，而节点能力会变（新机器没 v6、假 v6、运营商撤路由），
+// 只按列表下发会让不具备条件的节点长期 100% 丢包并误触告警。
+// 实测 net1上海 上报的 64:ff9b::aff:fb01 是运营商 NAT64 合成地址（只能 v6→v4），
+// 对 IPv6 目标 2409:8088::a 全部失败，而对同一家 v4 目标 0% 丢包。
+// 判定统一走 netutil，避免探针上报、主控落库、这里下发三处口径分裂。
+func (t *ISPTarget) AppliesToAgent(agent *Agent) bool {
+	if t == nil || agent == nil {
+		return false
+	}
+	if !t.AppliesTo(agent.ID) {
+		return false
+	}
+	// 非 IPv6 目标不受此限制
+	if !netutil.IsIPv6Literal(t.IP) {
+		return true
+	}
+	return netutil.IsUsablePublicIPv6(agent.IPv6)
 }
 
 // containsID 在节点 ID 列表中查找，避免引入额外依赖。

@@ -143,9 +143,10 @@ func (h *Handler) handlePublicGetServer(w http.ResponseWriter, r *http.Request) 
 	}
 	metric, _ := h.store.GetLatestMetrics(id)
 	writeJSON(w, http.StatusOK, publicServerDetailResponse{
-		Server:   buildPublicServerSummary(agent, metric),
-		// 只列出适用于该节点的线路，避开“有线路名但永远没数据”的空行
-		PingISPs: h.publicPingISPs(id),
+		Server: buildPublicServerSummary(agent, metric),
+		// 只列出适用于该节点的线路：避开“有线路名但永远没数据”的空行，
+		// 并且与主控下发用同一个判定（IPv6 线路要求节点有可用 v6 出口）
+		PingISPs: h.publicPingISPs(agent),
 	})
 }
 
@@ -266,10 +267,10 @@ func buildPublicServerSummary(agent *store.Agent, metric *store.LatestMetric) pu
 // publicPingISPs 返回指定节点实际会探测的启用线路名称。
 // 原因：运营商目标可以按节点设置作用域（如 IPv6 目标排除无 IPv6 出口的节点），
 // 公开详情页如果列出该节点不测的线路，会渲染出一个永远空白的数据行。
-func (h *Handler) publicPingISPs(agentID string) []publicISPTarget {
+func (h *Handler) publicPingISPs(agent *store.Agent) []publicISPTarget {
 	// 公开详情只暴露启用运营商名称，隐藏目标 IP/端口等管理配置。
 	targets, err := h.store.ListISPTargets()
-	if err != nil {
+	if err != nil || agent == nil {
 		return []publicISPTarget{}
 	}
 	items := make([]publicISPTarget, 0, len(targets))
@@ -278,7 +279,8 @@ func (h *Handler) publicPingISPs(agentID string) []publicISPTarget {
 		if target == nil || !target.Enabled || target.Name == "" || seen[target.Name] {
 			continue
 		}
-		if !target.AppliesTo(agentID) {
+		// 与 gRPC 下发过滤用同一个方法，避免“公开页列了线路但探针根本不测”的不一致
+		if !target.AppliesToAgent(agent) {
 			continue
 		}
 		seen[target.Name] = true

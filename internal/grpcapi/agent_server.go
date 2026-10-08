@@ -8,11 +8,11 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"net"
 	"sync"
 	"time"
 
 	"wukong/internal/config"
+	"wukong/internal/netutil"
 	"wukong/internal/store"
 	pb "wukong/proto/gen"
 
@@ -80,7 +80,9 @@ func (s *AgentServer) Register(ctx context.Context, req *pb.RegisterRequest) (*p
 		req.Token[:min(16, len(req.Token))]+"...", req.Hostname, req.Arch, req.IpV4, req.IpV6)
 
 	// 注册时保存探针上报的公网 IPv4/IPv6 地址，用于后端管理，不显示前端避免暴露
-	agent, secret, err := s.store.RegisterAgent(req.Token, req.Hostname, req.AgentVersion, req.Arch, req.IpV4, req.IpV6)
+	agent, secret, err := s.store.RegisterAgent(req.Token, req.Hostname, req.AgentVersion, req.Arch,
+		// 注册时同样先过一道判定，避免把 NAT64 合成地址等不可用值一开始就存进库
+		effectiveIPv4(req.IpV4, ""), effectiveIPv6(req.IpV6, ""))
 	if err != nil {
 		log.Printf("注册失败: %v", err)
 		return nil, status.Errorf(codes.InvalidArgument, "注册失败: %v", err)
@@ -342,12 +344,16 @@ func (s *AgentServer) handleMetricsReport(agentID string, r *pb.MetricsReport) {
 				agent.Arch = r.Arch
 				changed = true
 			}
-			if r.IpV4 != "" && isPublicIP(r.IpV4) && agent.IPv4 != r.IpV4 {
-				agent.IPv4 = r.IpV4
+			// 出口 IP 以主控判定为准：
+			//   - 上报值合法才写入；不合法（NAT64/Teredo/6to4/DS-Lite/私网）一律置空
+			//   - 本次没上报时也要重新校验库里已有的值，否则旧探针持续上报坏地址时，
+			//     一次误存就永远清不掉（net1上海的 64:ff9b::aff:fb01 就是这个情况）
+			if next := effectiveIPv4(r.IpV4, agent.IPv4); agent.IPv4 != next {
+				agent.IPv4 = next
 				changed = true
 			}
-			if r.IpV6 != "" && isPublicIP(r.IpV6) && agent.IPv6 != r.IpV6 {
-				agent.IPv6 = r.IpV6
+			if next := effectiveIPv6(r.IpV6, agent.IPv6); agent.IPv6 != next {
+				agent.IPv6 = next
 				changed = true
 			}
 			if changed {
@@ -431,13 +437,24 @@ func (s *AgentServer) enabledPingTargetsFor(agentID string) []*pb.PingTarget {
 		log.Printf("读取 Ping 运营商目标失败: %v", err)
 		return nil
 	}
+	// 取节点对象是为了用它的可用 IPv6 出口做能力过滤；
+	// 查不到时退回"只看人工作用域"，不能因为一次临时失败就把所有线路都停掉。
+	agent, agentErr := s.store.GetAgent(agentID)
+	if agentErr != nil {
+		agent = nil
+	}
 	result := make([]*pb.PingTarget, 0, len(targets))
 	for _, target := range targets {
 		if target == nil || !target.Enabled {
 			continue
 		}
-		// 只下发启用且适用于当前节点的目标；不包含任何管理端密钥。
-		if !target.AppliesTo(agentID) {
+		// 人工作用域 + 节点自身能力双重判定（IPv6 目标必须有可用 v6 出口），
+		// 不包含任何管理端密钥。
+		if agent != nil {
+			if !target.AppliesToAgent(agent) {
+				continue
+			}
+		} else if !target.AppliesTo(agentID) {
 			continue
 		}
 		result = append(result, &pb.PingTarget{
@@ -480,12 +497,34 @@ func min(a, b int) int {
 	return b
 }
 
-func isPublicIP(value string) bool {
-	ip := net.ParseIP(value)
-	if ip == nil {
-		return false
+// effectiveIPv4 计算应写入的公网 IPv4：优先用本次上报值，不合法则置空；
+// 本次没上报时只负责洗掉库里已有的非法存量值，不会误清正常地址。
+func effectiveIPv4(reported, stored string) string {
+	if reported != "" {
+		if netutil.IsPublicIPv4(reported) {
+			return reported
+		}
+		return ""
 	}
-	return ip.IsGlobalUnicast() && !ip.IsPrivate() && !ip.IsLoopback() && !ip.IsLinkLocalUnicast() && !ip.IsLinkLocalMulticast() && !ip.IsUnspecified()
+	if stored != "" && !netutil.IsPublicIPv4(stored) {
+		return ""
+	}
+	return stored
+}
+
+// effectiveIPv6 计算应写入的公网 IPv6。除了常规非公网过滤，还排除 NAT64/Teredo/6to4/DS-Lite
+// 这类“看起来是全局单播、实际连不上真 IPv6 目标”的合成地址。
+func effectiveIPv6(reported, stored string) string {
+	if reported != "" {
+		if netutil.IsUsablePublicIPv6(reported) {
+			return reported
+		}
+		return ""
+	}
+	if stored != "" && !netutil.IsUsablePublicIPv6(stored) {
+		return ""
+	}
+	return stored
 }
 
 // versionMatch 版本匹配：前缀匹配即可认为版本相同。

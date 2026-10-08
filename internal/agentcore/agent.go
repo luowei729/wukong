@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"wukong/internal/config"
+	"wukong/internal/netutil"
 	pb "wukong/proto/gen"
 
 	"google.golang.org/grpc"
@@ -28,8 +29,8 @@ import (
 
 // Agent 探针实例
 type Agent struct {
-	cfg    *config.AgentConfig
-	conn   *grpc.ClientConn
+	cfg  *config.AgentConfig
+	conn *grpc.ClientConn
 
 	// clientMu 保护 client 字段的并发读写。
 	// 原因：reportLoop goroutine 赋值 client，autoUpgradeCheck goroutine 读取 client，
@@ -612,8 +613,16 @@ func (a *Agent) setPublicIPs(ipV4, ipV6 string) {
 	if ipV4 != "" {
 		a.ipV4 = ipV4
 	}
-	if ipV6 != "" {
+	// IPv6 的更新规则比 IPv4 谨慎：
+	//   - 拿到可用 v6 → 直接更新
+	//   - 没拿到 v6 但拿到了 v4（说明外部 API 通路正常）→ 视为“本节点确实没有可用 v6”，清空；
+	//     否则旧版“非空才赋值”会让一次误报的 NAT64 地址永远滞留在进程里反复上报
+	//   - 两个都空（网络整体不可达）→ 保留旧值，避免一次网络抖动把正常地址清掉
+	switch {
+	case ipV6 != "":
 		a.ipV6 = ipV6
+	case ipV4 != "":
+		a.ipV6 = ""
 	}
 }
 
@@ -726,21 +735,29 @@ func fetchPublicIP(urls []string, wantV6 bool) string {
 			continue
 		}
 		value := strings.TrimSpace(string(body))
-		ip := net.ParseIP(value)
-		if ip == nil || !isPublicIP(value) {
+		// 判定统一走 netutil，与主控落库、目标下发过滤用同一口径。
+		// IPv6 要求是"节点真实可用的公网 v6"，排除 NAT64/Teredo/6to4/DS-Lite
+		// 这类外部服务能看到、但连不上真 IPv6 目标的合成或隧道地址
+		// （实测 net1上海 上报的 64:ff9b::aff:fb01 就是运营商 NAT64 合成地址）。
+		if wantV6 {
+			if netutil.IsUsablePublicIPv6(value) {
+				return value
+			}
 			continue
 		}
-		if wantV6 && ip.To4() == nil {
-			return value
-		}
-		if !wantV6 && ip.To4() != nil {
+		if netutil.IsPublicIPv4(value) {
 			return value
 		}
 	}
 	return ""
 }
 
-// getLocalIPs 从本机网卡获取 IPv4/IPv6 地址（回退方案）
+// getLocalIPs 从本机网卡获取地址（外部 API 全部失败时的回退方案）。
+//
+// 关键：回退路径**不上报 IPv6**。网卡上配了全局单播 v6 地址并不等于有可用路由，
+// 而这里拿不到任何连通性证据；IPv6 误报的代价很高（该节点会被归到 IPv6 线路里
+// 长期 100% 丢包并误触告警），所以只回退 IPv4，宁可暂时不显示 v6 也不报错地址。
+// 真正有 v6 出口的节点会在下一轮外部 API 成功时被补上。
 func getLocalIPs() (string, string) {
 	var ipV4, ipV6 string
 	addrs, err := net.InterfaceAddrs()
@@ -752,25 +769,15 @@ func getLocalIPs() (string, string) {
 		if !ok || ipNet.IP.IsLoopback() {
 			continue
 		}
-		if ipNet.IP.To4() != nil && ipV4 == "" && isPublicIP(ipNet.IP.String()) {
+		if ipNet.IP.To4() != nil && ipV4 == "" && netutil.IsPublicIPv4(ipNet.IP.String()) {
 			ipV4 = ipNet.IP.String()
-		}
-		if ipNet.IP.To4() == nil && ipV6 == "" && isPublicIP(ipNet.IP.String()) {
-			ipV6 = ipNet.IP.String()
 		}
 	}
 	return ipV4, ipV6
 }
 
-// isPublicIP 只允许公网出口 IP 上报。
-// 过滤 10/172.16/192.168、loopback、link-local(fe80::/10)、ULA(fc00::/7) 等非公网地址。
-func isPublicIP(value string) bool {
-	ip := net.ParseIP(strings.TrimSpace(value))
-	if ip == nil {
-		return false
-	}
-	return ip.IsGlobalUnicast() && !ip.IsPrivate() && !ip.IsLoopback() && !ip.IsLinkLocalUnicast() && !ip.IsLinkLocalMulticast() && !ip.IsUnspecified()
-}
+// 公网 IP 可用性判定已收敛到 internal/netutil：探针上报、主控落库、
+// 目标下发过滤必须用同一套规则，否则会出现“探针认为可用、主控认为不可用”的口径分裂。
 
 func minDuration(a, b time.Duration) time.Duration {
 	if a < b {

@@ -133,12 +133,20 @@
           </template>
         </el-table-column>
 
-        <!-- 出口 IP：主显示 IPv4，IPv6 放 title，降低列宽占用（仅后台可见） -->
-        <el-table-column label="出口 IP" min-width="124">
+        <!-- 出口 IP：v4 与 v6 各占一行同时显示（旧版只显 v4、v6 藏在 title 里看不到）。
+             v6 地址长达 30+ 字，用 break-all 折行保证完整可读，而不是省略号截断。 -->
+        <el-table-column label="出口 IP" min-width="208">
           <template #default="{ row }">
-            <span v-if="row.ip_v4 || row.ip_v6" class="wk-num wk-ip" :title="ipTitle(row)">
-              {{ row.ip_v4 || row.ip_v6 }}
-            </span>
+            <div v-if="row.ip_v4 || row.ip_v6" class="wk-ip-list" :title="ipTitle(row)">
+              <div v-if="row.ip_v4" class="wk-ip-row">
+                <span class="wk-ip-tag">v4</span>
+                <span class="wk-num wk-ip-val">{{ row.ip_v4 }}</span>
+              </div>
+              <div v-if="row.ip_v6" class="wk-ip-row">
+                <span class="wk-ip-tag">v6</span>
+                <span class="wk-num wk-ip-val">{{ row.ip_v6 }}</span>
+              </div>
+            </div>
             <span v-else class="wk-sub">-</span>
           </template>
         </el-table-column>
@@ -280,7 +288,7 @@ function netShort(value?: number): string {
   return formatBytesShort(value)
 }
 
-// 出口 IP 悬浮标题：单元格只放 IPv4 以免拉宽表格，双栈地址在 title 里完整展示
+// 出口 IP 悬浮标题：给出完整地址，方便直接复制（单元格内已经两行全显示）
 function ipTitle(node: any): string {
   const parts: string[] = []
   if (node.ip_v4) parts.push(`IPv4 ${node.ip_v4}`)
@@ -521,10 +529,33 @@ function goToNode(id: string) {
   color: var(--wk-primary);
 }
 
-/* IP 单元格：只显示一个地址，完整（含 IPv6）放 hover 标题 */
-.wk-ip {
-  font-size: var(--wk-fs-sm);
+/* 出口 IP：v4 / v6 各一行同时展示。
+   v6 地址长度不稳定（有的节点带满 8 组），所以允许 break-all 折行；
+   地址是静态数据不会每秒变，不会像实时指标那样出现行高跳动 */
+.wk-ip-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.wk-ip-row {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+
+.wk-ip-tag {
+  flex-shrink: 0;
+  font-size: var(--wk-fs-xs);
+  color: var(--wk-text-muted);
+}
+
+.wk-ip-val {
+  font-size: var(--wk-fs-xs);
+  line-height: 1.4;
   color: var(--wk-text-secondary);
-  white-space: nowrap;
+  word-break: break-all;
 }
 </style>

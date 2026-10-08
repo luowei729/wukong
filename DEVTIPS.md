@@ -263,6 +263,24 @@ docker run --rm -v /root/wukong:/src -v wukong-gomod:/go/pkg/mod -w /src \
 `pushplus_token` 与 `telegram_bot_token` 一样：**不回显、留空表示保留原值**，并且**故意不加入
 `allowedSettingKeys` 白名单**（否则通用 `GET /api/setting/{key}` 能把令牌读走），只能走专用接口。
 
+### IPv6 出口可用性判定（2026-10-08 14:48）
+
+- **有公网 IPv6 地址 ≠ IPv6 可用**。外部 API 看到的客户端地址可能是运营商 **NAT64 合成地址**
+  （`64:ff9b::/96`，RFC 6052），只能 v6→v4，探测真 IPv6 目标必然 100% 失败。
+  同类要一起排除的还有：`64:ff9b:1::/48`（NAT64 本地）、`2001::/32`（Teredo）、
+  `2002::/16`（6to4）、`100:64::/10`（DS-Lite）；IPv4 侧另排 CGNAT `100.64.0.0/10`。
+- **判定只在 `internal/netutil` 一处**：探针上报、主控落库清洗、目标下发过滤、公开页线路列表
+  全部调它。历史上 agentcore 和 grpcapi 各有一份 `isPublicIP`，口径分裂就是这么来的。
+- **主控必须是权威清洗方**：`effectiveIPv4/effectiveIPv6` 每次上报都重新校验**库里已有值**，
+  不合法就置空。只改探针判定没用 —— 旧探针会持续上报坏地址，而"非空才覆盖"的写法
+  让一次误存永远清不掉（也不用为此改 proto/加字段）。
+- **作用域是静态列表，节点能力会变**：`ISPTarget.AppliesToAgent(agent)` = 人工 scope + 能力判定，
+  gRPC 下发与 `publicPingISPs` 共用。只按 scope 列表下发会让失去 v6 能力的节点长期误告警。
+- **网卡回退路径不上报 IPv6**：`getLocalIPs` 拿不到任何连通性证据，误报代价（长期 100% 丢包 +
+  误告警）远高于漏报。`setPublicIPs` 的规则是"v4 成功但 v6 为空 = 确实没有可用 v6，清空"，
+  "两者都空 = 网络整体不可达，保留旧值"。
+- 判定函数会被多 goroutine 并发调用，**前缀必须 init 预计算**，不要写"无锁 map 缓存"。
+
 ## 生产部署与 CI（2026-10-05 迁移后）
 
 ### Cloudflare 与 gRPC 的硬限制（重要）

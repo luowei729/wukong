@@ -409,3 +409,32 @@ IPv6 目标一键选节点与列表作用域列。
 
 ### 后续可选
 节点级/分组级覆盖（真正落实三级回退）、critical 二级阈值分级、按项恢复通知开关。
+
+## 二十二、IPv6 出口可用性判定与节点列表双栈显示
+
+### 改动前总结
+用户反馈 net1上海 的 IPv6 地址不可用，要求增加有效性判断，并要求后台节点列表的出口 IP 同时显示 v4 与 v6。
+取生产数据定位：net1上海 上报 `64:ff9b::aff:fb01`，对「上海移动IPV6」100% 丢包（12 点），
+对同家 v4 线路 0% 丢包 51.9ms。`64:ff9b::/96` 是 IANA NAT64 well-known 前缀（RFC 6052），
+由运营商 NAT64 网关合成、只能 v6→v4，连不上真 IPv6 目标。原 `isPublicIP` 只排除
+ULA/link-local/loopback，未排除 NAT64/Teredo/6to4/DS-Lite；且探针与主控各有一份重复判定。
+
+另有两个会让修复失效的问题：主控"非空才覆盖"导致坏地址永远清不掉；ISP 的 IPv6 作用域是
+人工勾选的静态列表（含 net1），光修判定该节点仍会收到 IPv6 目标并持续误告警。
+
+### 改动后总结
+- 新增 `internal/netutil/ip.go`：`IsUsablePublicIPv6`（排除 NAT64 `64:ff9b::/96`、`64:ff9b:1::/48`、
+  Teredo `2001::/32`、6to4 `2002::/16`、DS-Lite `100:64::/10`）与 `IsPublicIPv4`（另排 CGNAT），
+  前缀 init 预计算避免并发写 map。
+- 新增 `store.ISPTarget.AppliesToAgent(agent)`：人工作用域 + 节点自身能力双重判定，
+  gRPC 下发与公开详情页线路列表共用，消除口径分裂。
+- 主控改为权威清洗方：`effectiveIPv4/effectiveIPv6` 每次上报重校验库中已有值，不合法即置空；
+  注册路径同样先过判定。不需要改 proto 也不需要等探针升级即可清掉存量坏地址。
+- 探针侧删除重复 `isPublicIP` 改调 netutil；网卡回退不再上报 IPv6；`setPublicIPs` 区分
+  "v4 成功但 v6 空（确实没有→清空）"与"两者都空（网络抖动→保留旧值）"。
+- `Nodes.vue` 出口 IP 列改为 v4/v6 各一行同时显示，列宽 124→208，v6 用 break-all 折行完整可读。
+
+### 验证结果
+`go build ./...`、`go vet ./...` 通过；新增 `internal/netutil/ip_test.go` 三个用例全部 PASS
+（含 net1 真实坏地址被拒、三家真实 v6 通过）；`vue-tsc` 零错误、`vite build` 成功。
+部署后核对：net1上海 ip_v6 被清空、下发 targets 由 4 回到 3、IPv6 线路不再产生 100% 丢包点。

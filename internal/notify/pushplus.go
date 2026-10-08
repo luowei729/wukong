@@ -30,12 +30,12 @@ const (
 
 // PushplusNotifier pushplus 中转渠道实现
 type PushplusNotifier struct {
-	Token    string        // pushplus 用户令牌（官网"我的凭证"里那一串）
-	Channel  string        // 发送渠道：clawbot / wechat / cp / qq / cmcc，空则 wechat
-	Template string        // 消息模板，ClawBot 只支持纯文本，固定用 txt
-	Topic    string        // 群组编码，留空只发给自己
-	BaseURL  string        // 接口地址，默认 https://www.pushplus.plus
-	SiteURL  string        // 主控站点地址，用于在消息里拼节点详情链接
+	Token    string // pushplus 用户令牌（官网"我的凭证"里那一串）
+	Channel  string // 发送渠道：clawbot / wechat / cp / qq / cmcc，空则 wechat
+	Template string // 消息模板，ClawBot 只支持纯文本，固定用 txt
+	Topic    string // 群组编码，留空只发给自己
+	BaseURL  string // 接口地址，默认 https://www.pushplus.plus
+	SiteURL  string // 主控站点地址，用于在消息里拼节点详情链接
 	client   *http.Client
 }
 

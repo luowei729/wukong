@@ -1,6 +1,6 @@
 # wukong 监控系统 - 开发规范与提示
 
-> 最后更新: 2026-10-07 00:53 (北京时间)
+> 最后更新: 2026-10-08 14:48 (北京时间)
 
 ## 开发原则
 
@@ -125,6 +125,8 @@ wukong/
 - **2026-10-06 07:43（北京时间）**：仓库卫生——`internal/webapi/dist/` **不再跟踪构建产物**，只留 `.gitkeep`。三条必须知道的规则：① 已跟踪文件不受 `.gitignore` 影响（`git check-ignore` 对它们报"未忽略"是 Git 行为不是规则错），解除跟踪必须 `git rm -r --cached`（本地文件不会被删）。② `.gitignore` 里**目录级排除会让子文件取反失效**（Git 不进入已忽略目录），必须写 `internal/webapi/dist/*` + `!internal/webapi/dist/.gitkeep`。③ **`//go:embed all:dist` 要求目录非空**：整个 dist 不在时 `go build` 直接报 `pattern all:dist: no matching files found`，所以不能彻底清空，要留占位；缺 `index.html` 时 `embed.go` 的 `init()` + `PlaceholderHandler` 会显示"请运行 make build-frontend"引导页而不是白屏。CI 不受影响（Dockerfile 用 `COPY --from=frontend-builder` 取现场构建产物）。本地构建走 `make all` / `make dev`（都已串 `build-frontend`）。
 
 - **2026-10-07 00:53（北京时间）**：告警从"扁平阈值"升级为"**每项一条独立规则**"。六项（offline/cpu/mem/disk/ping_latency/ping_loss）各自有 开关/阈值/持续时间/恢复滞回/抑制期，存 `settings.alert_rule_<metric>` JSON。关键约束：① **默认值、范围、单位、"哪一项有持续时间/滞回"只定义在 `internal/alert/rules.go` 的 `ruleSpecs` 一处**，引擎兜底、API 校验、前端渲染都从这里取（`GET /api/alert-rules` 同时下发 specs+rules），前端不许再写死数字；新增告警项只加一条 spec + 一次 `checkMetric` 调用。② 首次读取会从旧扁平 key **自动迁移**并落库，不会抹掉用户已配的阈值；改模型时必须保留这条迁移路径。③ 离线项 `has_duration/has_recovery` 都是 false（warning 语义就是"无心跳秒数"），`normalize` 强制置零。④ **滞回必须低于阈值**，否则 `value <= recovery` 永不成立、告警无法恢复，`normalize` 与 `ValidateRule` 双侧拦截。⑤ **关闭某项会静默清理它遗留的 firing 记录**（只在"启用→关闭"那次执行，不发通知，避免十几个节点一起推打爆微信配额）。⑥ `/api/alert-settings` 保留向后兼容（PUT 只改 warning/duration 并回写旧 key），新前端一律用 `/api/alert-rules`。⑦ 卡片副标题原先写的"探针/分组/全局三级回退"从未实现（store 里没有节点/分组级告警字段），已按实际行为改描述。
+
+- **2026-10-08 14:48（北京时间）**：IPv6 出口有效性判定。net1上海 上报的 `64:ff9b::aff:fb01` 是**运营商 NAT64 合成地址**（`64:ff9b::/96`，RFC 6052，只能 v6→v4），对真 IPv6 目标 100% 丢包、对同家 v4 线路 0% 丢包 —— 证明"有公网 IPv6 地址 ≠ IPv6 可用"。规则：① **判定只在 `internal/netutil` 一处**（`IsUsablePublicIPv6` 排除 NAT64/Teredo `2001::/32`/6to4 `2002::/16`/DS-Lite `100:64::/10`，`IsPublicIPv4` 另排 CGNAT），探针上报、主控清洗、下发过滤、公开页四处共用，**禁止再复制第二份 isPublicIP**。② **主控是权威清洗方**：`effectiveIPv4/effectiveIPv6` 每次上报重校验库里已有值，不合法即置空 —— 只改探针判定无效，因为"非空才覆盖"会让一次误存永远清不掉。③ **作用域 + 能力双判定**统一走 `ISPTarget.AppliesToAgent(agent)`（IPv6 目标必须有可用 v6 出口），gRPC 下发与 `publicPingISPs` 共用；只按人工勾选的静态列表下发会让失去 v6 能力的节点长期误告警。④ 网卡回退路径**不上报 IPv6**（无连通性证据）；`setPublicIPs` 区分"v4 成功+v6 空=确实没有→清空"与"两者都空=网络抖动→保留旧值"。⑤ 判定前缀在 `init()` 预计算，不要写无锁 map 缓存（并发写 fatal error）。⑥ 后台节点列表出口 IP 列 v4/v6 各一行同时显示（旧版 v6 只藏在 hover title）。
 
 ## 部署相关长期提示
 
