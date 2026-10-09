@@ -653,27 +653,9 @@
   }
 }
 
-// ---- 24h 丢包色条（Statuspage 风格） ----
-.wk-strip-row {
-  display: flex;
-  align-items: center;
-  gap: var(--wk-space-3);
-
-  & + & {
-    margin-top: 7px;
-  }
-}
-
-.wk-strip-label {
-  width: 108px;
-  flex-shrink: 0;
-  font-size: var(--wk-fs-sm);
-  color: var(--wk-text-secondary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
+// ---- 24h 丢包时间轴（Statuspage 风格色条）----
+// 行布局/标签/数值样式已随 WkLossStrip 组件重写（.wk-loss-* 在组件内 scoped），
+// 这里只保留色条本体与格子颜色，供组件直接复用。
 .wk-strip {
   flex: 1;
   min-width: 0;
@@ -684,6 +666,7 @@
   overflow: hidden;
 }
 
+// 格子语义色：ok=无丢包、warn=部分丢包、bad=严重丢包、none=该时段无数据
 .wk-strip-cell {
   flex: 1;
   min-width: 1px;
@@ -693,16 +676,6 @@
   &.is-warn { background: var(--wk-warning); }
   &.is-bad { background: var(--wk-danger); }
   &.is-none { background: color-mix(in srgb, var(--wk-text-muted) 22%, transparent); }
-}
-
-.wk-strip-value {
-  width: 86px;
-  flex-shrink: 0;
-  text-align: right;
-  font-family: var(--wk-mono-family);
-  font-variant-numeric: tabular-nums;
-  font-size: var(--wk-fs-sm);
-  color: var(--wk-text-secondary);
 }
 
 // ---- 骨架屏 ----
@@ -1039,18 +1012,7 @@
     white-space: nowrap;
   }
 
-  // 丢包色条的线路名列在窄屏占比过高，压缩后色条才有可读长度
-  .wk-strip-row {
-    gap: var(--wk-space-2);
-  }
-
-  .wk-strip-label {
-    width: 72px;
-  }
-
-  .wk-strip-value {
-    width: 56px;
-  }
+  // 丢包时间轴的窄屏适配在 WkLossStrip 组件内（grid 列宽变量），这里不再重复
 
   // 注：el-table 的手机端密度规则不在这里写——element.scss 在 `index.scss` 里排在
   // components.scss 之后，`.el-table .cell { padding: 0 12px }` 同特异度会覆盖本文件的媒体查询，

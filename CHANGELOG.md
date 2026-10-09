@@ -2,6 +2,42 @@
 
 所有变更记录使用北京时间（UTC+8）。
 
+## [2026-10-10 04:09] - 丢包色条升级为丢包时间轴（精确时段 + 时间刻度 + 时段汇总）
+
+### 改动前总结
+用户反馈：色条 hover 只显示"上海电信 第 105 段：部分丢包"，**不知道这一格对应几点**，
+也没法快速判断到底是哪个时间段在丢包。
+另外 `PingPoint` 类型被声明了三遍（`WkPingChart.vue` 里 `export interface` 但 `<script setup>`
+导出的类型外部根本 import 不到、`PublicServerDetail.vue` 又本地写一份），分桶算法散在页面里。
+
+还有一个会让"加时间刻度"直接失效的隐患：旧 `buildLossStrip` 是**每条线路各自按自己的首尾点分桶**，
+一旦某条线路数据有缺口，它的格子就与其他线路错位，同一列不再是同一时刻。
+
+### 改动后总结
+- **新增 `web/src/utils/ping.ts`**：`PingPoint` / `pointTime` / `pointMillis` 的唯一来源，
+  加 `buildLossRows()` 与 `mergeLossRanges()` 纯函数。`buildLossRows` 的时间域取
+  **所有线路的最早点—最晚点的全局范围**，保证各行格子按同一时刻对齐；WkPingChart 与
+  PublicServerDetail 都改为从这里取类型，删掉重复声明。
+- **新增 `web/src/components/WkLossStrip.vue`**，三处信息补齐：
+  1. **时间刻度轴**：色条上方 0/25/50/75/100% 五个时刻标记（三列共用一个 grid 模板保证与色条对齐）
+  2. **每格精确 tooltip**：`上海电信 09:33–09:45｜部分丢包｜平均丢包 3.2% · 峰值 100%｜12 个采样点`
+  3. **丢包时段汇总**：把连续丢包格合并成区间直接列出（`09:33–09:45 峰 100%`），
+     段数超过上限时**优先展示最严重的几段**（bad 优先、其次按峰值降序），而不是取前 N 个
+  右侧数值同时给平均与峰值 —— 平均 0.2% 也可能藏着一次 100% 丢包。
+- `PublicServerDetail.vue`：接入 `WkLossStrip`，删除本地 `buildLossStrip`/`cellLabel`/
+  `LossStripRow`/`stripBucketLabel` 与重复的 `PingPoint`（净减 70+ 行）；副标题改为说明
+  每格分钟数与"悬停可看精确时间区间"。
+- `components.scss`：删掉随组件重写的死样式 `.wk-strip-row/.wk-strip-label/.wk-strip-value`
+  及其 ≤640 覆盖，只保留色条本体 `.wk-strip` 与格子语义色 `.wk-strip-cell` 供组件复用。
+
+### 验证
+- `vue-tsc` 零错误、`vite build` 成功。
+- **用生产真实数据离线复算分桶与合并**（sel2首尔 24h）：全局时间域跨 24.0 小时、每格 12 分钟
+  （如 09:33–09:45）；上海电信 3 段、上海移动 2 段、上海联通 0 段（显示"无丢包时段"），
+  与色条实际观感一致。
+- 待部署后核对页面上刻度文字、时段汇总 chip 与格子 title 是否按预期显示。
+
+
 ## [2026-10-08 14:48] - IPv6 出口可用性判定（排除 NAT64 等合成地址）+ 节点列表同时显示 v4/v6
 
 ### 改动前总结

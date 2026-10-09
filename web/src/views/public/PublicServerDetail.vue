@@ -130,7 +130,7 @@
         <!-- ---------------- 网络质量 ---------------- -->
         <WkCard
           title="网络质量"
-          :subtitle="`最近 24 小时运营商线路延时（ms）；上方色条按分钟粒度显示丢包（${stripBucketLabel}）`"
+          :subtitle="`最近 24 小时运营商线路延时（ms）与丢包时段；色条每格约 ${stripBucketMinutes} 分钟，悬停可看精确时间区间`"
         >
           <WkEmptyState
             v-if="pingISPs.length === 0"
@@ -146,24 +146,11 @@
           />
 
           <template v-else>
-            <!-- 24h 丢包色条：Statuspage 风格，一格一分钟（按桶聚合到 120 格） -->
-            <div class="wk-strips">
-              <div v-for="row in lossStrips" :key="row.name" class="wk-strip-row">
-                <span class="wk-strip-label" :title="row.name">{{ row.name }}</span>
-                <div class="wk-strip">
-                  <span
-                    v-for="(cell, index) in row.cells"
-                    :key="index"
-                    :class="['wk-strip-cell', `is-${cell}`]"
-                    :title="`${row.name} 第 ${index + 1} 段：${cellLabel(cell)}`"
-                  />
-                </div>
-                <!-- 色条只负责“什么时段丢包”；延时统计已在下方分线路图标题里，不重复写 -->
-                <span class="wk-strip-value">丢 {{ row.loss.toFixed(1) }}%</span>
-              </div>
-            </div>
+            <!-- 丢包时间轴：统一时间刻度 + 每格精确区间 + 合并后的丢包时段列表，
+                 解决旧版只能看到“第 105 段：部分丢包”却不知道对应几点的问题 -->
+            <WkLossStrip :series="pingSeries" />
 
-            <!-- 分线路/叠加双模式：避免 5.4ms 与 5.6ms 这类接近的线路在同一纵轴上互相盖住 -->
+            <!-- 叠加对比图 + 每线路延时摘要 -->
             <WkPingChart :series="pingSeries" />
           </template>
         </WkCard>
@@ -191,8 +178,10 @@ import { useRoute, useRouter } from 'vue-router'
 import WkCard from '@/components/WkCard.vue'
 import WkChart from '@/components/WkChart.vue'
 import WkEmptyState from '@/components/WkEmptyState.vue'
+import WkLossStrip from '@/components/WkLossStrip.vue'
 import WkMetric from '@/components/WkMetric.vue'
 import WkPingChart from '@/components/WkPingChart.vue'
+import type { PingPoint } from '@/utils/ping'
 import WkSkeleton from '@/components/WkSkeleton.vue'
 import WkStatusDot from '@/components/WkStatusDot.vue'
 import http from '@/utils/http'
@@ -266,14 +255,7 @@ interface MetricPoint {
   net_down: number
 }
 
-interface PingPoint {
-  timestamp: string
-  count: number
-  avg_lat: number
-  min_lat: number
-  max_lat: number
-  loss_rate: number
-}
+// PingPoint 类型已收到 utils/ping（与 WkPingChart / WkLossStrip 共用一份定义）
 
 // ==================== 状态 ====================
 const route = useRoute()
@@ -461,58 +443,13 @@ function buildResourceOption() {
   }
 }
 
-// ==================== Ping 延时图 + 丢包色条 ====================
-// 色条格数：24h 按分钟最多 1440 个点，聚合到 120 格（每格约 12 分钟）才在窄屏也读得清
+// ==================== Ping 延时图 + 丢包时间轴 ====================
+// 分桶与区间合并逻辑已移到 utils/ping.ts（buildLossRows），由 WkLossStrip 组件调用；
+// 这里只留卡片副标题需要的“每格多少分钟”，与组件的格数默认值（120）保持一致。
 const STRIP_CELLS = 120
-const stripBucketLabel = computed(() => `每格约 ${Math.round((24 * 60) / STRIP_CELLS)} 分钟`)
+const stripBucketMinutes = Math.round((24 * 60) / STRIP_CELLS)
 
-interface LossStripRow {
-  name: string
-  cells: Array<'ok' | 'warn' | 'bad' | 'none'>
-  avgLat: number
-  loss: number
-}
-
-// 一格取桶内最差丢包：有丢包但不足一半算 warn，半数以上算 bad
-function buildLossStrip(points: PingPoint[]): Array<'ok' | 'warn' | 'bad' | 'none'> {
-  if (points.length === 0) return []
-  const sorted = points.slice().sort((a, b) => a.timestamp.localeCompare(b.timestamp))
-  const start = new Date(sorted[0].timestamp).getTime()
-  const end = new Date(sorted[sorted.length - 1].timestamp).getTime()
-  const span = Math.max(1, end - start)
-  const bucketMs = span / STRIP_CELLS
-  const buckets: number[][] = Array.from({ length: STRIP_CELLS }, () => [] as number[])
-
-  for (const point of sorted) {
-    const offset = new Date(point.timestamp).getTime() - start
-    const index = Math.min(STRIP_CELLS - 1, Math.floor(offset / bucketMs))
-    buckets[index].push(lossPercent(point.loss_rate))
-  }
-
-  return buckets.map((bucket) => {
-    if (bucket.length === 0) return 'none'
-    const worst = Math.max(...bucket)
-    if (worst <= 0) return 'ok'
-    if (worst < 50) return 'warn'
-    return 'bad'
-  })
-}
-
-const lossStrips = computed<LossStripRow[]>(() => {
-  return Object.entries(pingSeries.value).map(([name, points]) => ({
-    name,
-    cells: buildLossStrip(points),
-    avgLat: average(points.map((item) => Number(item.avg_lat || 0))) ?? 0,
-    loss: average(points.map((item) => lossPercent(Number(item.loss_rate || 0)))) ?? 0,
-  }))
-})
-
-function cellLabel(cell: string): string {
-  if (cell === 'ok') return '无丢包'
-  if (cell === 'warn') return '部分丢包'
-  if (cell === 'bad') return '严重丢包'
-  return '无数据'
-}
+// cellLabel / buildLossStrip 已移到 WkLossStrip 组件与 utils/ping，避免两处定义不一致
 
 // ==================== 生命周期 ====================
 // 实时指标每秒刷新；趋势与 Ping 每分钟刷新（历史曲线不需要秒级粒度）
@@ -578,17 +515,6 @@ usePolling(loadPingAgg, 60_000, { immediate: false })
   font-size: var(--wk-fs-base);
   color: var(--wk-text-secondary);
   margin-top: 2px;
-}
-
-/* 丢包色条区与图表之间留一档间距，避免视觉上粘连 */
-.wk-strips {
-  margin-bottom: var(--wk-space-4);
-}
-
-/* 统计文本强制单行，窄屏下也不会出现行尾多一个分隔符的挂列 */
-.wk-strip-value {
-  width: 168px;
-  white-space: nowrap;
 }
 
 @media (max-width: 640px) {

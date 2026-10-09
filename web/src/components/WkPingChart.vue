@@ -37,21 +37,12 @@ import {
   tooltipRow,
 } from '@/utils/charts'
 import { formatHourMinute, lossPercent } from '@/utils/format'
+import { pointTime, type PingPoint } from '@/utils/ping'
 
-export interface PingPoint {
-  // 后台 ping-agg 返回 bucket_min，公开接口返回 timestamp，两种字段都兼容
-  timestamp?: string
-  bucket_min?: string
-  avg_lat: number
-  min_lat: number
-  max_lat: number
-  loss_rate: number
-}
-
-/** 取探测点时间：兼容 bucket_min / timestamp 两种后端字段 */
-function pointTime(point: PingPoint): string {
-  return point.timestamp || point.bucket_min || ''
-}
+// PingPoint 与 pointTime 统一由 utils/ping 提供：
+// 后台 ping-agg 返回 bucket_min、公开接口返回 timestamp，两种字段名到处存在，
+// 各自写一份取值逻辑必然出现“某个页面读错字段”的问题。
+export type { PingPoint }
 
 const props = withDefaults(
   defineProps<{

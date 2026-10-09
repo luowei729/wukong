@@ -71,6 +71,19 @@ canvas **不解析** `var(--x)`。任何 `axisLabel: { color: 'var(--wk-text-mut
 而且 `grid.containLabel` 不会为轴名预留空间（实测“ms”盖住了图例“上海电信”）。单位改放到
 卡片副标题和统计摘要里；确实需要轴名时，把图例改到右上或给 `grid.top` 留足高度。
 
+### 丢包时间轴与 Ping 数据类型（2026-10-10 04:09）
+
+- `PingPoint` / `pointTime` / 分桶合并算法的**唯一来源是 `web/src/utils/ping.ts`**。
+  注意：`<script setup>` 里 `export interface` 导出的类型**外部 import 不到**（等于白写），
+  要跨文件共享的类型必须放 `.ts` 模块。
+- **多行色条/时间轴必须按全局时间域分桶**（所有序列的最早点—最晚点），不能每条各自首尾分桶 ——
+  否则某条数据有缺口就整行错位，同一列不是同一时刻，加时间刻度反而是错的。
+- "哪一段时间丢包"要**直接给答案**：连续丢包格合并成区间列出来（`mergeLossRanges`），
+  段数超上限时按严重度优先（bad 优先、再按峰值降序）而不是取前 N 个。
+- 平均丢包会掩盖尖峰：右侧数值必须**同时给平均与峰值**（平均 0.2% 可能藏着一次 100% 丢包）。
+- 色条本体 `.wk-strip` / `.wk-strip-cell` 留在 `components.scss`（跨组件复用），
+  行布局与标签样式放组件 scoped。
+
 ### 实时数据与轮询
 
 - 统一走 `composables/useOverview.ts`：模块级单例 + 引用计数，多个组件共用**一个** 1s 定时器；`document.visibilityState !== 'visible'` 时暂停（`usePolling.ts` 同理）。

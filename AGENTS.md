@@ -1,6 +1,6 @@
 # wukong 监控系统 - 开发规范与提示
 
-> 最后更新: 2026-10-08 14:48 (北京时间)
+> 最后更新: 2026-10-10 04:09 (北京时间)
 
 ## 开发原则
 
@@ -127,6 +127,8 @@ wukong/
 - **2026-10-07 00:53（北京时间）**：告警从"扁平阈值"升级为"**每项一条独立规则**"。六项（offline/cpu/mem/disk/ping_latency/ping_loss）各自有 开关/阈值/持续时间/恢复滞回/抑制期，存 `settings.alert_rule_<metric>` JSON。关键约束：① **默认值、范围、单位、"哪一项有持续时间/滞回"只定义在 `internal/alert/rules.go` 的 `ruleSpecs` 一处**，引擎兜底、API 校验、前端渲染都从这里取（`GET /api/alert-rules` 同时下发 specs+rules），前端不许再写死数字；新增告警项只加一条 spec + 一次 `checkMetric` 调用。② 首次读取会从旧扁平 key **自动迁移**并落库，不会抹掉用户已配的阈值；改模型时必须保留这条迁移路径。③ 离线项 `has_duration/has_recovery` 都是 false（warning 语义就是"无心跳秒数"），`normalize` 强制置零。④ **滞回必须低于阈值**，否则 `value <= recovery` 永不成立、告警无法恢复，`normalize` 与 `ValidateRule` 双侧拦截。⑤ **关闭某项会静默清理它遗留的 firing 记录**（只在"启用→关闭"那次执行，不发通知，避免十几个节点一起推打爆微信配额）。⑥ `/api/alert-settings` 保留向后兼容（PUT 只改 warning/duration 并回写旧 key），新前端一律用 `/api/alert-rules`。⑦ 卡片副标题原先写的"探针/分组/全局三级回退"从未实现（store 里没有节点/分组级告警字段），已按实际行为改描述。
 
 - **2026-10-08 14:48（北京时间）**：IPv6 出口有效性判定。net1上海 上报的 `64:ff9b::aff:fb01` 是**运营商 NAT64 合成地址**（`64:ff9b::/96`，RFC 6052，只能 v6→v4），对真 IPv6 目标 100% 丢包、对同家 v4 线路 0% 丢包 —— 证明"有公网 IPv6 地址 ≠ IPv6 可用"。规则：① **判定只在 `internal/netutil` 一处**（`IsUsablePublicIPv6` 排除 NAT64/Teredo `2001::/32`/6to4 `2002::/16`/DS-Lite `100:64::/10`，`IsPublicIPv4` 另排 CGNAT），探针上报、主控清洗、下发过滤、公开页四处共用，**禁止再复制第二份 isPublicIP**。② **主控是权威清洗方**：`effectiveIPv4/effectiveIPv6` 每次上报重校验库里已有值，不合法即置空 —— 只改探针判定无效，因为"非空才覆盖"会让一次误存永远清不掉。③ **作用域 + 能力双判定**统一走 `ISPTarget.AppliesToAgent(agent)`（IPv6 目标必须有可用 v6 出口），gRPC 下发与 `publicPingISPs` 共用；只按人工勾选的静态列表下发会让失去 v6 能力的节点长期误告警。④ 网卡回退路径**不上报 IPv6**（无连通性证据）；`setPublicIPs` 区分"v4 成功+v6 空=确实没有→清空"与"两者都空=网络抖动→保留旧值"。⑤ 判定前缀在 `init()` 预计算，不要写无锁 map 缓存（并发写 fatal error）。⑥ 后台节点列表出口 IP 列 v4/v6 各一行同时显示（旧版 v6 只藏在 hover title）。
+
+- **2026-10-10 04:09（北京时间）**：公开详情页丢包色条升级为**丢包时间轴**。用户反馈旧版 hover 只有"第 105 段：部分丢包"、看不出对应几点。改动：① 新增 `web/src/utils/ping.ts` 作为 `PingPoint`/`pointTime`/分桶合并算法的唯一来源（原先 `WkPingChart.vue` 里 `export interface` 在 `<script setup>` 下外部根本 import 不到、页面里又各写一份），**跨文件共享类型必须放 .ts 模块**。② **多行色条必须按全局时间域分桶**（所有序列的最早点—最晚点），旧版每条线路各自首尾分桶，一旦某条数据有缺口整行错位、同一列不是同一时刻 —— 加时间刻度前必须先修这个。③ 新增 `WkLossStrip.vue`：时间刻度轴 + 每格 title 精确区间与峰值 + **连续丢包合并成时段列表直接给出答案**（段数超上限按 bad 优先/峰值降序挑，不是取前 N 个）+ 右侧同时显示平均与峰值（平均 0.2% 可能藏着一次 100% 丢包）。④ 色条本体 `.wk-strip`/`.wk-strip-cell` 留 components.scss 供复用，行布局样式进组件 scoped。
 
 ## 部署相关长期提示
 

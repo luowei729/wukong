@@ -438,3 +438,24 @@ ULA/link-local/loopback，未排除 NAT64/Teredo/6to4/DS-Lite；且探针与主�
 `go build ./...`、`go vet ./...` 通过；新增 `internal/netutil/ip_test.go` 三个用例全部 PASS
 （含 net1 真实坏地址被拒、三家真实 v6 通过）；`vue-tsc` 零错误、`vite build` 成功。
 部署后核对：net1上海 ip_v6 被清空、下发 targets 由 4 回到 3、IPv6 线路不再产生 100% 丢包点。
+
+## 二十三、丢包色条升级为丢包时间轴
+
+### 改动前总结
+用户反馈公开详情页色条 hover 只显示"第 105 段：部分丢包"，无法判断对应的时间段。
+排查还发现两个结构问题：`PingPoint` 类型被声明三遍（`<script setup>` 里 export 的 interface
+外部无法 import，等于白写），分桶算法散在页面里；更关键的是旧 `buildLossStrip` 按**每条线路
+各自的首尾点**分桶，任一线路数据有缺口就会与其他线路错位，同一列不是同一时刻。
+
+### 改动后总结
+- 新增 `web/src/utils/ping.ts`：`PingPoint`/`pointTime`/`pointMillis` 唯一来源，
+  `buildLossRows()` 改为按**全局时间域**（所有序列最早点—最晚点）分桶，`mergeLossRanges()` 合并连续丢包。
+- 新增 `web/src/components/WkLossStrip.vue`：色条上方统一时间刻度（0/25/50/75/100% 五标记，
+  三列共用 grid 保证对齐）、每格 title 给出精确起止时间与平均/峰值丢包及采样数、
+  下方列出合并后的丢包时段（超上限按 bad 优先与峰值降序挑选）、右侧同时显示平均与峰值。
+- `PublicServerDetail.vue` 接入组件并删除本地重复实现（净减 70+ 行）；`components.scss`
+  删除随组件重写的死样式，仅保留 `.wk-strip`/`.wk-strip-cell` 供复用。
+
+### 验证结果
+`vue-tsc` 零错误、`vite build` 成功。用生产真实数据（sel2首尔 24h）离线复算：全局时间域跨
+24.0 小时、每格 12 分钟，上海电信 3 段 / 上海移动 2 段 / 上海联通 0 段，与色条观感一致。
