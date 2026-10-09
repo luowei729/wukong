@@ -63,6 +63,18 @@ export interface LossRow {
 /** 丢包分级阈值：只要有一点丢包就算 warn，达到 50% 视为 bad（与旧版一致） */
 const WARN_CEILING = 50
 
+/**
+ * 色条默认格数：24h 按分钟最多 1440 个点，聚合到 120 格（每格 12 分钟）
+ * 在窄屏也读得清。导出是为了让页面副标题的“每格多少分钟”与组件实际分桶永远一致，
+ * 不在两处各写一个 120。
+ */
+export const DEFAULT_LOSS_CELLS = 120
+
+/** 算出“每格多少分钟”，供卡片副标题说明使用 */
+export function stripBucketMinutes(hours = 24, cellCount = DEFAULT_LOSS_CELLS): number {
+  return Math.round((hours * 60) / cellCount)
+}
+
 function kindOf(peak: number): LossKind {
   if (peak <= 0) return 'ok'
   if (peak < WARN_CEILING) return 'warn'
@@ -78,7 +90,7 @@ function kindOf(peak: number): LossKind {
  */
 export function buildLossRows(
   series: Record<string, PingPoint[]>,
-  cellCount = 120
+  cellCount = DEFAULT_LOSS_CELLS
 ): LossRow[] {
   const rows = Object.entries(series || {}).map(([name, points]) => ({
     name,

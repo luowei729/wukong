@@ -459,3 +459,20 @@ ULA/link-local/loopback，未排除 NAT64/Teredo/6to4/DS-Lite；且探针与主�
 ### 验证结果
 `vue-tsc` 零错误、`vite build` 成功。用生产真实数据（sel2首尔 24h）离线复算：全局时间域跨
 24.0 小时、每格 12 分钟，上海电信 3 段 / 上海移动 2 段 / 上海联通 0 段，与色条观感一致。
+
+## 二十四、后台节点详情页接入丢包时间轴
+
+### 改动前总结
+上一轮 `WkLossStrip` 只接在公开详情页，后台节点详情页的网络质量卡仍看不到丢包时段；
+且色条格数（120）在组件默认值与页面副标题两处各写一遍。
+
+### 改动后总结
+- `NodeDetail.vue` 接入 `WkLossStrip`，副标题与公开页口径一致；ping 数据字段差异
+  （后台 `bucket_min` / 公开 `timestamp`）由 utils/ping 的 `pointTime` 兼容。
+- `utils/ping.ts` 导出 `DEFAULT_LOSS_CELLS` 与 `stripBucketMinutes()`，组件与两个页面共用。
+- 修正一处 Vue 约束踩坑：`<WkLossStrip>` 插在 `v-if` 与 `v-else` 之间会让 `v-else` 失效，
+  改用 `<template v-else>` 包住色条与延时图。
+
+### 验证结果
+`vue-tsc` 零错误、`vite build` 成功。待部署后核对后台节点详情页出现时间刻度与丢包时段汇总，
+且"暂无 Ping 数据"空态仍正常。

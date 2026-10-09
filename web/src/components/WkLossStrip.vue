@@ -66,7 +66,14 @@
 //   2) 色条上方加统一时间刻度（数据分桶已按全局时间域对齐，见 utils/ping.ts）
 //   3) 下方列出合并后的丢包时段，一眼看出"什么时候丢的"
 import { computed } from 'vue'
-import { buildLossRows, type LossCell, type LossRange, type LossRow, type PingPoint } from '@/utils/ping'
+import {
+  buildLossRows,
+  DEFAULT_LOSS_CELLS,
+  type LossCell,
+  type LossRange,
+  type LossRow,
+  type PingPoint,
+} from '@/utils/ping'
 import { formatHourMinute } from '@/utils/format'
 
 const props = withDefaults(
@@ -82,7 +89,7 @@ const props = withDefaults(
     /** 右侧数值列宽 */
     valueWidth?: string
   }>(),
-  { cellCount: 120, maxRanges: 6, labelWidth: '108px', valueWidth: '96px' }
+  { cellCount: DEFAULT_LOSS_CELLS, maxRanges: 6, labelWidth: '108px', valueWidth: '96px' }
 )
 
 const rows = computed<LossRow[]>(() => buildLossRows(props.series, props.cellCount))

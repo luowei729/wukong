@@ -114,7 +114,10 @@
     </WkCard>
 
     <!-- ---------------- 网络质量（Ping K 线） ---------------- -->
-    <WkCard title="网络质量" subtitle="最近 24 小时运营商线路延时（ms）与丢包，秒级原始数据聚合">
+    <WkCard
+      title="网络质量"
+      :subtitle="`最近 24 小时运营商线路延时（ms）与丢包时段；色条每格约 ${stripBucketMinutes()} 分钟，秒级原始数据聚合`"
+    >
       <template #actions>
         <el-button text size="small" @click="router.push('/settings')">配置运营商</el-button>
       </template>
@@ -137,8 +140,16 @@
           title="暂无 Ping 数据"
           description="已配置运营商目标，但最近 24 小时没有收到探测结果"
         />
-        <!-- 叠加对比图 + 每线路统计摘要（均/最低/最高/丢包） -->
-        <WkPingChart v-else :series="pingSeries" height="340px" :loading="pingLoading" />
+        <!-- 有数据时才渲染两个子块：v-if / v-else 必须是相邻兄弟，
+             把色条直接插在中间会让 v-else 失去关联（Vue 编译限制） -->
+        <template v-else>
+          <!-- 丢包时间轴：与公开详情页同一个组件（时间刻度 + 每格精确区间 + 丢包时段汇总）。
+               后台数据字段是 bucket_min、公开接口是 timestamp，组件内部已兼容。 -->
+          <WkLossStrip :series="pingSeries" />
+
+          <!-- 叠加对比图 + 每线路统计摘要（均/最低/最高/丢包） -->
+          <WkPingChart :series="pingSeries" height="340px" :loading="pingLoading" />
+        </template>
       </template>
     </WkCard>
 
@@ -186,9 +197,11 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import WkCard from '@/components/WkCard.vue'
 import WkChart from '@/components/WkChart.vue'
 import WkEmptyState from '@/components/WkEmptyState.vue'
+import WkLossStrip from '@/components/WkLossStrip.vue'
 import WkMetric from '@/components/WkMetric.vue'
 import WkPingChart from '@/components/WkPingChart.vue'
 import WkStatusDot from '@/components/WkStatusDot.vue'
+import { stripBucketMinutes } from '@/utils/ping'
 import http from '@/utils/http'
 import { refreshOverview, useOverview } from '@/composables/useOverview'
 import { usePolling } from '@/composables/usePolling'

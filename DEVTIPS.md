@@ -83,6 +83,12 @@ canvas **不解析** `var(--x)`。任何 `axisLabel: { color: 'var(--wk-text-mut
 - 平均丢包会掩盖尖峰：右侧数值必须**同时给平均与峰值**（平均 0.2% 可能藏着一次 100% 丢包）。
 - 色条本体 `.wk-strip` / `.wk-strip-cell` 留在 `components.scss`（跨组件复用），
   行布局与标签样式放组件 scoped。
+- **`v-if` / `v-else` 必须是相邻兄弟节点**：在两者之间插入任何元素（哪怕是注释后的普通节点）
+  都会让 `v-else` 失去关联。要在"有数据"分支里放多个块，用 `<template v-else>` 包起来
+  （NodeDetail 接 WkLossStrip 时踩过）。
+- 色条格数由 `utils/ping.ts` 的 `DEFAULT_LOSS_CELLS` 与 `stripBucketMinutes()` 统一提供，
+  页面副标题的"每格约 N 分钟"必须调它算，不要在页面里再写一个 120。
+
 
 ### 实时数据与轮询
 

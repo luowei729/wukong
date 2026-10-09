@@ -130,7 +130,7 @@
         <!-- ---------------- 网络质量 ---------------- -->
         <WkCard
           title="网络质量"
-          :subtitle="`最近 24 小时运营商线路延时（ms）与丢包时段；色条每格约 ${stripBucketMinutes} 分钟，悬停可看精确时间区间`"
+          :subtitle="`最近 24 小时运营商线路延时（ms）与丢包时段；色条每格约 ${stripBucketMinutes()} 分钟，悬停可看精确时间区间`"
         >
           <WkEmptyState
             v-if="pingISPs.length === 0"
@@ -181,7 +181,7 @@ import WkEmptyState from '@/components/WkEmptyState.vue'
 import WkLossStrip from '@/components/WkLossStrip.vue'
 import WkMetric from '@/components/WkMetric.vue'
 import WkPingChart from '@/components/WkPingChart.vue'
-import type { PingPoint } from '@/utils/ping'
+import { stripBucketMinutes, type PingPoint } from '@/utils/ping'
 import WkSkeleton from '@/components/WkSkeleton.vue'
 import WkStatusDot from '@/components/WkStatusDot.vue'
 import http from '@/utils/http'
@@ -444,10 +444,8 @@ function buildResourceOption() {
 }
 
 // ==================== Ping 延时图 + 丢包时间轴 ====================
-// 分桶与区间合并逻辑已移到 utils/ping.ts（buildLossRows），由 WkLossStrip 组件调用；
-// 这里只留卡片副标题需要的“每格多少分钟”，与组件的格数默认值（120）保持一致。
-const STRIP_CELLS = 120
-const stripBucketMinutes = Math.round((24 * 60) / STRIP_CELLS)
+// 分桶与区间合并逻辑在 utils/ping.ts（buildLossRows），由 WkLossStrip 组件调用；
+// 副标题里的“每格多少分钟”也直接问同一个模块要，避免页面与组件各写一个格数然后对不上。
 
 // cellLabel / buildLossStrip 已移到 WkLossStrip 组件与 utils/ping，避免两处定义不一致
 
