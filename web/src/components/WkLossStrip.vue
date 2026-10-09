@@ -27,7 +27,7 @@
         />
       </div>
       <span class="wk-loss-value wk-num">
-        丢 {{ row.loss.toFixed(1) }}%
+        丢 {{ lossText(row.loss) }}
         <span v-if="row.peak > 0" class="wk-loss-peak">峰 {{ Math.round(row.peak) }}%</span>
       </span>
     </template>
@@ -93,7 +93,9 @@ const gridStyle = computed(() => ({
   '--wk-loss-value-w': props.valueWidth,
 }))
 
-// 刻度取 0/25/50/75/100% 五个位置；两端分别左右对齐，避免文字溢出容器
+// 刻度取 0/25/50/75/100% 五个位置；两端分别左右对齐，避免文字溢出容器。
+// 24 小时窗口下起点与终点是同一时刻（部署后实测两端都显示 04:15），
+// 反而让人误以为刻度错了，所以终点直接标“现在”，既无歧义又告知右边缘就是当前时刻。
 const ticks = computed(() => {
   const cells = rows.value.find((row) => row.cells.length > 0)?.cells || []
   if (cells.length === 0) return []
@@ -102,7 +104,7 @@ const ticks = computed(() => {
   return [0, 25, 50, 75, 100].map((pos) => ({
     pos,
     shift: pos === 0 ? 'none' : pos === 100 ? 'translateX(-100%)' : 'translateX(-50%)',
-    label: formatHourMinute(start + ((end - start) * pos) / 100),
+    label: pos === 100 ? '现在' : formatHourMinute(start + ((end - start) * pos) / 100),
   }))
 })
 
@@ -120,6 +122,17 @@ function kindLabel(kind: string): string {
   if (kind === 'warn') return '部分丢包'
   if (kind === 'bad') return '严重丢包'
   return '无数据'
+}
+
+/**
+ * 平均丢包率文本：大于 0 但不足 0.1% 时显示 "<0.1%"。
+ * 原因：实测出现过“丢 0.0%”但下方列了三段丢包时段的矛盾观感（0.04% 被四舍五入成 0.0），
+ * 会让人怀疑数据不对。峰值始终单独显示，不会被平均值掩盖。
+ */
+function lossText(loss: number): string {
+  if (loss <= 0) return '0%'
+  if (loss < 0.1) return '<0.1%'
+  return `${loss.toFixed(1)}%`
 }
 
 function rangeLabel(range: LossRange): string {
